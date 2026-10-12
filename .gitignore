@@ -1,0 +1,45 @@
+/build/
+/build-*/
+/cmake-build-*/
+/dist/
+/reference/
+/references/
+/captures/
+/saves/
+/ski-jump-pro
+/Ski Jump Pro.desktop
+
+# Local analysis reports and extraction/calibration utilities.
+/docs/reference-analysis.md
+/docs/gameplay-comparison.md
+/docs/original-*.md
+/docs/fidelity-status.md
+/docs/validation.md
+/docs/visual-upgrade.md
+/tools/generate_hills.py
+/tools/analyze_mouse_calibration.py
+/tools/run_sdl_mouse_series.py
+/tools/sdl_mouse_probe.cpp
+
+# Local configuration, credentials and editor state.
+/.agents/
+/.codex/
+/.aws/
+/.vscode/
+/.idea/
+.env
+.env.*
+
+# Generated files and personal saves/replays.
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.sjr
+*.SJR
+*.rpl
+*.RPL
+*.sjc
+*.SJC
+*.sav
+*.SAV

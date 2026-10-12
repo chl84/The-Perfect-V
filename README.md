@@ -1,0 +1,106 @@
+# Ski Jump Pro
+
+A native Linux 3D ski jumping game built with C++17, SDL2, OpenGL and FreeType.
+It has 32 distinct hill profiles, a 70 Hz simulation, local World Cup and Team
+Cup competitions, CPU opponents, saved records and replay playback. The scenery,
+athlete, snow effects and sports interface use a modern stylized presentation.
+
+The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
+2.10. The original game's executable, data, reference recordings and analysis
+captures are not distributed in this repository and are not needed to play.
+
+## Build and play
+
+Install a C++17 compiler, CMake 3.16 or newer, pkg-config and the development
+packages for SDL2, OpenGL and FreeType. Then run:
+
+```sh
+git clone https://github.com/chl84/Ski-Jump-Pro.git
+cd Ski-Jump-Pro
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 4
+./play.sh
+```
+
+The launcher builds the game if the executable is missing. Normal play requires
+a graphical desktop; no browser, network connection or DOS emulator is needed.
+Use **How to jump** in the game for a short guide. England K50 and Austria K70
+are small practice hills.
+
+## Controls
+
+| Action | Mouse | Keyboard |
+| --- | --- | --- |
+| Leave the gate | Hold left button | Space |
+| Take off | Hold both buttons near the board, then release | Space |
+| Adjust flying position | Gentle vertical movement | Up / Down or W / S |
+| Prepare telemark | One button, then the other before contact | T |
+| Prepare two-foot landing | Both buttons together | B or Space in flight |
+| Pause / resume | Pause menu | Esc |
+| Change camera | Settings | C |
+| Toggle ghost | Settings | G |
+| Toggle sound | Settings | M |
+| Toggle fullscreen | — | F11 |
+| Watch replay | Results or main menu | R |
+
+Release the start button during the inrun. Hold both buttons near the board to
+extend through takeoff, and release both afterward to enable landing preparation.
+Use small mouse movements in flight. A wider telemark improves style but increases
+the risk of falling.
+
+Replays support pause, timeline seeking, camera changes and 0.25×–2× speed.
+The replay library reads native `.SJR` and original DSJ `.RPL` recordings. Drop a
+replay onto the window or use `./play.sh --replay FILE`. Original replay export
+is available when the recorded input sequence fits that format.
+
+## Competitions and saves
+
+Practice supports unlimited retries. World Cup accepts 1–16 human/CPU entrants;
+Team Cup accepts 1–4 teams of four. Select hills, seasons, CPU levels and whether
+to watch CPU jumps. Local players share the machine, and interrupted competitions
+can be resumed from checkpoints. Official standing human jumps can set hill records.
+
+Preferences, records and replays normally use
+`~/.local/share/SkiJumpPro/SkiJumpPro/`. Select an alternate location with
+`--data-dir PATH`. Personal saves and replays are excluded from Git.
+
+## Tests and packaging
+
+```sh
+ctest --test-dir build --output-on-failure
+./package.sh
+```
+
+A standalone checkout includes tests for simulation/render interpolation, physics
+and storage, and save migration. Additional fidelity tests require private local
+fixtures and are enabled automatically when those fixtures are available. See
+[development notes](docs/DEVELOPMENT.md).
+
+`package.sh` creates `dist/SkiJumpPro-linux-x86_64.tar.gz`. Extract it and run
+`./play.sh`. The package includes the executable, fonts, icon and documentation;
+it uses the host's SDL2, OpenGL, FreeType and C++ runtime libraries.
+
+For an automated full-game check, use an isolated save directory:
+
+```sh
+SDL_AUDIODRIVER=dummy ./build/ski-jump-pro --smoke-test \
+  --data-dir /tmp/sjp-test-saves
+```
+
+Run this from a graphical desktop. `--capture-dir PATH` optionally saves test
+screenshots. The original demo replay import check runs only when its local
+fixture is present; native replay, cup and all 32 hill checks remain available
+without it.
+
+## Source layout
+
+- `src/`: simulation, hill tables, controls, competition, storage, replay,
+  athlete geometry, rendering, interface and generated audio.
+- `assets/`: game icon and fonts.
+- `tests/`: standalone and optional fidelity tests.
+- `tools/`: native trajectory/replay probes and comparison utilities.
+- `docs/DEVELOPMENT.md`: build and verification details.
+
+Fonts are DejaVu Sans, distributed with their
+[license](assets/fonts/LICENSE-DejaVu.txt). Deluxe Ski Jump remains the work of
+its original author; its program and resources are not included here.
