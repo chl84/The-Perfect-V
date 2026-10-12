@@ -6,11 +6,116 @@
 
 namespace sjp {
 namespace {
+// Sample the existing rendered triangles, not a new collision surface. The
+// small height cache covers the unchanged athlete mesh's local x extent.
+struct FallContact {
+    const Hill &hill;
+    Vec3 origin;
+    double start, step, firstX, lift = 0;
+    std::vector<double> heights;
+    GLenum mode = GL_QUADS;
+    size_t count = 0;
+    std::array<Vec3, 4> face{};
+    FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton)
+        : hill(h), origin{f.x, f.y, 0}, start(std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale())),
+          step(3 * h.scale()) {
+        double low = skeleton.points[0].x, high = low;
+        for (auto p : skeleton.points) {
+            low = std::min(low, p.x);
+            high = std::max(high, p.x);
+        }
+        firstX = start + std::floor((f.x + low - .6 - start) / step) * step;
+        const size_t count = size_t(std::ceil((f.x + high + .6 - firstX) / step)) + 2;
+        heights.reserve(count);
+        for (size_t i = 0; i < count; ++i)
+            heights.push_back(h.ground(firstX + i * step));
+    }
+    double surface(double x, double z) const {
+        const long i = long(std::floor((x - firstX) / step));
+        const double x0 = firstX + i * step, u = (x - x0) / step;
+        auto height = [&](long index) {
+            return index >= 0 && size_t(index) < heights.size() ? heights[size_t(index)]
+                                                                : hill.ground(firstX + index * step);
+        };
+        const double a = height(i), b = height(i + 1), s = hill.scale();
+        const double zStep = 10 * s, z0 = -200 * s + std::floor((z + 200 * s) / zStep) * zStep;
+        const double z1 = z0 + zStep, v = (z - z0) / zStep;
+        if (std::max(std::abs(z0), std::abs(z1)) <= 19 * s)
+            return a * (1 - u) + b * u;
+        auto node = [&](double xx, double zz, double y) {
+            const double edge = std::max(0.0, std::abs(zz) - 19 * s);
+            return y - edge * .08 + std::sin(xx * .017 + zz * .013) * edge * .018;
+        };
+        const double aa = node(x0, z0, a), bb = node(x0, z1, a), cc = node(x0 + step, z1, b),
+                     dd = node(x0 + step, z0, b);
+        return v >= u ? aa * (1 - v) + bb * (v - u) + cc * u : aa * (1 - u) + cc * v + dd * (u - v);
+    }
+    void measure(Vec3 local) {
+        const Vec3 p = local + origin;
+        lift = std::max(lift, surface(p.x, p.z) + .008 - p.y);
+    }
+    void edge(Vec3 a, Vec3 b) {
+        // A triangle edge can cross a terrain-grid bend between its endpoints.
+        // Sample those crossings as well, retaining the original height grid.
+        if (std::abs(b.x - a.x) < 1e-10)
+            return;
+        const double low = std::min(a.x, b.x) + origin.x;
+        const double high = std::max(a.x, b.x) + origin.x;
+        for (double x = firstX + std::ceil((low - firstX) / step) * step; x < high; x += step) {
+            const double t = (x - origin.x - a.x) / (b.x - a.x);
+            measure(a + (b - a) * t);
+        }
+    }
+    void begin(GLenum primitive) {
+        mode = primitive;
+        count = 0;
+    }
+    void include(Vec3 local) {
+        measure(local);
+        if (mode == GL_TRIANGLE_FAN) {
+            if (count == 0)
+                face[0] = local;
+            else {
+                edge(face[0], local);
+                if (count > 1)
+                    edge(face[1], local);
+                face[1] = local;
+            }
+        } else {
+            face[count % 4] = local;
+            if ((mode == GL_QUADS && count % 4 == 3) ||
+                (mode == GL_QUAD_STRIP && count >= 3 && count % 2 == 1))
+                for (size_t a = 0; a < 4; ++a)
+                    for (size_t b = a + 1; b < 4; ++b)
+                        edge(face[a], face[b]);
+        }
+        ++count;
+    }
+};
+thread_local FallContact *contactPass = nullptr;
+void emitBegin(GLenum mode) {
+    if (contactPass)
+        contactPass->begin(mode);
+    else
+        glBegin(mode);
+}
+void emitEnd() {
+    if (!contactPass)
+        glEnd();
+}
+void emitNormal(double x, double y, double z) {
+    if (!contactPass)
+        glNormal3d(x, y, z);
+}
 void vertex(Vec3 p) {
-    glVertex3d(p.x, p.y, p.z);
+    if (contactPass)
+        contactPass->include(p);
+    else
+        glVertex3d(p.x, p.y, p.z);
 }
 void color(Color c) {
-    glColor4f(c.r, c.g, c.b, c.a);
+    if (!contactPass)
+        glColor4f(c.r, c.g, c.b, c.a);
 }
 Color shade(Color c, double amount) {
     return {float(c.r * amount), float(c.g * amount), float(c.b * amount), c.a};
@@ -18,7 +123,7 @@ Color shade(Color c, double amount) {
 void quad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color tint) {
     const Vec3 normal = cross(b - a, c - a).normalized();
     color(tint);
-    glNormal3d(normal.x, normal.y, normal.z);
+    emitNormal(normal.x, normal.y, normal.z);
     vertex(a);
     vertex(b);
     vertex(c);
@@ -42,20 +147,20 @@ Basis skiBasis(Vec3 a, Vec3 b) {
 void orientedBox(Vec3 center, const Basis &basis, Vec3 size, Color tint) {
     const Vec3 x = basis.forward * (size.x * .5), y = basis.up * (size.y * .5),
                z = basis.side * (size.z * .5);
-    glBegin(GL_QUADS);
+    emitBegin(GL_QUADS);
     quad(center - x + y - z, center - x + y + z, center + x + y + z, center + x + y - z, tint);
     quad(center - x - y - z, center + x - y - z, center + x - y + z, center - x - y + z, shade(tint, .8));
     quad(center - x - y + z, center + x - y + z, center + x + y + z, center - x + y + z, tint);
     quad(center + x - y - z, center - x - y - z, center - x + y - z, center + x + y - z, tint);
     quad(center - x - y - z, center - x - y + z, center - x + y + z, center - x + y - z, tint);
     quad(center + x - y + z, center + x - y - z, center + x + y - z, center + x + y + z, tint);
-    glEnd();
+    emitEnd();
 }
 void ellipsoid(Vec3 center, const Basis &basis, Vec3 radii, Color tint, int slices = 10, int rings = 6) {
     color(tint);
     for (int ring = 0; ring < rings; ++ring) {
         const double a = -PI * .5 + ring * PI / rings, b = a + PI / rings;
-        glBegin(GL_QUAD_STRIP);
+        emitBegin(GL_QUAD_STRIP);
         for (int slice = 0; slice <= slices; ++slice) {
             const double angle = slice * 2 * PI / slices;
             for (double latitude : {a, b}) {
@@ -64,12 +169,12 @@ void ellipsoid(Vec3 center, const Basis &basis, Vec3 radii, Color tint, int slic
                 const Vec3 normal =
                     (basis.forward * (x / radii.x) + basis.up * (y / radii.y) + basis.side * (z / radii.z))
                         .normalized();
-                glNormal3d(normal.x, normal.y, normal.z);
+                emitNormal(normal.x, normal.y, normal.z);
                 vertex(center + basis.forward * (x * radii.x) + basis.up * (y * radii.y) +
                        basis.side * (z * radii.z));
             }
         }
-        glEnd();
+        emitEnd();
     }
 }
 // Only the skin around a segment changes. All segment centres and endpoints
@@ -87,7 +192,7 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
         return a + (b - a) * t + basis.forward * (std::cos(angle) * depth) +
                basis.side * (std::sin(angle) * width);
     };
-    glBegin(GL_QUADS);
+    emitBegin(GL_QUADS);
     for (size_t ring = 0; ring + 1 < positions.size(); ++ring)
         for (int face = 0; face < 8; ++face) {
             const double left = face * PI / 4, right = (face + 1) * PI / 4;
@@ -98,16 +203,16 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
             quad(ringPoint(ring, left), ringPoint(ring + 1, left), ringPoint(ring + 1, right),
                  ringPoint(ring, right), panel);
         }
-    glEnd();
+    emitEnd();
     for (bool end : {false, true}) {
         color(shade(tint, .92));
-        glBegin(GL_TRIANGLE_FAN);
+        emitBegin(GL_TRIANGLE_FAN);
         const Vec3 normal = basis.up * (end ? 1 : -1);
-        glNormal3d(normal.x, normal.y, normal.z);
+        emitNormal(normal.x, normal.y, normal.z);
         vertex(end ? b : a);
         for (int face = 0; face <= 8; ++face)
             vertex(ringPoint(end ? positions.size() - 1 : 0, (end ? -face : face) * PI / 4));
-        glEnd();
+        emitEnd();
     }
 }
 void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Color accent) {
@@ -118,7 +223,7 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     auto corner = [&](size_t section, double across, double height) {
         return centers[section] + basis.side * (widths[section] * across) + basis.up * height;
     };
-    glBegin(GL_QUADS);
+    emitBegin(GL_QUADS);
     for (size_t section = 0; section < 2; ++section) {
         // Three adjacent top panels share their edges; stripes do not sit on
         // top of a second nearly coplanar ski surface.
@@ -142,7 +247,7 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
          corner(0, -1, halfThickness), edge);
     quad(corner(2, 1, -halfThickness), corner(2, -1, -halfThickness), corner(2, -1, halfThickness),
          corner(2, 1, halfThickness), edge);
-    glEnd();
+    emitEnd();
     orientedBox(ankle + basis.up * .025, basis, {.37, .045, .14}, edge);
     orientedBox(ankle - basis.forward * .13 + basis.up * .067, basis, {.08, .09, .13}, accent);
     orientedBox(ankle + basis.forward * .13 + basis.up * .046, basis, {.085, .055, .14}, accent);
@@ -156,7 +261,7 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
                basis.up * (.207 * std::sin(latitude)) +
                basis.side * (.192 * std::cos(latitude) * std::sin(angle));
     };
-    glBegin(GL_QUADS);
+    emitBegin(GL_QUADS);
     for (size_t ring = 0; ring + 1 < latitudes.size(); ++ring)
         for (int slice = 0; slice < slices; ++slice) {
             const double a = slice * 2 * PI / slices, b = (slice + 1) * 2 * PI / slices;
@@ -170,25 +275,14 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
             quad(point(latitudes[ring], a), point(latitudes[ring + 1], a), point(latitudes[ring + 1], b),
                  point(latitudes[ring], b), panel);
         }
-    glEnd();
+    emitEnd();
     for (double side : {-1.0, 1.0}) {
         const Vec3 ear = head + basis.side * (.153 * side) - basis.up * .015;
         const Vec3 chin = head - basis.up * .175 + basis.forward * .045 + basis.side * (.08 * side);
         tailoredSegment(ear, chin, .011, .015, .011, .015, shade(shell, .66));
     }
 }
-} // namespace
-
-void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
-    auto pose = f.pose;
-    if (pose[18] == 0 && pose[20] == 0) {
-        OriginalPose fallback;
-        fallback.reset(std::atan(f.x <= 0 ? h.inrunSlope(f.x) : h.slope(f.x)));
-        std::copy(fallback.angles.begin(), fallback.angles.end(), pose.begin());
-        std::copy(fallback.offsets.begin(), fallback.offsets.end(), pose.begin() + 18);
-    }
-    const auto skeleton =
-        f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
+void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
     const float alpha = ghost ? .35f : 1;
     auto tint = [&](Color c) {
@@ -200,14 +294,6 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     const Color suit = tint({.94f, .31f, .13f}), dark = tint({.055f, .13f, .19f}),
                 white = tint({.91f, .95f, .95f}), accent = tint({.23f, .82f, .75f}),
                 visor = tint({.22f, .69f, .82f}), skin = tint({.77f, .56f, .43f});
-    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_TEXTURE_BIT | GL_COLOR_BUFFER_BIT |
-                 GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_TEXTURE_2D);
-    const GLfloat specular[]{.2f, .23f, .24f, 1};
-    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
-    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 34);
-    glPushMatrix();
-    glTranslated(f.x, f.y, 0);
     const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
     const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
     const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
@@ -246,6 +332,54 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09, .075, .078, .075, .078, dark);
     const Basis headBasis = segmentBasis(head - shoulder);
     helmet(head, headBasis, dark, white, visor, skin);
+}
+} // namespace
+
+Frame displayedAthleteFrame(const Hill &h, const Frame &f) {
+    Frame display = f;
+    if (!f.crashed || f.x <= 0 || (Phase(f.phase) != Phase::Outrun && Phase(f.phase) != Phase::Finished))
+        return display;
+    auto pose = f.pose;
+    if (pose[18] == 0 && pose[20] == 0) {
+        OriginalPose fallback;
+        fallback.reset(std::atan(h.slope(f.x)));
+        std::copy(fallback.angles.begin(), fallback.angles.end(), pose.begin());
+        std::copy(fallback.offsets.begin(), fallback.offsets.end(), pose.begin() + 18);
+    }
+    const auto skeleton =
+        f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
+    FallContact contact(h, f, skeleton);
+    struct MeasurementScope {
+        FallContact *previous;
+        explicit MeasurementScope(FallContact &contact) : previous(contactPass) { contactPass = &contact; }
+        ~MeasurementScope() { contactPass = previous; }
+    } scope(contact);
+    // Measure the actual suit, helmet, boots, gloves and skis without GL calls.
+    // One rigid translation preserves all joint angles, limb lengths and rolling.
+    drawAthleteGeometry(skeleton, false);
+    display.y = float(double(f.y) + contact.lift);
+    return display;
+}
+
+void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
+    auto pose = f.pose;
+    if (pose[18] == 0 && pose[20] == 0) {
+        OriginalPose fallback;
+        fallback.reset(std::atan(f.x <= 0 ? h.inrunSlope(f.x) : h.slope(f.x)));
+        std::copy(fallback.angles.begin(), fallback.angles.end(), pose.begin());
+        std::copy(fallback.offsets.begin(), fallback.offsets.end(), pose.begin() + 18);
+    }
+    const auto skeleton =
+        f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
+    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_TEXTURE_BIT | GL_COLOR_BUFFER_BIT |
+                 GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_TEXTURE_2D);
+    const GLfloat specular[]{.2f, .23f, .24f, 1};
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
+    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 34);
+    glPushMatrix();
+    glTranslated(f.x, f.y, 0);
+    drawAthleteGeometry(skeleton, ghost);
     glPopMatrix();
     glPopAttrib();
 }

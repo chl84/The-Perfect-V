@@ -3,10 +3,14 @@
 #include <GL/gl.h>
 #include <SDL.h>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 namespace sjp {
+// Fall contact correction is presentation only. Never feed this Frame to physics,
+// input, camera tracking, scoring or replay storage.
+Frame displayedAthleteFrame(const Hill &, const Frame &);
 struct Color {
     float r, g, b, a = 1;
 };
@@ -49,7 +53,10 @@ class Renderer {
     SDL_Window *window;
     Font regular, boldFont;
     GLuint snowTexture = 0;
+    GLuint naturalSnowTexture = 0;
     std::array<GLuint, HILL_COUNT> landscapes{};
+    std::array<uint64_t, HILL_COUNT> landscapeUse{};
+    uint64_t landscapeClock = 0;
     Vec3 eye{}, target{};
     bool cameraInit = false;
     Font loadFont(const std::string &);

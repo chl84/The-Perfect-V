@@ -102,18 +102,31 @@ double terrainY(const Hill &h, double x, double z) {
     const double edge = std::max(0.0, std::abs(z) - 19 * h.scale());
     return h.ground(x) - edge * .08 + std::sin(x * .017 + z * .013) * edge * .018;
 }
-Color snowColor(double x, double z, double scale) {
+double preparedSnowWeight(const Hill &h, double x, double z) {
+    const double side = clamp((25 * h.scale() - std::abs(z)) / (8 * h.scale()), 0.0, 1.0);
+    // Only the material ends here. The original uphill surface continues intact.
+    const double end = h.outrunBottom() + 45 + 2 * std::sin(z * .13);
+    const double t = clamp((end - x) / 33, 0.0, 1.0);
+    return side * t * t * (3 - 2 * t);
+}
+Color snowColor(const Hill &h, double x, double z) {
     const double variation = .014 * std::sin(x * .057 + z * .037) + .009 * std::sin(x * .19 - z * .083);
-    const double corridor = clamp((25 * scale - std::abs(z)) / (8 * scale), 0.0, 1.0);
+    const double corridor = preparedSnowWeight(h, x, z);
     return {float(.83 + .065 * corridor + variation), float(.89 + .035 * corridor + variation),
             float(.94 + .012 * corridor + variation * .6), 1};
 }
-void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = false) {
+    if (groomed && preparedSnowWeight(h, a.x, a.z) == 0 && preparedSnowWeight(h, b.x, b.z) == 0 &&
+        preparedSnowWeight(h, c.x, c.z) == 0 && preparedSnowWeight(h, d.x, d.z) == 0)
+        return;
     const Vec3 n = cross(b - a, c - a).normalized();
     glBegin(GL_QUADS);
     glNormal3d(n.x, n.y, n.z);
     for (Vec3 p : {a, b, c, d}) {
-        col(snowColor(p.x, p.z, h.scale()));
+        Color color = snowColor(h, p.x, p.z);
+        if (groomed)
+            color.a = float(preparedSnowWeight(h, p.x, p.z));
+        col(color);
         glTexCoord2d(p.x / 13.0, p.z / 13.0);
         vertex(p);
     }
@@ -130,7 +143,7 @@ void texturedQuad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     }
     glEnd();
 }
-GLuint makeSnowTexture() {
+GLuint makeSnowTexture(bool groomed) {
     GLuint texture = 0;
     glGenTextures(1, &texture);
     glPushAttrib(GL_TEXTURE_BIT);
@@ -138,14 +151,14 @@ GLuint makeSnowTexture() {
     glGetIntegerv(GL_UNPACK_ALIGNMENT, &oldAlignment);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glBindTexture(GL_TEXTURE_2D, texture);
-    // Small brightness variations, groomed ridges, and fine grain. Explicit
-    // averaged mip levels prevent the distant snow texture from sparkling.
+    // Ordinary snow has grain; only the prepared track has machine-made ridges.
+    // Averaged mip levels prevent either material from sparkling at a distance.
     int width = 128;
     std::vector<uint8_t> pixels(width * width);
     for (int y = 0; y < width; ++y)
         for (int x = 0; x < width; ++x) {
             const double ridges =
-                .006 * std::cos(y * 2 * PI * 8 / 128) + .004 * std::sin((x + y) * 2 * PI / 128);
+                groomed ? .006 * std::cos(y * 2 * PI * 8 / 128) + .004 * std::sin((x + y) * 2 * PI / 128) : 0;
             const double grain = (hash(x * 13.71 + y * 8.17) - .5) * .018;
             pixels[y * width + x] = uint8_t(clamp(int((.978 + ridges + grain) * 255), 0, 255));
         }
@@ -676,12 +689,28 @@ void Renderer::terrain(const Hill &h) {
     for (size_t i = 0; i < hills().size(); ++i)
         if (h.id == hills()[i].id)
             index = i;
+    landscapeUse[index] = ++landscapeClock;
     if (landscapes[index]) {
         glCallList(landscapes[index]);
         return;
     }
     if (!snowTexture)
-        snowTexture = makeSnowTexture();
+        snowTexture = makeSnowTexture(true);
+    if (!naturalSnowTexture)
+        naturalSnowTexture = makeSnowTexture(false);
+    // Keep the current and most recently visited venue. The full 32-venue
+    // cache retained millions of unused vertices between jumps.
+    size_t count = 0, oldest = index;
+    for (size_t i = 0; i < landscapes.size(); ++i)
+        if (landscapes[i]) {
+            ++count;
+            if (oldest == index || landscapeUse[i] < landscapeUse[oldest])
+                oldest = i;
+        }
+    if (count >= 2) {
+        glDeleteLists(landscapes[oldest], 1);
+        landscapes[oldest] = 0;
+    }
     landscapes[index] = glGenLists(1);
     glNewList(landscapes[index], GL_COMPILE_AND_EXECUTE);
     visual::StaticBatch staticBatch;
@@ -690,7 +719,7 @@ void Renderer::terrain(const Hill &h) {
     glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matte);
     glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 8);
     glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, snowTexture);
+    glBindTexture(GL_TEXTURE_2D, naturalSnowTexture);
     glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     // Same bounds, cell dimensions, and vertex heights as the existing hill.
     // Grooming, grain, and broad snow color variation are material-only.
@@ -700,6 +729,22 @@ void Renderer::terrain(const Hill &h) {
             snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z});
+    // Reuse the exact receiver triangles for a finite, softly blended prepared
+    // strip. Polygon offset avoids coplanar flicker; this pass never writes depth.
+    glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT | GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_POLYGON_BIT);
+    glBindTexture(GL_TEXTURE_2D, snowTexture);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glDepthMask(GL_FALSE);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(-1, -1);
+    for (double x = std::min(-170 * s, h.inrunStart() - 60 * s);
+         x < std::min(std::max(420 * s, h.end() + 80 * s), h.outrunBottom() + 47); x += 3 * s)
+        for (double z = -200 * s; z < 200 * s; z += 10 * s)
+            snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
+                     {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
+                     {x + 3 * s, terrainY(h, x + 3 * s, z), z}, true);
+    glPopAttrib();
     glDisable(GL_TEXTURE_2D);
     // Three broad alpine ridgelines sit well behind the forest. Their lower
     // silhouette opens the sky and lets atmospheric fog separate the layers.
@@ -742,6 +787,7 @@ void Renderer::terrain(const Hill &h) {
     }
     // Existing snowy track and its exact h.inrun profile; details sit beside
     // or underneath it, and never alter the track's contour or width.
+    glBindTexture(GL_TEXTURE_2D, snowTexture);
     for (double x = h.inrunStart(); x < 0; x += 2 * s) {
         const double xx = std::min(0.0, x + 2 * s), y = h.inrun(x), yy = h.inrun(xx);
         glEnable(GL_TEXTURE_2D);
@@ -838,7 +884,7 @@ void Renderer::terrain(const Hill &h) {
         for (int section = 0; section < 14; ++section) {
             const double x = (79 + section * 6.2) * s, width = 5.8 * s;
             const Color accent = section % 3 == 0 ? Color{.86f, .37f, .25f, 1} : Color{.25f, .68f, .65f, 1};
-            advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "SKI JUMP PRO");
+            advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "THE PERFECT V");
             for (int row = 0; row < 3; ++row) {
                 const double z0 = side * (arenaNear + 1.35 + row * 1.2), z1 = z0 + side * 1.2;
                 const double floor = .65 + row * .70;
@@ -862,8 +908,9 @@ void Renderer::terrain(const Hill &h) {
             floodlight(h, x, z, std::sqrt(s));
         }
     }
-    glPopAttrib();
     staticBatch.finish();
+    // Finish writes current attributes, so restore the caller's state last.
+    glPopAttrib();
     glEndList();
 }
 

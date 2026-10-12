@@ -160,7 +160,7 @@ class App {
             else if (a == "--replay" && i + 1 < argc)
                 replayArgument = argv[++i];
             else if (a == "--help") {
-                std::cout << "Ski Jump Pro\n  --smoke-test     automated complete jump and render "
+                std::cout << "The Perfect V\n  --smoke-test     automated complete jump and render "
                              "validation\n  --hidden         hidden window (use with --smoke-test)\n  "
                              "--capture-dir P  write menu, flight and result images (PPM)\n  --data-dir P    "
                              " use a separate records and replay directory\n  --replay FILE     open an "
@@ -184,14 +184,14 @@ class App {
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
         SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
-        window = SDL_CreateWindow("Ski Jump Pro", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
+        window = SDL_CreateWindow("The Perfect V", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                       (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN));
         if (!window) {
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
             SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
             window = SDL_CreateWindow(
-                "Ski Jump Pro", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
+                "The Perfect V", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
                 SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN));
         }
         if (!window)
@@ -206,7 +206,7 @@ class App {
         std::filesystem::path executableDir = base ? base : ".";
         SDL_free(base);
         for (auto candidate :
-             {executableDir / "assets", executableDir / "../assets", executableDir / "../share/ski-jump-pro",
+             {executableDir / "assets", executableDir / "../assets", executableDir / "../share/the-perfect-v",
               std::filesystem::path(SJP_ASSET_DIR)}) {
             if (std::filesystem::exists(candidate / "fonts/Interim-Regular.ttf")) {
                 assets = candidate.string();
@@ -218,6 +218,7 @@ class App {
         renderer = std::make_unique<Renderer>(window, assets);
         audio = std::make_unique<Audio>();
         if (dataDir.empty()) {
+            // Retain the legacy namespace so the rename keeps existing saves.
             char *pref = SDL_GetPrefPath("SkiJumpPro", "SkiJumpPro");
             if (pref) {
                 dataDir = pref;
@@ -255,7 +256,7 @@ class App {
                 decodeOriginalReplay(lastReplay.originalRpl, originalReplayData, &replayExportError);
         if (!replayArgument.empty())
             openReplayFile(replayArgument);
-        std::cout << "Ski Jump Pro | " << renderer->device << "\nSaves: " << dataDir << '\n';
+        std::cout << "The Perfect V | " << renderer->device << "\nSaves: " << dataDir << '\n';
     }
     ~App() {
         if (renderer) {
@@ -1036,7 +1037,7 @@ class App {
         r.line(x + 15, y, x + 30, y + 22, colors::teal, 2);
         r.line(x + 19, y + 8, x + 27, y - 3, colors::white, 2);
         r.line(x + 27, y - 3, x + 43, y + 22, colors::white, 2);
-        r.text("SKI JUMP PRO", x + 58, y - 1, 20, colors::white, true);
+        r.text("THE PERFECT V", x + 58, y - 1, 20, colors::white, true);
     }
     void top(const std::string &title, const std::string &subtitle) {
         auto &r = *renderer;
@@ -1173,7 +1174,7 @@ class App {
             {"02", "Time your takeoff", "Near the board, hold both buttons through",
              "the takeoff. Then release both for landing.", "Keyboard: SPACE near the board"},
             {"03", "Find your flying position", "Move the mouse gently up and down.",
-             "Keep the position meter in its green zone.", "Keyboard: UP / DOWN or W / S"},
+             "Keep a steady position through the flight.", "Keyboard: UP / DOWN or W / S"},
             {"04", "Finish with a telemark", "Before contact, press one button, then the other.",
              "More delay = wider telemark, more style and risk.",
              "Keyboard: T telemark / B two-foot (both buttons)"}};
@@ -1265,116 +1266,60 @@ class App {
     void hud() {
         auto &r = *renderer;
         const auto &h = sim.hill();
-        r.glassPanel(24, 20, 404, 91, 12, .8f);
-        brand(38, 31);
-        r.text(h.name + "  /  K" + std::to_string(h.k), 40, 75, 13, colors::muted);
+        // Keep venue and weather at the edges; the jumper has the center.
+        r.glassPanel(32, 28, 360, 74, 10, .76f);
+        r.text(h.name, 50, 40, 21, colors::white, true);
+        r.text("K" + std::to_string(h.k) + (competition ? "" : "  /  Practice"), 50, 76, 11,
+               colors::muted);
         if (competition) {
-            r.glassPanel(540, 20, 567, 91, 12, .8f);
-            r.pill((cup.setup().mode == CupMode::Team ? "TEAM CUP  " : "WORLD CUP  ") +
-                       std::to_string(cupEvent + 1) + " / " + std::to_string(cup.eventCount()),
-                   556, 28);
-            r.text(jumperName() + " / ROUND " + std::to_string(round + 1), 572, 70, 12, colors::white, true);
-        } else {
-            r.glassPanel(619, 22, 137, 56, 12, .78f);
-            r.pill("PRACTICE", 635, 35);
+            r.glassPanel(470, 28, 490, 74, 10, .76f);
+            const std::string name = jumperName();
+            const float size = std::min(20.f, 454.f / std::max(1.f, r.textWidth(name, 1, true)));
+            r.text(name, 488, 40, size, colors::white, true);
+            r.text((cup.setup().mode == CupMode::Team ? "Team cup  " : "World cup  ") +
+                       std::to_string(cupEvent + 1) + " / " + std::to_string(cup.eventCount()) +
+                       "  /  Round " + std::to_string(round + 1),
+                   488, 76, 11, colors::muted);
         }
-        r.glassPanel(1180, 20, 215, 91, 12, .82f);
-        r.windArrow(1212, 48, sim.windSpeed, sim.displayWindAngle());
-        r.textRight(number(sim.windSpeed) + " m/s", 1385, 26, 24, colors::white, true);
-        r.textRight(sim.wind >= 0 ? "HEADWIND" : "TAILWIND", 1385, 68, 11, colors::teal, true);
-        r.glassPanel(38, 151, 227, 109, 12, .82f);
-        r.rect(38, 169, 3, 39, colors::teal, 1);
-        r.text("SPEED", 57, 166, 11, colors::muted, true);
-        r.text(number(std::sqrt(sim.vx * sim.vx + sim.vy * sim.vy) * 3.6, 0), 54, 187, 40, colors::white,
-               true);
-        r.text("km/h", 181, 212, 13, colors::muted);
-        if (sim.phase == Phase::Flight) {
-            r.glassPanel(38, 275, 227, 94, 12, .82f);
-            r.text("DISTANCE", 57, 288, 11, colors::muted, true);
-            r.text(number(h.distance(sim.x)), 55, 310, 32, colors::white, true);
-            r.text("m", 216, 329, 13, colors::muted);
-            r.glassPanel(1150, 151, 245, 132, 12, .84f);
-            r.text("FLYING POSITION", 1168, 170, 11, colors::muted, true);
-            r.rect(1170, 212, 205, 8, {.02f, .06f, .09f, 1}, 4);
-            float optimal = 1170 + (sim.optimalPitch() + .6) / 1.2 * 205;
-            r.rect(optimal - 29, 210, 58, 12, {.2f, .58f, .45f, .72f}, 4);
-            for (int tick = 0; tick <= 4; ++tick)
-                r.line(1170 + tick * 51.25f, 225, 1170 + tick * 51.25f, 229,
-                       {.6f, .76f, .79f, .45f});
-            r.rect(1170 + clamp((sim.pitch + .6) / 1.2, 0.0, 1.0) * 205 - 3, 204, 6, 24,
-                   sim.efficiency() > .8 ? colors::teal : colors::orange, 3);
-            r.text(sim.efficiency() > .8 ? "Good air. Hold steady." : "Small, gentle corrections.", 1168, 247,
-                   12, sim.efficiency() > .8 ? colors::teal : colors::orange);
-        }
-        std::string title, detail;
-        Color c = colors::teal;
+        r.glassPanel(1218, 28, 190, 74, 10, .76f);
+        r.windArrow(1242, 61, sim.windSpeed, sim.displayWindAngle());
+        r.textRight(number(sim.windSpeed) + " m/s", 1390, 39, 24, colors::white, true);
+        r.textRight(sim.wind >= 0 ? "Headwind" : "Tailwind", 1390, 76, 11, colors::muted);
+
         if (sim.phase == Phase::Ready) {
-            title = "Your hill. Your moment.";
-            detail = "HOLD LEFT MOUSE or press SPACE to leave the gate.";
-            r.glassPanel(635, 149, 171, 49, 10, .83f);
-            r.text("START IN  " + number(sim.countdown, 0) + " s", 653, 164, 13,
-                   sim.countdown < 5 ? colors::orange : colors::teal, true);
-        } else if (sim.phase == Phase::Inrun) {
-            double boardZone = std::max(1.0, sim.vx) * .5;
-            bool near = sim.x > -boardZone;
-            title = sim.originalStage == 4 ? "Hold through your takeoff."
-                    : near                 ? "Get ready to take off."
-                                           : "Settle into the approach.";
-            detail = sim.originalStage == 2 ? "Release the start button to prepare your takeoff."
-                                            : "BOTH MOUSE BUTTONS or SPACE near the end of the ramp.";
-            float progress = near ? clamp(float((sim.x + boardZone) / boardZone), 0.f, 1.f)
-                                  : clamp(float((sim.x - h.start()) / -h.start()), 0.f, 1.f);
-            r.glassPanel(501, 684, 438, 61, 10, .8f);
-            r.text(near ? "TAKEOFF BOARD" : "APPROACH", 520, 695, 11, colors::muted, true);
-            r.rect(520, 723, 400, 6, {.26f, .37f, .42f, .85f}, 3);
-            if (near)
-                r.rect(740, 720, 48, 12, {.2f, .65f, .5f, .85f}, 3);
-            r.rect(520, 723, 400 * progress, 6, near ? colors::orange : colors::teal, 3);
-            r.rect(520 + 400 * progress - 3, 717, 6, 18, colors::white, 3);
-        } else if (sim.phase == Phase::Flight) {
-            if (sim.originalStage == 6) {
-                title = "Release both takeoff buttons.";
-                detail = "Release fully before preparing your landing.";
-            } else if (sim.originalStage == 8 && !sim.automaticLanding()) {
-                title = "Open your telemark.";
-                detail = "Press the other mouse button. A wider stance earns more style but risks a fall.";
-            } else if (sim.landing != Landing::None) {
-                title =
-                    sim.landing == Landing::Telemark ? "Telemark prepared." : "Two-foot landing prepared.";
-                detail = "Stay balanced. Let the hill come to you.";
-            } else if (sim.clearance() < 8 && sim.phaseTime > .5) {
-                title = "Prepare your landing.";
-                detail = "T for TELEMARK  /  B for TWO-FOOT";
-                c = colors::orange;
-            } else {
-                title = "Find the air. Hold your line.";
-                detail = "GENTLE MOUSE MOVEMENT or UP / DOWN to adjust your position.";
+            r.glassPanel(32, 116, 105, 34, 8, .76f);
+            r.text("START", 45, 126, 10, colors::muted);
+            r.textRight(number(sim.countdown, 0) + " s", 125, 124, 13,
+                        sim.countdown < 5 ? colors::orange : colors::teal, true);
+            if (!competition || !activeComputer()) {
+                r.glassPanel(590, 798, 260, 42, 10, .72f);
+                const std::string hint = "SPACE / LEFT CLICK";
+                r.text(hint, 720 - r.textWidth(hint, 12, true) / 2, 812, 12, colors::white, true);
             }
-        } else {
-            title = sim.crashed ? "A little closer next time." : "Bring it home.";
-            detail = sim.crashed ? "Every jump teaches you something."
-                                 : "A clean landing makes every metre count.";
+            return;
         }
-        r.glassPanel(360, 757, 720, 87, 12, .86f);
-        r.rect(684, 757, 72, 2, {c.r, c.g, c.b, .82f}, 1);
-        r.text(title, 720 - r.textWidth(title, 23, true) / 2, 766, 23, c, true);
-        r.text(detail, 720 - r.textWidth(detail, 12) / 2, 810, 12, colors::white);
-        r.glassPanel(24, 852, 542, 36, 8, .73f);
-        r.glassPanel(1190, 852, 218, 36, 8, .73f);
-        keyHint("ESC", "Pause", 38, 860);
-        keyHint("C", "Camera", 218, 860);
-        keyHint("G", ghost ? "Ghost on" : "Ghost", 406, 860);
-        r.textRight("K POINT  " + std::to_string(h.k) + " m", 1397, 863, 11, colors::muted, true);
+
+        r.glassPanel(32, 754, 174, 104, 10, .76f);
+        r.text("SPEED", 50, 766, 10, colors::muted, true);
+        r.text(number(std::sqrt(sim.vx * sim.vx + sim.vy * sim.vy) * 3.6, 0), 48, 790, 40,
+               colors::white, true);
+        r.textRight("km/h", 188, 829, 11, colors::muted);
+        if (sim.phase == Phase::Flight || sim.phase == Phase::Outrun) {
+            r.glassPanel(220, 754, 184, 104, 10, .76f);
+            r.text("DISTANCE", 238, 766, 10, colors::muted, true);
+            const double distance = sim.phase == Phase::Flight ? h.distance(sim.x) : sim.result.distance;
+            r.text(number(distance), 236, 795, 32, colors::white, true);
+            r.textRight("m", 386, 829, 11, colors::muted);
+        }
     }
     void paused() {
         auto &r = *renderer;
         r.rect(0, 0, 1440, 900, {.03f, .08f, .12f, .78f});
-        r.glassPanel(472, 264, 496, 373, 16, .94f);
-        r.pill("TAKE A BREATH", 509, 299);
-        r.text("Paused.", 508, 355, 42, colors::white, true);
-        button("Back to the hill", 510, 438, 420, Action::Resume, 0, true);
-        button("Leave jump", 510, 505, 420, Action::Back);
-        r.text("ESC or ENTER to resume", 511, 589, 13, colors::muted);
+        r.glassPanel(472, 285, 496, 320, 16, .94f);
+        r.text("Paused", 508, 317, 38, colors::white, true);
+        button("Resume", 510, 398, 420, Action::Resume, 0, true);
+        button("Leave jump", 510, 465, 420, Action::Back);
+        r.text("ESC / ENTER", 511, 560, 12, colors::muted);
     }
     void result() {
         auto &r = *renderer;
@@ -1388,10 +1333,7 @@ class App {
                               : "JUMP COMPLETE",
                326, 154, s.crashed || s.disqualified ? colors::orange : colors::teal);
         r.textRight(sim.hill().name + " / K" + std::to_string(sim.hill().k), 1114, 161, 13, colors::muted);
-        r.text(s.disqualified ? "The moment passed."
-               : s.crashed    ? "Find your feet next time."
-                              : "That feeling of flight.",
-               324, 211, 37, colors::white, true);
+        r.text("Jump result", 324, 211, 32, colors::white, true);
         r.text(number(s.distance), 321, 282, 82, s.crashed ? colors::white : colors::teal, true);
         r.text("metres", 611, 344, 18, colors::muted);
         r.textRight(number(s.total), 1114, 301, 56, colors::white, true);
@@ -1424,11 +1366,8 @@ class App {
             if (drop)
                 r.line(x + 11, 535, x + 73, 535, colors::muted, 1);
         }
-        r.text(s.beforeTakeoff || s.disqualified ? "No style marks" : "Highest and lowest dropped", 979, 516,
-               10, colors::muted);
-        if (!s.beforeTakeoff && !s.disqualified)
-            r.text("3 marks count", 979, 537, 10, colors::muted);
-        r.text(s.feedback, 326, 595, 14, colors::muted);
+        if (s.beforeTakeoff || s.disqualified)
+            r.text(s.feedback, 326, 595, 14, colors::muted);
         if (competition)
             r.text(completedName + "  /  EVENT " + std::to_string(completedEvent + 1) + " OF " +
                        std::to_string(cup.eventCount()) + "  /  ROUND " + std::to_string(completedRound + 1) +
@@ -1594,7 +1533,7 @@ class App {
     }
     void replayFilesUI() {
         auto &r = *renderer;
-        top("Your replay library.", "Open original DSJ .RPL files or Ski Jump Pro .SJR files. You can also "
+        top("Your replay library.", "Open original DSJ .RPL files or The Perfect V .SJR files. You can also "
                                     "drop a file onto the game.");
         r.text(replayDirectory.string().substr(0, 135), 66, 245, 14, colors::teal);
         smallButton("< Parent folder", 65, 282, 220, Action::ReplayParent);
@@ -2118,7 +2057,7 @@ int main(int argc, char **argv) {
         App app(argc, argv);
         return app.run();
     } catch (const std::exception &e) {
-        std::cerr << "Ski Jump Pro: " << e.what() << '\n';
+        std::cerr << "The Perfect V: " << e.what() << '\n';
         return 1;
     }
 }

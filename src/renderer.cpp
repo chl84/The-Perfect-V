@@ -265,10 +265,14 @@ Renderer::~Renderer() {
     glDeleteTextures(1, &boldFont.tex);
     if (snowTexture)
         glDeleteTextures(1, &snowTexture);
+    if (naturalSnowTexture)
+        glDeleteTextures(1, &naturalSnowTexture);
 }
 void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, bool panorama, bool ghost,
                      const Frame *gf) {
     SDL_GL_GetDrawableSize(window, &width, &height);
+    width = std::max(1, width);
+    height = std::max(1, height);
     glViewport(0, 0, width, height);
     glClearColor(.79f, .86f, .88f, 1);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -336,14 +340,15 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     Vec3 end{wx - 2.2, wy - .3 - std::sin(time * 3) * .12, -23 * s};
     beam({wx, wy, -23 * s}, end, .23, colors::orange);
-    jumperShadow(h, f);
-    athlete(h, f, false);
+    const Frame display = displayedAthleteFrame(h, f);
+    jumperShadow(h, display);
+    athlete(h, display, false);
     if (ghost && gf) {
         glDepthMask(GL_FALSE);
-        athlete(h, *gf, true);
+        athlete(h, displayedAthleteFrame(h, *gf), true);
         glDepthMask(GL_TRUE);
     }
-    effects(h, f, time);
+    effects(h, display, time);
     glDisable(GL_FOG);
     glDisable(GL_LIGHTING);
 }

@@ -1,9 +1,11 @@
-# Ski Jump Pro
+# The Perfect V
 
 A native Linux 3D ski jumping game built with C++17, SDL2, OpenGL and FreeType.
 It has 32 distinct hill profiles, a 70 Hz simulation, local World Cup and Team
 Cup competitions, CPU opponents, saved records and replay playback. The scenery,
 athlete, snow effects and sports interface use a modern stylized presentation.
+The compact HUD keeps the venue, wind, speed and distance at the screen edges,
+leaving the jumper clear of coaching text and progress meters.
 
 The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
 2.10. The original game's executable, data, reference recordings and analysis
@@ -15,8 +17,8 @@ Install a C++17 compiler, CMake 3.16 or newer, pkg-config and the development
 packages for SDL2, OpenGL and FreeType. Then run:
 
 ```sh
-git clone https://github.com/chl84/Ski-Jump-Pro.git
-cd Ski-Jump-Pro
+git clone https://github.com/chl84/The-Perfect-V.git
+cd The-Perfect-V
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 4
 ./play.sh
@@ -60,9 +62,10 @@ Team Cup accepts 1–4 teams of four. Select hills, seasons, CPU levels and whet
 to watch CPU jumps. Local players share the machine, and interrupted competitions
 can be resumed from checkpoints. Official standing human jumps can set hill records.
 
-Preferences, records and replays normally use
-`~/.local/share/SkiJumpPro/SkiJumpPro/`. Select an alternate location with
-`--data-dir PATH`. Personal saves and replays are excluded from Git.
+Preferences, records and replays remain in the existing SDL user-data directory.
+The launcher prints its location as `Saves:` when the game starts. The name change
+preserves existing saves; use `--data-dir PATH` to select another location.
+Personal saves and replays are excluded from Git.
 
 ## Tests and packaging
 
@@ -72,19 +75,20 @@ ctest --test-dir build --output-on-failure
 ```
 
 A standalone checkout includes tests for simulation/render interpolation, physics
-and storage, and save migration. Additional fidelity tests require private local
-fixtures and are enabled automatically when those fixtures are available. See
+and storage, save migration, fall presentation and CPU rendering commands.
+Additional fidelity tests require private local fixtures and are enabled
+automatically when those fixtures are available. See
 [development notes](docs/DEVELOPMENT.md).
 
-`package.sh` creates `dist/SkiJumpPro-linux-x86_64.tar.gz`. Extract it and run
+`package.sh` creates `dist/ThePerfectV-linux-x86_64.tar.gz`. Extract it and run
 `./play.sh`. The package includes the executable, fonts, icon and documentation;
 it uses the host's SDL2, OpenGL, FreeType and C++ runtime libraries.
 
 For an automated full-game check, use an isolated save directory:
 
 ```sh
-SDL_AUDIODRIVER=dummy ./build/ski-jump-pro --smoke-test \
-  --data-dir /tmp/sjp-test-saves
+SDL_AUDIODRIVER=dummy ./build/the-perfect-v --smoke-test \
+  --data-dir /tmp/tpv-test-saves
 ```
 
 Run this from a graphical desktop. `--capture-dir PATH` optionally saves test

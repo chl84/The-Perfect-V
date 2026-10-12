@@ -48,7 +48,7 @@ bool loadOriginalReplay(const std::string &path, Replay &output,
 class OriginalReplayRecording {
   public:
     void begin(int hill, const OriginalWind &, uint32_t seed,
-               const std::string &athleteName = "PLAYER", const std::string &author = "Ski Jump Pro");
+               const std::string &athleteName = "PLAYER", const std::string &author = "The Perfect V");
     void capture(uint32_t counter, int beforeStage, int afterStage, const Input &,
                  bool firstImpact, float distance);
     bool finish(OriginalReplayData &output, std::string *error = nullptr) const;
