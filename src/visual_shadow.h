@@ -1,4 +1,5 @@
 #pragma once
+#include "visual_floodlights.h"
 #include "original_skeleton.h"
 #include <algorithm>
 #include <array>
@@ -6,6 +7,29 @@
 #include <vector>
 
 namespace sjp::visual {
+struct LandingShadow {
+    Vec3 cast;
+    double opacity, softness;
+};
+inline LandingShadow landingShadow(const EnvironmentLight &light, double clearance, double slope,
+                                   FloodlightField::Sample lamps = {}) {
+    clearance = std::max(0.0, clearance);
+    const double sunWeight = light.direct.length();
+    Vec3 direction = (light.direction * sunWeight + lamps.direction).normalized();
+    direction = mix(Vec3{0, 1, 0}, direction, smoothUnit((direction.y - .05) / .15)).normalized();
+    // A broad sky contribution takes over smoothly at grazing incidence. It
+    // retains one projection instead of dropping the silhouette entirely.
+    const Vec3 normal = Vec3{-slope, 1, 0}.normalized();
+    const double direct = smoothUnit((dot(normal, direction) - .08) / .32);
+    direction = mix(Vec3{0, 1, 0}, direction, direct).normalized();
+    const double nearSnow = std::exp(-clearance / 32);
+    const double strength = std::max({light.shadowStrength * direct,
+                                      .32 * std::min(1.0, lamps.intensity), .28 * nearSnow});
+    const double softness = (.025 + std::min(.18, clearance * .005)) *
+                            (1 + (light.shadowSoftness - 1) * (1 - nearSnow) * .5);
+    return {{-direction.x / direction.y, 0, -direction.z / direction.y},
+            strength * std::exp(-clearance / 85), softness};
+}
 struct ShadowCapsule {
     Vec3 a, b;
     double radius;

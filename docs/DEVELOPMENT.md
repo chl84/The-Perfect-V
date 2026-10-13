@@ -110,7 +110,11 @@ overlapping parts never accumulate opacity. Gaussian softening increases with
 height above the snow and preserves the silhouette's coverage rather than adding
 an oval underneath it. One non-overlapping mesh draws the result onto the existing
 snow triangles, without new textures, shadow maps or offscreen rendering passes.
-The CPU command suite checks overlap, ski gaps and height-dependent softening.
+Near-snow contrast and sharpness remain readable under clouds and grazing
+sunlight. A broad sky projection takes over smoothly when direct light cannot
+reach the receiver; floodlights contribute one blended projection at night.
+The CPU command suite checks overlap, ski gaps, height-dependent softening and
+landing contrast in all sixteen time/weather combinations.
 
 Normal play has an independent 60 FPS submission limit. Its deadlines advance
 from a fixed clock schedule so timer wake-up delays do not accumulate; long
@@ -189,11 +193,19 @@ original bytes and cannot carry this modern atmosphere metadata.
 
 Four compact lighting presets set sun/moon direction, sky gradient, ambient and
 directional light, fog color and visibility. Overcast, snow and fog reduce direct
-light and soften the single silhouette shadow. Shadow projection uses the same
-light direction and the local receiver tangent. A broad arena fill makes night
-jumping readable. The sun/moon disc and a small fixed star field are projected as
-background primitives when in view; clouds suppress them. These reuse the existing
-two-light shader and fog blend, without offscreen passes, shadow maps, volumetric
+light and soften the single silhouette shadow. Shadow projection uses the light
+field and the local receiver tangent, retaining diffuse near-snow visibility.
+Each of the ten floodlight masts supplies one aggregate spotlight from its lamp
+faces, aimed at the landing snow. Vertex lighting evaluates at most four local
+sources (the two adjacent mast columns on both sides), with smooth longitudinal,
+cone and finite-range attenuation. Source selection uses world coordinates,
+including translated athlete geometry, and fades continuously between columns.
+Day disables the local lights; morning/evening use weaker lamps and night uses
+full strength with a reduced directional fill. Cached terrain retains live light
+uniforms. Lamp glass uses warm emission scaled by that same live strength,
+without bloom textures or extra passes. The sun/moon disc and a small fixed star field are projected as
+background primitives when in view; clouds suppress them. All lighting and fog
+share the existing rendering pass, without shadow maps, volumetric
 clouds or new textures. Time and weather do not alter terrain, camera rails or
 collision geometry, and changes reuse the cached terrain meshes.
 

@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "original_skeleton.h"
 #include "visual_weather.h"
+#include "visual_floodlights.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -93,8 +94,7 @@ void sphere(Vec3 p, double r, Color color) {
 // This is the existing decorative valley profile. The central corridor and
 // all inrun vertices retain exactly the original hill surface coordinates.
 double terrainY(const Hill &h, double x, double z) {
-    const double edge = std::max(0.0, std::abs(z) - 19 * h.scale());
-    return h.ground(x) - edge * .08 + std::sin(x * .017 + z * .013) * edge * .018;
+    return visual::arenaGround(h, x, z);
 }
 double preparedSnowWeight(const Hill &h, double x, double z) {
     const double side = clamp((25 * h.scale() - std::abs(z)) / (8 * h.scale()), 0.0, 1.0);
@@ -835,6 +835,8 @@ void floodlight(const Hill &h, double x, double z, double size) {
     for (int lamp = 0; lamp < 6; ++lamp) {
         const double xx = x + (lamp % 3 - 1) * 1.02, yy = y + height + (lamp / 3 - .5) * .49;
         box({xx, yy, z}, {.82, .38, .67}, {.51f, .59f, .63f, 1});
+        // Self-lit warm glass; the vertex shader raises emission with the
+        // current lamp strength without rebuilding these cached faces.
         const float emission[]{.28f, .27f, .22f, 1};
         sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::EMISSION, emission);
         const double front = z + (z > 0 ? -.345 : .345);
@@ -1081,9 +1083,9 @@ void Renderer::terrain(const Hill &h) {
                 beam({xx, terrainY(h, xx, back) + 2.0, back}, {xx, terrainY(h, xx, back) + 3.45, back}, .045,
                      {.44f, .54f, .58f, 1});
         }
-        for (int mast = 0; mast < 5; ++mast) {
-            const double x = (60 + mast * 29) * s, z = side * (arenaNear + 10.5);
-            floodlight(h, x, z, std::sqrt(s));
+        for (int mast = 0; mast < gfx::ARENA_LIGHT_COLUMNS; ++mast) {
+            const auto fixture = visual::floodlightMast(h, mast, side);
+            floodlight(h, fixture.base.x, fixture.base.z, fixture.size);
         }
     }
     staticBatch.finish();

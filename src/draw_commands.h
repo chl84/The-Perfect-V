@@ -1,5 +1,6 @@
 #pragma once
 #include <SDL3/SDL.h>
+#include <array>
 #include <cstdint>
 #include <string>
 
@@ -11,6 +12,16 @@ namespace sjp::gfx {
 using Enum = uint32_t;
 using Flags = uint32_t;
 using Id = uint32_t;
+
+// Five paired mast columns. Only the two adjacent columns illuminate a vertex.
+inline constexpr int ARENA_LIGHT_COLUMNS = 5;
+inline constexpr int ARENA_LIGHT_COUNT = ARENA_LIGHT_COLUMNS * 2;
+struct SpotLight {
+    std::array<float, 4> positionRange{}; // world position, inverse squared range
+    std::array<float, 4> directionCone{}; // unit aim direction, outer cone cosine
+};
+void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
+                 float strength, float attenuationDistance);
 
 inline constexpr Enum ALPHA = 0x1906;
 inline constexpr Enum AMBIENT = 0x1200;

@@ -158,17 +158,13 @@ void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye,
     sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
     sjp::gfx::popAttrib();
 }
-void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight &light) {
+void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight &light,
+                  const visual::FloodlightField &lamps) {
     const bool onInrun = f.x <= 0;
     const auto surface = [&](double x) { return onInrun ? h.inrun(x) : h.ground(x); };
     const double clearance = std::max(0.0, f.y - surface(f.x));
     const double slope = onInrun ? h.inrunSlope(f.x) : h.slope(f.x);
-    const Vec3 cast{-light.direction.x / light.direction.y, 0, -light.direction.z / light.direction.y};
-    const double facing = dot(Vec3{-slope, 1, 0}.normalized(), light.direction);
-    if (facing <= .06)
-        return;
-    const double softness = (.025 + std::min(.18, clearance * .007)) * light.shadowSoftness;
-    const float visibility = float(std::exp(-clearance / 85));
+    const auto shadow = visual::landingShadow(light, clearance, slope, lamps.sample({f.x, f.y, 0}));
     // Use exactly the same displayed joints as the athlete. Shadow projection
     // is presentation only; neither this pose nor the origin is changed.
     auto pose = f.pose;
@@ -181,7 +177,7 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
     const auto skeleton =
         f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
     visual::ShadowMask silhouette;
-    silhouette.build(visual::shadowSilhouette(skeleton, cast, clearance, slope), softness);
+    silhouette.build(visual::shadowSilhouette(skeleton, shadow.cast, clearance, slope), shadow.softness);
     const visual::CameraSurface receiver(h);
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::COLOR_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
@@ -211,7 +207,7 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
         if (onInrun)
             z = clamp(z, -2.25, 2.25);
         const float alpha = silhouette.coverage[size_t(row * visual::ShadowMask::columns + column)];
-        col({.09f, .15f, .20f, alpha * visibility * float(light.shadowStrength * std::min(1.0, facing * 4))});
+        col({.09f, .15f, .20f, alpha * float(shadow.opacity)});
         const double y = central ? (std::abs(z) <= 2.3 ? ramp[size_t(column)] : ground[size_t(column)])
                                  : receiver.height(x, z);
         sjp::gfx::vertex3d(x, y + .012, z);
@@ -224,7 +220,7 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
             const size_t at = size_t(row * visual::ShadowMask::columns + column);
             if (std::max({silhouette.coverage[at], silhouette.coverage[at + 1],
                           silhouette.coverage[at + visual::ShadowMask::columns],
-                          silhouette.coverage[at + visual::ShadowMask::columns + 1]}) * visibility < .004f)
+                          silhouette.coverage[at + visual::ShadowMask::columns + 1]}) * shadow.opacity < .001f)
                 continue;
             shadowVertex(column, row);
             shadowVertex(column, row + 1);
@@ -398,6 +394,9 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::enable(sjp::gfx::LIGHT1);
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::DIFFUSE, fill);
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::POSITION, fillPosition);
+    const visual::FloodlightField lamps(h, sceneEnvironment.time);
+    sjp::gfx::arenaLights(lamps.lights, float(lamps.firstX), float(lamps.spacing), float(lamps.strength),
+                          float(lamps.attenuationDistance));
     sjp::gfx::enable(sjp::gfx::FOG);
     float fog[] = {float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1};
     sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, fog);
@@ -416,7 +415,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
     const Frame display = displayedAthleteFrame(h, f);
-    jumperShadow(h, display, lighting);
+    jumperShadow(h, display, lighting, lamps);
     athlete(h, display, false);
     if (ghost && gf) {
         sjp::gfx::depthMask(sjp::gfx::FALSE);

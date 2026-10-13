@@ -50,13 +50,13 @@ inline EnvironmentLight environmentLight(environment::Conditions conditions) {
                  false};
         break;
     case TimeOfDay::Night:
-        // A cool moon and a broad arena fill keep the snow and landing readable.
+        // Local mast lighting supplies the arena's warm light at night.
         light = {{.018, .033, .069},
                  {.085, .13, .21},
                  {.07, .11, .17},
                  {.13, .18, .27},
                  {.22, .28, .40},
-                 {.35, .33, .31},
+                 {.09, .11, .15},
                  {.35, .70, -.60},
                  140,
                  800,

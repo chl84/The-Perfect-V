@@ -22,6 +22,11 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 parameters; // shininess, fog start, fog end, line width
     vec4 flags;      // lighting, fog, texturing, reserved
     vec4 viewport;   // pixel width/height, their reciprocals
+    vec4 spotPositionRange[10];
+    vec4 spotDirectionCone[10];
+    vec4 arenaAxis;       // world X plane in eye coordinates
+    vec4 arenaParameters; // first X, inverse spacing, inverse attenuation distance squared, strength
+    vec4 arenaColor;
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -30,6 +35,39 @@ layout(location = 2) out float fogDistance;
 layout(location = 3) flat out float textured;
 layout(location = 4) flat out vec4 fogParameters;
 layout(location = 5) flat out vec3 fogColor;
+
+vec3 arenaDiffuse(vec3 eye, vec3 n) {
+    if (state.arenaParameters.w == 0.0)
+        return vec3(0.0);
+    float coordinate = (dot(state.arenaAxis, vec4(eye, 1.0)) - state.arenaParameters.x) * state.arenaParameters.y;
+    if (coordinate <= -1.0 || coordinate >= 5.0)
+        return vec3(0.0);
+    int left = int(floor(coordinate));
+    float intensity = 0.0;
+    // Fixed budget: two neighboring columns, two mast groups each. Smooth
+    // longitudinal weighting reaches zero before a source leaves the set.
+    for (int offset = 0; offset < 2; ++offset) {
+        int column = left + offset;
+        if (column < 0 || column >= 5)
+            continue;
+        float longitudinal = smoothstep(0.0, 1.0, 1.0 - abs(coordinate - float(column)));
+        for (int side = 0; side < 2; ++side) {
+            int index = column * 2 + side;
+            vec4 source = state.spotPositionRange[index];
+            vec4 cone = state.spotDirectionCone[index];
+            vec3 delta = source.xyz - eye;
+            float d2 = dot(delta, delta);
+            float range = 1.0 - d2 * source.w;
+            if (range <= 0.0 || d2 < 0.0001)
+                continue;
+            vec3 l = delta * inversesqrt(d2);
+            float beam = smoothstep(cone.w, 0.90, dot(-l, cone.xyz));
+            intensity += longitudinal * beam * range * range * max(dot(n, l), 0.0) /
+                         (1.0 + d2 * state.arenaParameters.z);
+        }
+    }
+    return state.arenaColor.rgb * (state.arenaParameters.w * intensity);
+}
 
 void main() {
     vec4 eye = state.modelView * vec4(position, 1.0);
@@ -61,8 +99,12 @@ void main() {
         vec3 halfVector = normalize(l0 + vec3(0.0, 0.0, 1.0));
         float shine = d0 > 0.0 ? (state.parameters.x == 0.0 ? 1.0 :
                       pow(max(dot(n, halfVector), 0.0), state.parameters.x)) : 0.0;
-        vec3 lit = color.rgb * (state.ambient.rgb + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1);
-        lit += state.emission.rgb + state.materialSpecular.rgb * state.specularLight0.rgb * shine;
+        vec3 lit = color.rgb * (state.ambient.rgb + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1 +
+                               arenaDiffuse(eye.xyz, n));
+        // Lamp glass is the scene's emissive material. Its glow follows the
+        // live arena strength, including when the fixture mesh is cached.
+        lit += state.emission.rgb * (1.0 + 2.0 * state.arenaParameters.w) +
+               state.materialSpecular.rgb * state.specularLight0.rgb * shine;
         vertexColor.rgb = clamp(lit, 0.0, 1.0);
     }
     textureUV = uv;

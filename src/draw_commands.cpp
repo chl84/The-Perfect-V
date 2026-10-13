@@ -56,6 +56,8 @@ struct State {
     Id textureId = 0;
     std::array<float, 4> ambient{.2f, .2f, .2f, 1}, specular{}, emission{}, fogColor{};
     std::array<Light, 2> lights{};
+    std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> spotPositionRange{}, spotDirectionCone{};
+    std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{};
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
 struct SavedState {
@@ -118,6 +120,11 @@ struct Context {
         u.parameters = {state.shininess, state.fogStart, state.fogEnd, state.lineWidth};
         u.flags = {float(state.lighting), float(state.fog), float(state.texture), 0};
         u.viewport = {float(width), float(height), 1.f / width, 1.f / height};
+        u.spotPositionRange = state.spotPositionRange;
+        u.spotDirectionCone = state.spotDirectionCone;
+        u.arenaAxis = state.arenaAxis;
+        u.arenaParameters = state.arenaParameters;
+        u.arenaColor = state.arenaColor;
         return u;
     }
     void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
@@ -377,6 +384,11 @@ void popAttrib() {
         if (saved.mask & LIGHTING_BIT) {
             s.ambient = old.ambient;
             s.lights = old.lights;
+            s.spotPositionRange = old.spotPositionRange;
+            s.spotDirectionCone = old.spotDirectionCone;
+            s.arenaAxis = old.arenaAxis;
+            s.arenaParameters = old.arenaParameters;
+            s.arenaColor = old.arenaColor;
             s.specular = old.specular;
             s.emission = old.emission;
             s.shininess = old.shininess;
@@ -472,6 +484,30 @@ void lightModelfv(Enum name, const float *v) {
         throw std::runtime_error("Unsupported ambient light");
     const auto value = array4(v);
     apply([=](Context &c) { c.state.ambient = value; });
+}
+void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX, float spacing,
+                 float strength, float attenuationDistance) {
+    apply([=](Context &c) {
+        auto &s = c.state;
+        // Express world X as an eye-space plane once. This remains valid for
+        // translated/scaled local athlete geometry as well as cached terrain.
+        s.arenaAxis = transform(normalMatrix(c.modelView), {1, 0, 0, 0});
+        const auto origin = transform(c.modelView, {0, 0, 0, 1});
+        s.arenaAxis[3] = -(s.arenaAxis[0] * origin[0] + s.arenaAxis[1] * origin[1] +
+                           s.arenaAxis[2] * origin[2]);
+        s.arenaParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), strength};
+        s.arenaColor = {1, .95f, .84f, 0};
+        for (size_t i = 0; i < lights.size(); ++i) {
+            const auto &light = lights[i];
+            auto position = light.positionRange, direction = light.directionCone;
+            position[3] = 1;
+            direction[3] = 0;
+            s.spotPositionRange[i] = transform(c.modelView, position);
+            s.spotDirectionCone[i] = transform(c.modelView, direction);
+            s.spotPositionRange[i][3] = light.positionRange[3];
+            s.spotDirectionCone[i][3] = light.directionCone[3];
+        }
+    });
 }
 void lightfv(Enum light, Enum property, const float *v) {
     if (light != LIGHT0 && light != LIGHT1)

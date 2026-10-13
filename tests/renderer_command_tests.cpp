@@ -71,6 +71,71 @@ void singleShadow() {
     overlap.build(sjp::visual::shadowSilhouette(changed), .025);
     require(single.coverage != overlap.coverage, "Shadow does not follow the displayed joints");
 }
+void floodlightsAndLandingShadow() {
+    using namespace sjp;
+    using namespace sjp::visual;
+    using namespace sjp::environment;
+    for (const auto &hill : hills()) {
+        FloodlightField field(hill, TimeOfDay::Night), day(hill, TimeOfDay::Day);
+        for (int column = 0; column < gfx::ARENA_LIGHT_COLUMNS; ++column) {
+            const double x = field.firstX + column * field.spacing;
+            const Vec3 snow{x, hill.ground(x), 0};
+            require(field.sample(snow).intensity > .3, "Floodlights do not reach the landing snow");
+            require(day.sample(snow).intensity == 0, "Daylight runs the spotlight calculations");
+            for (int side : {-1, 1}) {
+                const auto mast = floodlightMast(hill, column, side);
+                const double edge = std::max(0.0, std::abs(mast.base.z) - 19 * hill.scale());
+                require(std::abs(mast.base.x - x) < 1e-10 &&
+                            std::abs(mast.base.y - (hill.ground(x) - edge * .08 +
+                                       std::sin(x * .017 + mast.base.z * .013) * edge * .018)) < 1e-10 &&
+                            std::abs(mast.lamp.y - (mast.base.y + 18 * std::sqrt(hill.scale()) + 2)) < 1e-10,
+                        "Lighting changed mast positions or the existing valley profile");
+                const Vec3 aim = (snow - mast.lamp).normalized();
+                auto isolated = field;
+                const int index = column * 2 + (side > 0 ? 1 : 0);
+                for (int i = 0; i < gfx::ARENA_LIGHT_COUNT; ++i)
+                    if (i != index)
+                        isolated.lights[size_t(i)].positionRange[3] = 1e8f;
+                require(isolated.sample(mast.lamp - aim * 2).intensity == 0,
+                        "A spotlight illuminates behind its lamp face");
+                require(field.sample(mast.lamp + aim * 300).intensity == 0,
+                        "Spotlights ignore their finite range");
+            }
+            // Switching the neighboring pair must not produce a brightness or
+            // shadow-direction step at a mast column, on any of the 32 hills.
+            const auto left = field.sample(snow + Vec3{-1e-5, 0, 0});
+            const auto right = field.sample(snow + Vec3{1e-5, 0, 0});
+            require(std::abs(left.intensity - right.intensity) < 1e-5 &&
+                        (left.direction - right.direction).length() < 1e-5,
+                    "Floodlight selection causes visible source switching");
+            for (double height : {0.0, 5.0, 15.0, 35.0, 50.0}) {
+                const auto shadow = landingShadow(environmentLight({TimeOfDay::Night, Weather::Sunny, 0}),
+                                                  height, hill.slope(x),
+                                                  field.sample(snow + Vec3{0, height, 0}));
+                require(std::isfinite(shadow.cast.x) && std::isfinite(shadow.cast.z) &&
+                            1 + hill.slope(x) * shadow.cast.x > .1 && shadow.opacity > 0,
+                        "Floodlights produce an invalid shadow above the lamp height");
+            }
+        }
+        for (int time = 0; time < 4; ++time)
+            for (int weather = 0; weather < 4; ++weather) {
+                const auto light = environmentLight({TimeOfDay(time), Weather(weather), 0});
+                for (double slope : {-.05, -.6, -1.2, .15}) {
+                    const auto contact = landingShadow(light, 0, slope);
+                    const auto near = landingShadow(light, 5, slope);
+                    const auto high = landingShadow(light, 35, slope);
+                    require(contact.opacity >= .28 && near.opacity > .22 &&
+                                high.opacity < near.opacity && contact.softness < near.softness &&
+                                near.softness < high.softness && contact.softness <= .026,
+                            "Landing shadow fades at contact or fails to soften with height");
+                    for (const auto shadow : {contact, near, high})
+                        require(std::isfinite(shadow.cast.x) && std::isfinite(shadow.cast.z) &&
+                                    1 + slope * shadow.cast.x > .1,
+                                "Grazing sunlight loses or stretches the landing shadow");
+                }
+            }
+    }
+}
 struct Current {
     std::array<float, 4> color{1, 1, 1, 1};
     std::array<float, 3> normal{0, 0, 1};
@@ -109,6 +174,8 @@ uint64_t positionHash = 1469598103934665603ULL, particlePositionHash = 146959810
 size_t particleVertices = 0;
 size_t completedFrames = 0;
 std::array<float, 3> primaryLight{}, globalAmbient{};
+std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> spotLights{};
+float spotStrength = 0;
 float fogStart = 0, fogEnd = 0;
 bool captureBoards = false;
 bool captureCamera = false;
@@ -366,6 +433,20 @@ void sjp::gfx::lightModelfv(sjp::gfx::Enum pname, const float *params) {
     if (pname == sjp::gfx::LIGHT_MODEL_AMBIENT)
         std::copy_n(params, 3, audit::globalAmbient.begin());
 }
+void sjp::gfx::arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX,
+                         float spacing, float strength, float attenuationDistance) {
+    audit::command("arenaLights inside a primitive", false);
+    for (const auto &light : lights)
+        for (const auto &values : {light.positionRange, light.directionCone})
+            for (float value : values)
+                audit::finite(value);
+    for (float value : {firstX, spacing, strength, attenuationDistance})
+        audit::finite(value);
+    audit::require(spacing > 0 && attenuationDistance > 0 && strength >= 0,
+                   "Invalid arena light field");
+    audit::spotLights = lights;
+    audit::spotStrength = strength;
+}
 void sjp::gfx::lightfv(sjp::gfx::Enum light, sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::lightfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
@@ -560,6 +641,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 int main() {
     try {
         audit::singleShadow();
+        audit::floodlightsAndLandingShadow();
         size_t snowy = 0;
         constexpr size_t weatherSamples = 100000;
         for (uint32_t i = 0; i < weatherSamples; ++i) {
@@ -821,6 +903,10 @@ int main() {
                     r.finish();
                     audit::balanced();
                     const auto expected = sjp::visual::environmentLight(conditions);
+                    const sjp::visual::FloodlightField expectedSpots(sim.hill(), conditions.time);
+                    audit::require(std::abs(audit::spotStrength - expectedSpots.strength) < 1e-6 &&
+                                       audit::spotLights[4].positionRange == expectedSpots.lights[4].positionRange,
+                                   "Cached hill uses stale floodlights after changing conditions");
                     audit::require(r.environmentConditions() == conditions && audit::nextList == cached,
                                    "Changing atmosphere rebuilt hill geometry or reselected conditions");
                     audit::require(std::abs(audit::primaryLight[0] - expected.direction.x) < 1e-6 &&
