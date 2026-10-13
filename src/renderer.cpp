@@ -159,12 +159,17 @@ void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye,
     sjp::gfx::popAttrib();
 }
 void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight &light,
-                  const visual::FloodlightField &lamps) {
+                  const visual::FloodlightField &lamps, const visual::InrunLayout &inrun,
+                  environment::TimeOfDay time) {
     const bool onInrun = f.x <= 0;
     const auto surface = [&](double x) { return onInrun ? h.inrun(x) : h.ground(x); };
     const double clearance = std::max(0.0, f.y - surface(f.x));
     const double slope = onInrun ? h.inrunSlope(f.x) : h.slope(f.x);
-    const auto shadow = visual::landingShadow(light, clearance, slope, lamps.sample({f.x, f.y, 0}));
+    auto illumination = lamps.sample({f.x, f.y, 0});
+    const auto laneLight = inrun.sample({f.x, f.y, 0}, time);
+    illumination.direction = illumination.direction + laneLight.direction;
+    illumination.intensity += laneLight.intensity;
+    const auto shadow = visual::landingShadow(light, clearance, slope, illumination);
     // Use exactly the same displayed joints as the athlete. Shadow projection
     // is presentation only; neither this pose nor the origin is changed.
     auto pose = f.pose;
@@ -283,8 +288,11 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
 }
 Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool vsync, bool validation)
     : window(w) {
-    for (size_t i = 0; i < chasePaths.size(); ++i)
+    for (size_t i = 0; i < chasePaths.size(); ++i) {
         chasePaths[i].build(hills()[i]);
+        inrunLayouts[i].build(hills()[i]);
+        grandstandLayouts[i].build(hills()[i]);
+    }
     sjp::gfx::initialize(window, noMsaa, vsync, validation);
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
@@ -397,6 +405,14 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     const visual::FloodlightField lamps(h, sceneEnvironment.time);
     sjp::gfx::arenaLights(lamps.lights, float(lamps.firstX), float(lamps.spacing), float(lamps.strength),
                           float(lamps.attenuationDistance));
+    size_t venue = 0;
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (h.id == hills()[i].id)
+            venue = i;
+    const auto &inrun = inrunLayouts[venue];
+    sjp::gfx::inrunLights(inrun.lights, float(inrun.firstLightX), float(inrun.lightSpacing),
+                         inrun.lightColumns, float(visual::InrunLayout::strength(sceneEnvironment.time)),
+                         float(visual::InrunLayout::attenuationDistance));
     sjp::gfx::enable(sjp::gfx::FOG);
     float fog[] = {float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1};
     sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, fog);
@@ -427,7 +443,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
     const Frame display = displayedAthleteFrame(h, f);
-    jumperShadow(h, display, lighting, lamps);
+    jumperShadow(h, display, lighting, lamps, inrun, sceneEnvironment.time);
     athlete(h, display, false);
     if (ghost && gf) {
         sjp::gfx::depthMask(sjp::gfx::FALSE);

@@ -22,10 +22,12 @@ struct alignas(16) Uniforms {
     std::array<float, 4> ambient{}, direction0{}, direction1{}, diffuse0{}, diffuse1{}, specularLight0{},
         materialSpecular{}, emission{}, fogColor{}, parameters{}, flags{}, viewport{};
     std::array<std::array<float, 4>, 10> spotPositionRange{}, spotDirectionCone{};
-    std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{};
+    std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{}, worldZAxis{};
+    std::array<std::array<float, 4>, 10> inrunPositionRange{}, inrunDirectionCone{};
+    std::array<float, 4> inrunParameters{}, inrunColor{};
     bool operator==(const Uniforms &other) const;
 };
-static_assert(sizeof(Uniforms) == 752);
+static_assert(sizeof(Uniforms) == 1120);
 struct PipelineState {
     bool depthTest = false, depthWrite = true, blend = false, cull = false, offset = false;
     float offsetFactor = 0, offsetUnits = 0;

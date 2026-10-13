@@ -3,6 +3,8 @@
 #include "draw_commands.h"
 #include "camera_path.h"
 #include "visual_environment.h"
+#include "visual_inrun.h"
+#include "visual_grandstands.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
@@ -71,8 +73,11 @@ class Renderer {
     double cameraTime = 0;
     double cameraProgress = 0;
     std::array<visual::ChaseCameraPath, HILL_COUNT> chasePaths;
+    std::array<visual::InrunLayout, HILL_COUNT> inrunLayouts;
+    std::array<visual::GrandstandLayout, HILL_COUNT> grandstandLayouts;
     Font loadFont(const std::string &);
     void terrain(const Hill &);
+    void inrunStructure(const Hill &, const visual::InrunLayout &);
     void scenery(const Hill &, const Frame &, double time);
     void athlete(const Hill &, const Frame &, bool ghost);
     void effects(const Hill &, const Frame &, double time, bool showWeather);

@@ -78,6 +78,45 @@ remain unchanged. Ordinary scenery snow has grain without grooming stripes.
 Both textures have averaged mip levels; the material blend reuses the existing
 terrain triangles with depth writes disabled and polygon offset.
 
+## Inrun structures and lighting
+
+The structural assembly surrounds the original inrun: continuous steel
+stringers, transverse girders, terrain-embedded footings and braced piers.
+Pier height follows the existing snow triangles, with no reversed columns on
+earth-supported sections. Service stairs, close-spaced rail posts, takeoff
+access openings and supported cabin landings remain outside the ski grooves,
+on the -Z side only. The +Z side facing camera 1 has no service deck, stairs,
+railings or inrun lamps; the underlying load-bearing structure remains.
+The original snow surface, groove vertices, start seat and physics coordinates
+are retained. The command suite freezes the complete terrain/inrun vertex
+streams from before this change on all 32 venues.
+
+A narrow 16 cm transverse marker follows the existing snow mesh at the takeoff
+edge. Red K signs retain their original X/Z coordinates; their upright panels
+clear the uphill snow by at least 35 cm, with posts embedded in the snow mesh.
+
+Every takeoff has one shielded lamp on the far service side. Longer or tall
+structures receive extra lamps along that side, up to five in total. Lamp faces
+share their positions/aim with the real vertex lights, with lens normals facing
+the spotlight direction. Illumination fades by cone and finite range.
+Day disables illumination, with low morning/evening power and fuller night light.
+The two adjacent columns require at most two inrun or four arena local-source
+evaluations per vertex; the fields have disjoint bounds. Far forest/terrain
+vertices skip the inrun field entirely. Cached meshes and light layouts remain
+bounded and reuse the existing pass, without extra textures or shadow maps.
+
+## Grandstand terraces
+
+Spectator landings are horizontal in both directions. Steep sections use
+shorter landings; concrete bases embed in the existing snow mesh without
+altering terrain or advertising boards. Guards follow landing heights at the
+rear, exposed front edges and substantial level changes.
+
+Each venue's layout is built once. Static bodies and animated arms use the
+same cached landing and keep both shoe soles inside its wooden surface.
+Adult heights vary from 1.60 to 1.90 m while preserving shoe width and crowd
+density. The command suite checks actual floor and shoe vertices on all venues.
+
 ## Fall model visibility
 
 Crashed outrun/replay models receive a presentation-only vertical offset when

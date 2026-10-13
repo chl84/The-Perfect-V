@@ -136,6 +136,59 @@ void floodlightsAndLandingShadow() {
             }
     }
 }
+void inrunConstruction() {
+    using namespace sjp;
+    using namespace sjp::visual;
+    using environment::TimeOfDay;
+    size_t litLarge = 0, litSmall = 0;
+    for (const auto &hill : hills()) {
+        InrunLayout layout;
+        layout.build(hill);
+        const CameraSurface snow(hill);
+        require(layout.supports.size() >= 4 && layout.supports.size() <= 16 &&
+                    layout.supports.back().x == -.75,
+                "Inrun has an unsupported takeoff end or unbounded support count");
+        for (size_t i = 0; i < layout.supports.size(); ++i) {
+            const auto &s = layout.supports[i];
+            require(s.x >= hill.inrunStart() && s.x < 0 && s.deck < hill.inrun(s.x) &&
+                        s.footingBottom < s.footingTop,
+                    "Support changes the track or uses an invalid footing");
+            for (double x : {s.x - .55, s.x + .55})
+                require(s.footingBottom < snow.height(x, inrunColumnZ) &&
+                            s.footingTop > snow.height(x, inrunColumnZ),
+                        "Footing floats above or is completely buried below the existing snow");
+            if (i > 0)
+                require(s.x - layout.supports[i - 1].x <= 9.000001,
+                        "Inrun structural bay exceeds its bounded span");
+        }
+        require(layout.lightColumns >= 1 && layout.lightColumns <= 5 &&
+                    std::abs(layout.firstLightX + (layout.lightColumns - 1) * layout.lightSpacing + 2.5) < 1e-9,
+                "Missing takeoff lamp or inrun light budget exceeded");
+        (layout.lightColumns > 1 ? litLarge : litSmall)++;
+        for (int column = 0; column < layout.lightColumns; ++column) {
+            const double x = layout.firstLightX + column * layout.lightSpacing;
+            const Vec3 surface{x, hill.inrun(x), 0};
+            require(layout.sample(surface, TimeOfDay::Night).intensity > .25 &&
+                        layout.sample(surface, TimeOfDay::Day).intensity == 0,
+                    "Inrun lights fail to reach the snow or stay active in daylight");
+            const auto a = layout.sample(surface + Vec3{-1e-5, 0, 0}, TimeOfDay::Night);
+            const auto b = layout.sample(surface + Vec3{1e-5, 0, 0}, TimeOfDay::Night);
+            require(std::abs(a.intensity - b.intensity) < 1e-5 &&
+                        (a.direction - b.direction).length() < 1e-5,
+                    "Inrun light selection steps at a column boundary");
+            const auto &p = layout.lights[size_t(column)].positionRange;
+            require(p[2] < -2.3 && p[0] < 0 &&
+                        std::abs(p[1] - (hill.inrun(x) + 2.4)) < 1e-5,
+                    "Inrun light hardware intrudes into the ski track or camera 1's side");
+        }
+        // The two fields cannot illuminate the same vertex, so the combined
+        // scene keeps the existing maximum of four local-source evaluations.
+        for (double x : {11.9, 12.0, 12.9})
+            require(layout.sample({x, 0, 0}, TimeOfDay::Night).intensity == 0,
+                    "Inrun lights spill into the arena shader's source selection");
+    }
+    require(litLarge > 0 && litSmall > 0, "Every venue received the same inrun lighting layout");
+}
 struct Current {
     std::array<float, 4> color{1, 1, 1, 1};
     std::array<float, 3> normal{0, 0, 1};
@@ -144,6 +197,51 @@ struct Current {
 Current current;
 std::array<float, 4> currentEmission{};
 bool signalMaterial = false, captureSignal = false;
+bool textureEnabled = false, captureSnow = false;
+sjp::gfx::Id boundTexture = 0, protectedTexture = 0;
+uint64_t snowHash = 1469598103934665603ULL;
+size_t snowVertices = 0;
+void protectedSnow(int hill) {
+    // Snapshot of every natural/prepared snow and inrun vertex before the
+    // construction changes. Geometry, including its original elevations,
+    // must remain byte-identical on all 32 venues.
+    static const std::array<std::pair<size_t, uint64_t>, sjp::HILL_COUNT> frozen{{
+        {52692, 8929634750460910395ULL},
+        {52932, 4961535559577657852ULL},
+        {52920, 13011848076777423058ULL},
+        {52422, 17105584306129191312ULL},
+        {57042, 10291631105589817921ULL},
+        {52362, 6735142137497314494ULL},
+        {51750, 16676245615236058334ULL},
+        {53358, 10655617069735740352ULL},
+        {51486, 14876695077908833954ULL},
+        {53130, 12706393837836967098ULL},
+        {51456, 15722584054216609977ULL},
+        {77718, 8313475174198820722ULL},
+        {52362, 17762803137908481336ULL},
+        {53184, 1836508506089985619ULL},
+        {52998, 9459794330870045278ULL},
+        {51354, 17697855449581398120ULL},
+        {52950, 9135949032508433795ULL},
+        {76380, 136115027135053538ULL},
+        {52464, 15590644764506681616ULL},
+        {53202, 6546171082793365974ULL},
+        {51282, 2660078780452410792ULL},
+        {63174, 10473521836022733824ULL},
+        {53364, 13545339765436101732ULL},
+        {52770, 13508245450373346062ULL},
+        {58326, 1545828841040480761ULL},
+        {53646, 5602211231906966122ULL},
+        {52632, 4458927447898145323ULL},
+        {52104, 18169965633297188017ULL},
+        {52362, 14060586234147959493ULL},
+        {51540, 5050501703021410990ULL},
+        {52236, 11485110930087622931ULL},
+        {52368, 11331550327366158445ULL},
+    }};
+    if (snowVertices != frozen[size_t(hill)].first || snowHash != frozen[size_t(hill)].second)
+        throw std::runtime_error("Protected terrain/track changed on " + sjp::hills()[size_t(hill)].name);
+}
 size_t signalVertices = 0;
 sjp::Vec3 signalCenter;
 std::array<float, 4> signalEmission{};
@@ -153,6 +251,8 @@ struct Saved {
     bool depth;
     std::array<float, 4> emission;
     bool signal;
+    bool textureEnabled;
+    sjp::gfx::Id boundTexture;
 };
 std::vector<Saved> attributes;
 std::map<sjp::gfx::Enum, int> matrices{{sjp::gfx::MODELVIEW, 1}, {sjp::gfx::PROJECTION, 1}, {sjp::gfx::TEXTURE, 1}};
@@ -183,18 +283,37 @@ size_t completedFrames = 0;
 std::array<float, 3> primaryLight{}, globalAmbient{};
 std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> spotLights{};
 float spotStrength = 0;
+std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> inrunSpots{};
+float inrunStrength = 0;
+int inrunColumns = 0;
 float fogStart = 0, fogEnd = 0;
 bool captureBoards = false;
 bool captureCamera = false;
 sjp::Vec3 cameraEye;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
+std::vector<sjp::Vec3> standTops, spectatorSoles;
 void position(double x, double y, double z) {
+    if (captureSnow && compiling && textureEnabled &&
+        (boundTexture == protectedTexture || boundTexture == protectedTexture + 1)) {
+        ++snowVertices;
+        for (double value : {x, y, z}) {
+            uint64_t bits;
+            std::memcpy(&bits, &value, sizeof(bits));
+            snowHash = (snowHash ^ bits) * 1099511628211ULL;
+        }
+    }
     if (captureSignal && !compiling && signalMaterial) {
         require(std::abs((sjp::Vec3{x, y, z} - signalCenter).length() - .22) < 1e-8,
                 "Start-signal emission leaks onto its post or other geometry");
         ++signalVertices;
         signalEmission = currentEmission;
     }
+    if (captureBoards && compiling && current.color == std::array<float, 4>{.40f, .32f, .26f, 1} &&
+        current.normal[1] > .999999f)
+        standTops.push_back({x, y, z});
+    if (captureBoards && compiling && current.color == std::array<float, 4>{.075f, .105f, .14f, 1} &&
+        current.normal[1] < -.999999f)
+        spectatorSoles.push_back({x, y, z});
     if (captureBoards && compiling)
         for (size_t face = 0; face < boardFaces.size(); ++face) {
             const std::array<float, 4> color = face == 0 ? std::array<float, 4>{.10f, .28f, .33f, 1}
@@ -208,6 +327,37 @@ void position(double x, double y, double z) {
         positionHash = (positionHash ^ b) * 1099511628211ULL;
         if (!compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN)
             particlePositionHash = (particlePositionHash ^ b) * 1099511628211ULL;
+    }
+}
+void flatGrandstands() {
+    require(standTops.size() >= 28 * 3 * 6 && standTops.size() % 6 == 0 &&
+                !spectatorSoles.empty() && spectatorSoles.size() % 6 == 0,
+            "Missing horizontal grandstand landings or spectator shoes");
+    struct Deck { sjp::Vec3 low, high; };
+    std::vector<Deck> decks;
+    for (size_t first = 0; first < standTops.size(); first += 6) {
+        Deck deck{standTops[first], standTops[first]};
+        for (size_t i = first; i < first + 6; ++i) {
+            const auto p = standTops[i];
+            deck.low = {std::min(deck.low.x, p.x), std::min(deck.low.y, p.y), std::min(deck.low.z, p.z)};
+            deck.high = {std::max(deck.high.x, p.x), std::max(deck.high.y, p.y), std::max(deck.high.z, p.z)};
+        }
+        require(std::abs(deck.high.y - deck.low.y) < 1e-9 && deck.high.x - deck.low.x > .78 &&
+                    std::abs(deck.high.z - deck.low.z - .60) < 1e-9,
+                "Grandstand walking surface slopes or lacks room for both feet");
+        decks.push_back(deck);
+    }
+    for (size_t first = 0; first < spectatorSoles.size(); first += 6) {
+        const bool planted = std::any_of(decks.begin(), decks.end(), [&](const Deck &deck) {
+            for (size_t i = first; i < first + 6; ++i) {
+                const auto p = spectatorSoles[i];
+                if (std::abs(p.y - deck.high.y) > 1e-8 || p.x < deck.low.x - 1e-8 ||
+                    p.x > deck.high.x + 1e-8 || p.z < deck.low.z - 1e-8 || p.z > deck.high.z + 1e-8)
+                    return false;
+            }
+            return true;
+        });
+        require(planted, "Spectator shoe floats, clips into a stand, or straddles a terrace edge");
     }
 }
 void rectangularBoards(const sjp::Hill &hill) {
@@ -300,6 +450,7 @@ void sjp::gfx::begin(sjp::gfx::Enum mode) {
 void sjp::gfx::bindTexture(sjp::gfx::Enum target, sjp::gfx::Id texture) {
     audit::command("sjp::gfx::bindTexture inside sjp::gfx::begin", false);
     audit::require(!texture || audit::textures.count(texture), "Bind unknown texture");
+    audit::boundTexture = texture;
 }
 void sjp::gfx::blendFunc(sjp::gfx::Enum sfactor, sjp::gfx::Enum dfactor) {
     audit::command("sjp::gfx::blendFunc inside sjp::gfx::begin", false);
@@ -358,9 +509,13 @@ void sjp::gfx::depthMask(bool flag) {
 }
 void sjp::gfx::disable(sjp::gfx::Enum cap) {
     audit::command("sjp::gfx::disable inside sjp::gfx::begin", false);
+    if (cap == sjp::gfx::TEXTURE_2D)
+        audit::textureEnabled = false;
 }
 void sjp::gfx::enable(sjp::gfx::Enum cap) {
     audit::command("sjp::gfx::enable inside sjp::gfx::begin", false);
+    if (cap == sjp::gfx::TEXTURE_2D)
+        audit::textureEnabled = true;
 }
 void sjp::gfx::end(void) {
     audit::command("sjp::gfx::end inside sjp::gfx::begin", true);
@@ -460,6 +615,19 @@ void sjp::gfx::arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &light
     audit::spotLights = lights;
     audit::spotStrength = strength;
 }
+void sjp::gfx::inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX,
+                         float spacing, int columns, float strength, float attenuationDistance) {
+    audit::command("inrunLights inside a primitive", false);
+    audit::require(columns >= 1 && columns <= 5 && spacing > 0 && strength >= 0 && attenuationDistance > 0,
+                   "Invalid inrun light field");
+    for (const auto &light : lights)
+        for (const auto &values : {light.positionRange, light.directionCone})
+            for (float value : values)
+                audit::finite(value);
+    audit::inrunSpots = lights;
+    audit::inrunStrength = strength;
+    audit::inrunColumns = columns;
+}
 void sjp::gfx::lightfv(sjp::gfx::Enum light, sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::lightfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
@@ -555,6 +723,10 @@ void sjp::gfx::popAttrib(void) {
         audit::currentEmission = saved.emission;
         audit::signalMaterial = saved.signal;
     }
+    if (saved.mask & (sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT))
+        audit::textureEnabled = saved.textureEnabled;
+    if (saved.mask & sjp::gfx::TEXTURE_BIT)
+        audit::boundTexture = saved.boundTexture;
 }
 void sjp::gfx::popMatrix(void) {
     audit::command("sjp::gfx::popMatrix inside sjp::gfx::begin", false);
@@ -563,7 +735,7 @@ void sjp::gfx::popMatrix(void) {
 void sjp::gfx::pushAttrib(sjp::gfx::Flags mask) {
     audit::command("sjp::gfx::pushAttrib inside sjp::gfx::begin", false);
     audit::attributes.push_back({mask, audit::current, audit::depth, audit::currentEmission,
-                                 audit::signalMaterial});
+                                 audit::signalMaterial, audit::textureEnabled, audit::boundTexture});
     audit::require(audit::attributes.size() <= 16, "Attribute stack exceeds guaranteed capacity");
 }
 void sjp::gfx::pushMatrix(void) {
@@ -664,6 +836,7 @@ int main() {
     try {
         audit::singleShadow();
         audit::floodlightsAndLandingShadow();
+        audit::inrunConstruction();
         size_t snowy = 0;
         constexpr size_t weatherSamples = 100000;
         for (uint32_t i = 0; i < weatherSamples; ++i) {
@@ -691,6 +864,8 @@ int main() {
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             for (int hi = 0; hi < int(sjp::HILL_COUNT); ++hi) {
+                if (hi == 0)
+                    audit::protectedTexture = audit::nextTexture;
                 sjp::Simulation s(hi, 0);
                 s.resetOriginal(hi, 12345, 98765);
                 s.setWind(0, 0);
@@ -714,10 +889,18 @@ int main() {
                 r.resetCamera();
                 for (auto &faces : audit::boardFaces)
                     faces.clear();
+                audit::standTops.clear();
+                audit::spectatorSoles.clear();
                 audit::captureBoards = true;
+                audit::captureSnow = true;
+                audit::snowHash = 1469598103934665603ULL;
+                audit::snowVertices = 0;
                 r.begin(s.hill(), s.frame(), 4, 0, true);
+                audit::captureSnow = false;
+                audit::protectedSnow(hi);
                 audit::captureBoards = false;
                 audit::rectangularBoards(s.hill());
+                audit::flatGrandstands();
                 r.overlay();
                 r.finish();
                 audit::balanced();
@@ -957,6 +1140,13 @@ int main() {
                     audit::balanced();
                     const auto expected = sjp::visual::environmentLight(conditions);
                     const sjp::visual::FloodlightField expectedSpots(sim.hill(), conditions.time);
+                    sjp::visual::InrunLayout expectedInrun;
+                    expectedInrun.build(sim.hill());
+                    audit::require(audit::inrunSpots[0].positionRange == expectedInrun.lights[0].positionRange &&
+                                       audit::inrunColumns == expectedInrun.lightColumns &&
+                                       std::abs(audit::inrunStrength -
+                                                sjp::visual::InrunLayout::strength(conditions.time)) < 1e-6,
+                                   "Inrun lights ignore the hill, cached geometry or time of day");
                     audit::require(std::abs(audit::spotStrength - expectedSpots.strength) < 1e-6 &&
                                        audit::spotLights[4].positionRange == expectedSpots.lights[4].positionRange,
                                    "Cached hill uses stale floodlights after changing conditions");

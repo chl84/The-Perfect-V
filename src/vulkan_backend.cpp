@@ -16,7 +16,10 @@ bool Uniforms::operator==(const Uniforms &o) const {
            materialSpecular == o.materialSpecular && emission == o.emission && fogColor == o.fogColor &&
            parameters == o.parameters && flags == o.flags && viewport == o.viewport &&
            spotPositionRange == o.spotPositionRange && spotDirectionCone == o.spotDirectionCone &&
-           arenaAxis == o.arenaAxis && arenaParameters == o.arenaParameters && arenaColor == o.arenaColor;
+           arenaAxis == o.arenaAxis && arenaParameters == o.arenaParameters && arenaColor == o.arenaColor &&
+           worldZAxis == o.worldZAxis &&
+           inrunPositionRange == o.inrunPositionRange && inrunDirectionCone == o.inrunDirectionCone &&
+           inrunParameters == o.inrunParameters && inrunColor == o.inrunColor;
 }
 bool PipelineState::operator==(const PipelineState &o) const { return !(*this < o) && !(o < *this); }
 bool PipelineState::operator<(const PipelineState &o) const {

@@ -27,6 +27,11 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 arenaAxis;       // world X plane in eye coordinates
     vec4 arenaParameters; // first X, inverse spacing, inverse attenuation distance squared, strength
     vec4 arenaColor;
+    vec4 worldZAxis;
+    vec4 inrunPositionRange[10];
+    vec4 inrunDirectionCone[10];
+    vec4 inrunParameters; // first X, inverse spacing, inverse attenuation distance squared, columns
+    vec4 inrunColor;      // color, intensity
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -36,10 +41,10 @@ layout(location = 3) flat out float textured;
 layout(location = 4) flat out vec4 fogParameters;
 layout(location = 5) flat out vec3 fogColor;
 
-vec3 arenaDiffuse(vec3 eye, vec3 n) {
+vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
         return vec3(0.0);
-    float coordinate = (dot(state.arenaAxis, vec4(eye, 1.0)) - state.arenaParameters.x) * state.arenaParameters.y;
+    float coordinate = (worldX - state.arenaParameters.x) * state.arenaParameters.y;
     if (coordinate <= -1.0 || coordinate >= 5.0)
         return vec3(0.0);
     int left = int(floor(coordinate));
@@ -67,6 +72,50 @@ vec3 arenaDiffuse(vec3 eye, vec3 n) {
         }
     }
     return state.arenaColor.rgb * (state.arenaParameters.w * intensity);
+}
+
+vec3 inrunDiffuse(vec3 eye, vec3 n, float worldX) {
+    if (state.inrunColor.w == 0.0)
+        return vec3(0.0);
+    float coordinate = (worldX - state.inrunParameters.x) * state.inrunParameters.y;
+    int count = int(state.inrunParameters.w);
+    if (coordinate <= -1.0 || coordinate >= float(count))
+        return vec3(0.0);
+    int left = int(floor(coordinate));
+    float intensity = 0.0;
+    for (int offset = 0; offset < 2; ++offset) {
+        int column = left + offset;
+        if (column < 0 || column >= count)
+            continue;
+        float longitudinal = smoothstep(0.0, 1.0, 1.0 - abs(coordinate - float(column)));
+        vec4 source = state.inrunPositionRange[column];
+        vec4 cone = state.inrunDirectionCone[column];
+        vec3 delta = source.xyz - eye;
+        float d2 = dot(delta, delta), range = 1.0 - d2 * source.w;
+        if (range <= 0.0 || d2 < 0.0001)
+            continue;
+        vec3 l = delta * inversesqrt(d2);
+        float beam = smoothstep(cone.w, 0.90, dot(-l, cone.xyz));
+        intensity += longitudinal * beam * range * range * max(dot(n, l), 0.0) /
+                     (1.0 + d2 * state.inrunParameters.z);
+    }
+    return state.inrunColor.rgb * (state.inrunColor.w * intensity);
+}
+
+vec3 localDiffuse(vec3 eye, vec3 n) {
+    if (state.arenaParameters.w == 0.0 && state.inrunColor.w == 0.0)
+        return vec3(0.0);
+    float worldX = dot(state.arenaAxis, vec4(eye, 1.0));
+    // Inrun sources end at x=-2.5 with a 14 m range; arena sources begin
+    // beyond x=12.9 on the smallest hill. Only one local-light field runs.
+    if (worldX < 12.0) {
+        // Every inrun source is at |z|=3.28 with a 14 m finite range. Far
+        // terrain/forest vertices therefore skip both light evaluations.
+        if (abs(dot(state.worldZAxis, vec4(eye, 1.0))) > 17.3)
+            return vec3(0.0);
+        return inrunDiffuse(eye, n, worldX);
+    }
+    return arenaDiffuse(eye, n, worldX);
 }
 
 void main() {
@@ -100,7 +149,7 @@ void main() {
         float shine = d0 > 0.0 ? (state.parameters.x == 0.0 ? 1.0 :
                       pow(max(dot(n, halfVector), 0.0), state.parameters.x)) : 0.0;
         vec3 lit = color.rgb * (state.ambient.rgb + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1 +
-                               arenaDiffuse(eye.xyz, n));
+                               localDiffuse(eye.xyz, n));
         // Emission W selects arena tracking. Independently powered indicators
         // keep constant emission; vertex color still supplies surface alpha.
         lit += state.emission.rgb * (1.0 + 2.0 * state.arenaParameters.w * state.emission.w) +

@@ -22,6 +22,8 @@ struct SpotLight {
 };
 void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
                  float strength, float attenuationDistance);
+void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
+                 int columns, float strength, float attenuationDistance);
 
 inline constexpr Enum ALPHA = 0x1906;
 inline constexpr Enum AMBIENT = 0x1200;

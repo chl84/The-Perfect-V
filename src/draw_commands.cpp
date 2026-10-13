@@ -57,7 +57,9 @@ struct State {
     std::array<float, 4> ambient{.2f, .2f, .2f, 1}, specular{}, emission{}, fogColor{};
     std::array<Light, 2> lights{};
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> spotPositionRange{}, spotDirectionCone{};
-    std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{};
+    std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{}, worldZAxis{};
+    std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
+    std::array<float, 4> inrunParameters{}, inrunColor{};
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
 struct SavedState {
@@ -125,6 +127,11 @@ struct Context {
         u.arenaAxis = state.arenaAxis;
         u.arenaParameters = state.arenaParameters;
         u.arenaColor = state.arenaColor;
+        u.worldZAxis = state.worldZAxis;
+        u.inrunPositionRange = state.inrunPositionRange;
+        u.inrunDirectionCone = state.inrunDirectionCone;
+        u.inrunParameters = state.inrunParameters;
+        u.inrunColor = state.inrunColor;
         return u;
     }
     void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
@@ -389,6 +396,11 @@ void popAttrib() {
             s.arenaAxis = old.arenaAxis;
             s.arenaParameters = old.arenaParameters;
             s.arenaColor = old.arenaColor;
+            s.worldZAxis = old.worldZAxis;
+            s.inrunPositionRange = old.inrunPositionRange;
+            s.inrunDirectionCone = old.inrunDirectionCone;
+            s.inrunParameters = old.inrunParameters;
+            s.inrunColor = old.inrunColor;
             s.specular = old.specular;
             s.emission = old.emission;
             s.shininess = old.shininess;
@@ -495,6 +507,9 @@ void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
         const auto origin = transform(c.modelView, {0, 0, 0, 1});
         s.arenaAxis[3] = -(s.arenaAxis[0] * origin[0] + s.arenaAxis[1] * origin[1] +
                            s.arenaAxis[2] * origin[2]);
+        s.worldZAxis = transform(normalMatrix(c.modelView), {0, 0, 1, 0});
+        s.worldZAxis[3] = -(s.worldZAxis[0] * origin[0] + s.worldZAxis[1] * origin[1] +
+                            s.worldZAxis[2] * origin[2]);
         s.arenaParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), strength};
         s.arenaColor = {1, .95f, .84f, 0};
         for (size_t i = 0; i < lights.size(); ++i) {
@@ -506,6 +521,23 @@ void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
             s.spotDirectionCone[i] = transform(c.modelView, direction);
             s.spotPositionRange[i][3] = light.positionRange[3];
             s.spotDirectionCone[i][3] = light.directionCone[3];
+        }
+    });
+}
+void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX, float spacing,
+                 int columns, float strength, float attenuationDistance) {
+    apply([=](Context &c) {
+        auto &s = c.state;
+        s.inrunParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), float(columns)};
+        s.inrunColor = {1, .94f, .84f, strength};
+        for (size_t i = 0; i < lights.size(); ++i) {
+            auto position = lights[i].positionRange, direction = lights[i].directionCone;
+            position[3] = 1;
+            direction[3] = 0;
+            s.inrunPositionRange[i] = transform(c.modelView, position);
+            s.inrunDirectionCone[i] = transform(c.modelView, direction);
+            s.inrunPositionRange[i][3] = lights[i].positionRange[3];
+            s.inrunDirectionCone[i][3] = lights[i].directionCone[3];
         }
     });
 }

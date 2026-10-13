@@ -489,30 +489,40 @@ void treeBranch(const Tree &tree, int tier, Vec3 sway = {}) {
     const Vec3 p = tree.base + Vec3{0, tree.height * (.12 + .53 * t), 0};
     branch(p, tree.height * (.31 - .238 * t), tree.height * (.43 - .12 * t), tree.seed + tier * 29.7, sway);
 }
-void slopedSlab(const Hill &h, double x0, double x1, double z0, double z1, double low, double high, Color c) {
-    const Vec3 a{x0, terrainY(h, x0, z0), z0}, b{x0, terrainY(h, x0, z1), z1}, d{x1, terrainY(h, x1, z0), z0},
-        e{x1, terrainY(h, x1, z1), z1};
-    const Vec3 up{0, high, 0}, down{0, low, 0};
-    quad(a + up, b + up, e + up, d + up, c);
-    quad(a + down, d + down, e + down, b + down, c);
-    quad(a + down, a + up, d + up, d + down, shade(c, .88));
-    quad(b + down, e + down, e + up, b + up, shade(c, .88));
-    quad(a + down, b + down, b + up, a + up, shade(c, .94));
-    quad(d + down, d + up, e + up, e + down, shade(c, .94));
+void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double z0, double z1,
+                 double top, Color c) {
+    const Vec3 a{x0, top, z0}, b{x0, top, z1}, d{x1, top, z0}, e{x1, top, z1};
+    const Vec3 aa{x0, snow.height(x0, z0) - .16, z0}, bb{x0, snow.height(x0, z1) - .16, z1},
+               dd{x1, snow.height(x1, z0) - .16, z0}, ee{x1, snow.height(x1, z1) - .16, z1};
+    quad(a, b, e, d, c);
+    quad(aa, dd, ee, bb, c);
+    quad(aa, a, d, dd, shade(c, .88));
+    quad(bb, ee, e, b, shade(c, .88));
+    quad(aa, bb, b, a, shade(c, .94));
+    quad(dd, d, e, ee, shade(c, .94));
 }
-void inrunSideDeck(const Hill &h, double x0, double x1, double z0, double z1) {
-    // Only the side platform changes; the centre track is drawn separately
-    // with its unchanged original inrun vertices.
-    for (double x = x0; x < x1; x += .5) {
-        const double xx = std::min(x + .5, x1);
-        const Vec3 a{x, h.inrun(x) + .025, z0}, b{x, h.inrun(x) + .025, z1}, c{xx, h.inrun(xx) + .025, z1},
-            d{xx, h.inrun(xx) + .025, z0};
-        const Vec3 down{0, -.23, 0};
-        quad(a, b, c, d, {.39f, .32f, .27f, 1});
-        quad(a + down, d + down, c + down, b + down, {.26f, .30f, .32f, 1});
-        quad(a, d, d + down, a + down, {.27f, .34f, .37f, 1});
-        quad(b, b + down, c + down, c, {.27f, .34f, .37f, 1});
-        beam(a + Vec3{0, .016, .12}, b + Vec3{0, .016, -.12}, .017, {.53f, .44f, .35f, 1});
+void standGuard(Vec3 a, Vec3 b) {
+    const Color post{.44f, .54f, .58f, 1}, rail{.55f, .64f, .68f, 1};
+    beam(a, a + Vec3{0, 1.12, 0}, .028, post);
+    beam(b, b + Vec3{0, 1.12, 0}, .028, post);
+    beam(a + Vec3{0, 1.08, 0}, b + Vec3{0, 1.08, 0}, .033, rail);
+    beam(a + Vec3{0, .55, 0}, b + Vec3{0, .55, 0}, .020, post);
+}
+void standEndGuard(const visual::StandTerrace &t, double x, int side, double near) {
+    const Color post{.44f, .54f, .58f, 1}, rail{.55f, .64f, .68f, 1};
+    // One continuous stair railing across the three lateral seating tiers.
+    // Each post starts on its own horizontal landing, including the turns.
+    const std::array<Vec3, 4> feet{{
+        {x, t.floor(0), side * (near + 1.40)},
+        {x, t.floor(1), side * (near + 2.60)},
+        {x, t.floor(2), side * (near + 3.80)},
+        {x, t.floor(2), side * (near + 4.90)},
+    }};
+    for (const auto p : feet)
+        beam(p, p + Vec3{0, 1.12, 0}, .028, post);
+    for (size_t i = 1; i < feet.size(); ++i) {
+        beam(feet[i - 1] + Vec3{0, 1.08, 0}, feet[i] + Vec3{0, 1.08, 0}, .033, rail);
+        beam(feet[i - 1] + Vec3{0, .55, 0}, feet[i] + Vec3{0, .55, 0}, .020, post);
     }
 }
 struct VisualStartSeat {
@@ -730,16 +740,19 @@ constexpr std::array<Color, 7> crowdColors{{{.14f, .34f, .43f, 1},
                                             {.73f, .79f, .80f, 1}}};
 struct Spectator {
     Vec3 feet;
-    double size = 1, seed = 0, yaw = 0;
+    double size = 1, verticalScale = 1, seed = 0, yaw = 0;
     Color coat{};
     int side = 1;
     bool present = true, animated = false, flag = false;
 };
-Spectator spectatorAt(const Hill &h, int side, int section, int row, int person) {
-    const double s = h.scale(), width = 5.8 * s, center = (79 + section * 6.2) * s;
+Spectator spectatorAt(const visual::GrandstandLayout &stands, int side, int section, int row, int person) {
+    const auto &stand = stands.section(side, section);
+    const double width = stand.width, center = stand.center;
     const double seed = section * 91.0 + row * 13.0 + person * 7.0 + (side < 0 ? 431.0 : 0);
     Spectator p;
     p.size = .74 + hash(seed + 1) * .31;
+    // Adult standing heights of 1.60-1.90 m, without widening their footprint.
+    p.verticalScale = (1.60 + hash(seed + 4.7) * .30 - .155 * p.size) / (1.155 * p.size);
     p.seed = seed;
     p.coat = crowdColors[int(hash(seed + 9) * crowdColors.size())];
     p.side = side;
@@ -756,24 +769,19 @@ Spectator spectatorAt(const Hill &h, int side, int section, int row, int person)
     const double room = std::max(0.0, width * .90 - (capacity - 1) * pitch - .58);
     const double cluster = (hash(section * 19.1 + row * 3.93 + side * 7.14) - .5) * room * .83;
     const double jitter = (hash(seed + 31.7) - .5) * pitch * .08;
-    const double x = center + (person - (capacity - 1) * .5) * pitch + cluster + jitter;
-    const double near = std::max(25 * s, 8.0);
-    const double z = side * (near + 1.95 + row * 1.2 + (hash(seed + 41.9) - .5) * .12);
-    // Use the actual two triangles of the wooden row floor, including its
-    // slope, so irregular placements remain planted on the existing stands.
-    const double x0 = center - width * .48, x1 = center + width * .48;
-    const double za = side * (near + 1.35 + row * 1.2), zb = za + side * 1.2;
-    const double z0 = std::min(za, zb) + .3, z1 = std::max(za, zb) - .3;
-    const double tx = clamp((x - x0) / (x1 - x0), 0.0, 1.0), tz = clamp((z - z0) / (z1 - z0), 0.0, 1.0);
-    const double a = terrainY(h, x0, z0), b = terrainY(h, x0, z1), c = terrainY(h, x1, z1),
-                 d = terrainY(h, x1, z0);
-    const double floor = tz >= tx ? a + (b - a) * tz + (c - b) * tx : a + (d - a) * tx + (c - d) * tz;
-    p.feet = {x, floor + .78 + row * .70, z};
+    double x = center + (person - (capacity - 1) * .5) * pitch + cluster + jitter;
+    const double z = side * (stands.near + 1.95 + row * 1.2 + (hash(seed + 41.9) - .5) * .06);
+    const auto &terrace = stand.at(x);
+    // Both shoes remain on the same horizontal wooden landing, including
+    // during arm animation. Keep them away from an exposed step boundary.
+    x = clamp(x, terrace.x0 + .38, terrace.x1 - .38);
+    p.feet = {x, terrace.woodTop(row), z};
     return p;
 }
 Vec3 spectatorPoint(const Spectator &p, Vec3 local) {
     const double c = std::cos(p.yaw), s = std::sin(p.yaw);
-    return p.feet + Vec3{local.x * c + local.z * s, local.y, -local.x * s + local.z * c};
+    return p.feet + Vec3{local.x * c + local.z * s, local.y * p.verticalScale,
+                        -local.x * s + local.z * c};
 }
 void spectatorBox(const Spectator &p, Vec3 center, Vec3 size, Color color) {
     const Vec3 a = center - size * .5, b = center + size * .5;
@@ -797,6 +805,7 @@ void spectatorBody(const Spectator &p) {
     }
     spectatorBox(p, {0, .67 * s, 0}, {.42 * s, .48 * s, .29 * s}, p.coat);
     spectatorBox(p, {0, .90 * s, -p.side * .055 * s}, {.34 * s, .09 * s, .29 * s}, shade(p.coat, .68));
+    spectatorBox(p, {0, 1.00 * s, 0}, {.13 * s, .16 * s, .13 * s}, {.77f, .65f, .55f, 1});
     sphere(spectatorPoint(p, {0, 1.065 * s, 0}), .155 * s, {.77f, .65f, .55f, 1});
     sphere(spectatorPoint(p, {0, 1.155 * s, .025 * p.side * s}), .155 * s, shade(p.coat, .73));
     if (!p.animated)
@@ -968,36 +977,28 @@ void Renderer::terrain(const Hill &h) {
             quad({x, y + .014, z - .055}, {x, y + .014, z + .055}, {xx, yy + .014, z + .055},
                  {xx, yy + .014, z - .055}, {.48f, .67f, .76f, 1});
         for (double z : {-2.2, 2.2}) {
-            beam({x, y + .7, z}, {xx, yy + .7, z}, .055, {.68f, .75f, .78f, 1});
-            beam({x, y + .39, z}, {xx, yy + .39, z}, .028, {.39f, .49f, .54f, 1});
-            const double outer = z < 0 ? -3.35 : 3.35;
-            quad({x, y - .1, outer - .42}, {x, y - .1, outer + .42}, {xx, yy - .1, outer + .42},
-                 {xx, yy - .1, outer - .42}, {.43f, .35f, .28f, 1});
             quad({x, y + .021, z - .09}, {x, y + .021, z + .09}, {xx, yy + .021, z + .09},
                  {xx, yy + .021, z - .09}, {.19f, .42f, .53f, 1});
         }
-        beam({x, y - .58, -2.25}, {x, y - .58, 2.25}, .055, {.39f, .33f, .28f, 1});
-    }
-    for (double x = h.inrunStart(); x < -1; x += 12 * s) {
-        const double y = h.inrun(x), base = h.ground(x) - 3;
-        for (double z : {-2., 2.}) {
-            beam({x, base, z}, {x, y - .6, z}, .21, {.28f, .35f, .39f, 1});
-            box({x, base + .1, z}, {.90, .2, .90}, {.48f, .52f, .53f, 1});
-            if (x + 12 * s < 0)
-                beam({x, base, z}, {x + 12 * s, h.inrun(x + 12 * s) - .6, z}, .095, {.41f, .48f, .52f, 1});
-            beam({x, y, z}, {x, y + .75, z}, .04, {.58f, .66f, .69f, 1});
-            beam({x, y - .32, z}, {x, y - .32, -z}, .075, {.39f, .44f, .47f, 1});
+        if (xx > -.16) {
+            // A narrow metal-colored transverse edge, like a real takeoff
+            // table. Follow the existing snow triangle, without changing it.
+            const double edgeX = std::max(x, -.16);
+            const double edgeY = y + (yy - y) * (edgeX - x) / (xx - x);
+            if (xx - edgeX > 1e-8)
+                quad({edgeX, edgeY + .018, -2.3}, {edgeX, edgeY + .018, 2.3},
+                     {xx, yy + .018, 2.3}, {xx, yy + .018, -2.3}, {.16f, .19f, .22f, 1});
         }
     }
-    // The old horizontal 4x7 platform intersected the steep track downhill.
-    // Narrow side decks follow the existing slope, leaving the track clear.
-    for (int side : {-1, 1}) {
-        const double a = side * 2.70, b = side * 3.95;
-        inrunSideDeck(h, h.start() - 3.8, h.start() + .65, std::min(a, b), std::max(a, b));
+    inrunStructure(h, inrunLayouts[index]);
+    // The continuous service stairs share these short seat-area outriggers.
+    // No additional overlapping/sloping platform covers their treads.
+    {
+        constexpr int side = visual::inrunServiceSide;
         for (double x : {h.start() - 3.4, h.start() + .25}) {
             const double z = side * 3.35, y = h.inrun(x);
-            beam({x, y - 1.10, z}, {x, y - .19, z}, .075, {.32f, .40f, .44f, 1});
-            beam({x, y - .95, side * 2.12}, {x, y - .22, z}, .05, {.43f, .49f, .51f, 1});
+            beam({x, y - .46, side * 2.12}, {x, y - .46, side * 3.65}, .10, {.34f, .41f, .44f, 1});
+            beam({x, y - .46, z}, {x, y - .19, z}, .075, {.32f, .40f, .44f, 1});
         }
     }
     // Position the slim seat immediately under the unchanged Ready pelvis.
@@ -1013,9 +1014,14 @@ void Renderer::terrain(const Hill &h) {
              .035, {.55f, .63f, .67f, 1});
     const double cabinX = h.start() - 2.6, cabinZ = -4.45;
     const double cabinFloor = std::max(h.inrun(cabinX - 1.2), h.inrun(cabinX + 1.2)) + .16;
-    for (double x : {cabinX - 1.08, cabinX + 1.08})
+    for (double x : {cabinX - 1.08, cabinX + 1.08}) {
+        const double y = h.inrun(x) - .46;
+        beam({x, y, -2.12}, {x, y, cabinZ - .75}, .12, {.34f, .41f, .44f, 1});
+        beam({x, y, -2.12}, {x, y - .75, -2.12}, .08, {.34f, .41f, .44f, 1});
+        beam({x, y - .75, -2.12}, {x, y, cabinZ - .75}, .07, {.43f, .49f, .51f, 1});
         for (double z : {cabinZ - .60, cabinZ + .60})
-            beam({x, h.inrun(x) - .18, z}, {x, cabinFloor, z}, .075, {.34f, .43f, .47f, 1});
+            beam({x, y, z}, {x, cabinFloor - .12, z}, .075, {.34f, .43f, .47f, 1});
+    }
     box({cabinX, cabinFloor - .065, cabinZ}, {2.65, .13, 1.62}, {.38f, .44f, .47f, 1});
     box({cabinX, cabinFloor + 1.35, cabinZ}, {2.4, 2.7, 1.5}, {.24f, .31f, .35f, 1});
     box({cabinX, cabinFloor + 2.80, cabinZ}, {2.80, .20, 1.95}, {.88f, .93f, .95f, 1});
@@ -1023,6 +1029,26 @@ void Renderer::terrain(const Hill &h) {
     for (double x : {cabinX - .65, cabinX + .65})
         beam({x, cabinFloor + 1.13, cabinZ + .815}, {x, cabinFloor + 2.16, cabinZ + .815}, .021,
              {.65f, .74f, .78f, 1});
+    // The entrance is on the uphill end, where the horizontal hut floor
+    // meets the service stairs. A short landing bridges to the side deck.
+    box({cabinX - 1.208, cabinFloor + 1.04, cabinZ}, {.03, 2.08, .70}, {.15f, .22f, .25f, 1});
+    box({cabinX - 1.23, cabinFloor + .94, cabinZ + .20}, {.025, .045, .045}, {.70f, .74f, .73f, 1});
+    const double landingX = cabinX - 1.55, landingBase = h.inrun(landingX) - .46;
+    beam({landingX, landingBase, -2.12}, {landingX, landingBase, -4.95}, .08, {.34f, .41f, .44f, 1});
+    if (cabinFloor - .09 > landingBase + .04)
+        for (double z : {-3.60, -4.80})
+            beam({landingX, landingBase, z}, {landingX, cabinFloor - .09, z}, .05, {.34f, .41f, .44f, 1});
+    box({landingX, cabinFloor - .07, -4.20}, {.70, .14, 1.50}, {.43f, .35f, .28f, 1});
+    for (Vec3 p : {Vec3{landingX - .35, cabinFloor, -3.68},
+                   Vec3{landingX - .35, cabinFloor, -4.95},
+                   Vec3{landingX + .35, cabinFloor, -4.95}})
+        beam(p, p + Vec3{0, 1.08, 0}, .035, {.45f, .51f, .53f, 1});
+    for (double height : {.56, 1.04}) {
+        beam({landingX - .35, cabinFloor + height, -3.68},
+             {landingX - .35, cabinFloor + height, -4.95}, .030, {.45f, .51f, .53f, 1});
+        beam({landingX - .35, cabinFloor + height, -4.95},
+             {landingX + .35, cabinFloor + height, -4.95}, .030, {.45f, .51f, .53f, 1});
+    }
     signText("PRO", {cabinX, cabinFloor + .55, cabinZ + .762}, 1.55, .43, -1, {.88f, .94f, .94f, 1});
     // Granbar and red spray share a cached overlay pass with two small textures.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT |
@@ -1043,45 +1069,71 @@ void Renderer::terrain(const Hill &h) {
         distanceMarkerStrip(h, h.atDistance(h.k) + .09, h.k, .48, 18, {.76f, .38f, .36f, .72f});
     distanceMarkerStrip(h, h.kMarkerX + .2, h.k, .75, 20, {.79f, .36f, .34f, .76f});
     sjp::visual::popAttrib();
-    // The source-defined red K-point signs stay at their existing positions.
+    // Keep the original K-point X/Z coordinates. Upright signs clear the
+    // uphill snow across their full width, and their posts embed in the mesh.
     {
         const double x = h.kMarkerX;
+        constexpr double width = 2.45, height = 1.12, depth = .22;
+        const visual::CameraSurface snow(h);
         const Color c{.94f, .28f, .28f, 1};
         for (int side : {-1, 1}) {
-            const double z = side * 20 * s, y = terrainY(h, x, z);
-            beam({x, h.ground(x), z}, {x, h.ground(x) + 3, z}, .08, c);
-            box({x, y + 1.1, z}, {2.45, 1.12, .22}, {.91f, .24f, .24f, 1});
-            signText("K" + std::to_string(h.k), {x, y + 1.12, z - side * .116}, 2.15, .65, side,
+            const double z = side * 20 * s, y = snow.height(x, z);
+            double highestSnow = y;
+            for (double xx : {x - width * .5, x, x + width * .5})
+                for (double zz : {z - depth * .5, z, z + depth * .5})
+                    highestSnow = std::max(highestSnow, snow.height(xx, zz));
+            const double panelY = std::max(y + 1.1, highestSnow + .35 + height * .5);
+            const double postTop = std::max(y + 3.0, panelY + height * .5 + .18);
+            beam({x, y - .30, z}, {x, postTop, z}, .08, c);
+            box({x, panelY, z}, {width, height, depth}, {.91f, .24f, .24f, 1});
+            signText("K" + std::to_string(h.k), {x, panelY + .02, z - side * .116}, 2.15, .65, side,
                      {.98f, .97f, .92f, 1});
-            box({x, y + 3.0, z}, {.24, .20, .24}, {.94f, .95f, .90f, 1});
+            box({x, postTop, z}, {.24, .20, .24}, {.94f, .95f, .90f, 1});
         }
     }
     // Terraced concrete, warm timber seating, railings, sponsored panels and
     // winter spectators give the existing arena scale and a sporting identity.
-    const double arenaNear = std::max(25 * s, 8.0);
+    const auto &stands = grandstandLayouts[index];
+    const visual::CameraSurface arenaSnow(h);
+    const double arenaNear = stands.near;
     for (int side : {-1, 1}) {
         const double front = side * (arenaNear - 1.0);
-        for (int section = 0; section < 14; ++section) {
-            const double x = (79 + section * 6.2) * s, width = 5.8 * s;
+        for (int section = 0; section < visual::GrandstandLayout::sectionCount; ++section) {
+            const auto &stand = stands.section(side, section);
+            const double x = stand.center, width = stand.width;
             const Color accent = section % 3 == 0 ? Color{.86f, .37f, .25f, 1} : Color{.25f, .68f, .65f, 1};
             advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "THE PERFECT V");
-            for (int row = 0; row < 3; ++row) {
-                const double z0 = side * (arenaNear + 1.35 + row * 1.2), z1 = z0 + side * 1.2;
-                const double floor = .65 + row * .70;
-                slopedSlab(h, x - width * .5, x + width * .5, std::min(z0, z1), std::max(z0, z1), -.16, floor,
-                           {.43f, .49f, .52f, 1});
-                slopedSlab(h, x - width * .48, x + width * .48, std::min(z0, z1) + .3, std::max(z0, z1) - .3,
-                           floor + .05, floor + .13, {.40f, .32f, .26f, 1});
-                for (int person = 0; person < 4; ++person)
-                    spectatorBody(spectatorAt(h, side, section, row, person));
+            for (size_t bay = 0; bay < stand.terraces.size(); ++bay) {
+                const auto &t = stand.terraces[bay];
+                const auto *left = bay ? &stand.terraces[bay - 1] :
+                    (section ? &stands.section(side, section - 1).terraces.back() : nullptr);
+                const auto *right = bay + 1 < stand.terraces.size() ? &stand.terraces[bay + 1] :
+                    (section + 1 < visual::GrandstandLayout::sectionCount ?
+                     &stands.section(side, section + 1).terraces.front() : nullptr);
+                for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row) {
+                    const double za = side * (arenaNear + 1.35 + row * 1.2), zb = za + side * 1.2;
+                    const double z0 = std::min(za, zb), z1 = std::max(za, zb), floor = t.floor(row);
+                    terraceSlab(arenaSnow, t.x0, t.x1, z0, z1, floor, {.43f, .49f, .52f, 1});
+                    box({(t.x0 + t.x1) * .5, floor + .09, (z0 + z1) * .5},
+                        {t.x1 - t.x0 - .16, .08, .60}, {.40f, .32f, .26f, 1});
+                }
+                // Lower tiers remain open; substantial drops get one shared
+                // edge railing instead of separate barriers around each row.
+                if (!left || t.base - left->base > 1.0)
+                    standEndGuard(t, t.x0 + .06, side, arenaNear);
+                if (!right || t.base - right->base > 1.0)
+                    standEndGuard(t, t.x1 - .06, side, arenaNear);
+                const double back = side * (arenaNear + 4.90);
+                standGuard({t.x0 + .08, t.floor(2), back}, {t.x1 - .08, t.floor(2), back});
+                const double lip = side * (arenaNear + 1.39);
+                const double frontDrop = t.floor(0) - std::min(arenaSnow.height(t.x0, lip),
+                                                             arenaSnow.height(t.x1, lip));
+                if (frontDrop > 1.15)
+                    standGuard({t.x0 + .08, t.floor(0), lip}, {t.x1 - .08, t.floor(0), lip});
             }
-            const double back = side * (arenaNear + 5.0);
-            beam({x - width * .5, terrainY(h, x - width * .5, back) + 3.4, back},
-                 {x + width * .5, terrainY(h, x + width * .5, back) + 3.4, back}, .046,
-                 {.55f, .64f, .68f, 1});
-            for (double xx : {x - width * .5, x + width * .5})
-                beam({xx, terrainY(h, xx, back) + 2.0, back}, {xx, terrainY(h, xx, back) + 3.45, back}, .045,
-                     {.44f, .54f, .58f, 1});
+            for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row)
+                for (int person = 0; person < 4; ++person)
+                    spectatorBody(spectatorAt(stands, side, section, row, person));
         }
         for (int mast = 0; mast < gfx::ARENA_LIGHT_COLUMNS; ++mast) {
             const auto fixture = visual::floodlightMast(h, mast, side);
@@ -1110,11 +1162,16 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
         treeBranch(tree, tree.tiers - 1, wind * bend);
     }
     sjp::visual::disable(sjp::gfx::CULL_FACE);
+    size_t venue = 0;
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (h.id == hills()[i].id)
+            venue = i;
+    const auto &stands = grandstandLayouts[venue];
     for (int side : {-1, 1})
         for (int section = 0; section < 14; ++section)
             for (int row = 0; row < 3; ++row)
                 for (int person = 0; person < 4; ++person) {
-                    const Spectator p = spectatorAt(h, side, section, row, person);
+                    const Spectator p = spectatorAt(stands, side, section, row, person);
                     if (!p.present || !p.animated)
                         continue;
                     const double s = p.size;

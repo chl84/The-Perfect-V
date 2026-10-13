@@ -29,7 +29,7 @@ target_compile_options(tpv_vulkan PRIVATE -Wall -Wextra -Wpedantic)
 add_library(ski_physics src/physics.cpp src/original_physics.cpp src/original_pose.cpp src/original_scoring.cpp src/original_controls.cpp src/original_wind.cpp src/original_ai.cpp src/original_outrun.cpp src/competition.cpp src/competition_storage.cpp src/original_replay.cpp src/original_skeleton.cpp)
 target_include_directories(ski_physics PUBLIC src)
 target_compile_options(ski_physics PRIVATE -Wall -Wextra -Wpedantic)
-add_executable(the-perfect-v src/main.cpp src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp src/renderer_effects.cpp src/renderer_ui.cpp src/storage.cpp src/audio.cpp)
+add_executable(the-perfect-v src/main.cpp src/renderer.cpp src/renderer_environment.cpp src/renderer_inrun.cpp src/renderer_athlete.cpp src/renderer_effects.cpp src/renderer_ui.cpp src/storage.cpp src/audio.cpp)
 target_link_libraries(the-perfect-v PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
 target_compile_options(the-perfect-v PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_definitions(the-perfect-v PRIVATE SJP_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -37,7 +37,7 @@ include(CTest)
 option(TPV_BUILD_RENDER_PROBE "Build explicitly invoked graphics diagnostics" OFF)
 if(TPV_BUILD_RENDER_PROBE)
   add_executable(render-probe tools/render_probe.cpp src/storage.cpp
-    src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp
+    src/renderer.cpp src/renderer_environment.cpp src/renderer_inrun.cpp src/renderer_athlete.cpp
     src/renderer_effects.cpp src/renderer_ui.cpp)
   target_link_libraries(render-probe PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
   target_compile_options(render-probe PRIVATE -Wall -Wextra -Wpedantic)
@@ -62,7 +62,7 @@ if(BUILD_TESTING)
   add_test(NAME presentation-timing COMMAND presentation-timing-tests)
   # CPU command model supplies drawing/SDL entry points; it does not use a GPU.
   add_executable(renderer-command-tests tests/renderer_command_tests.cpp
-    src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp
+    src/renderer.cpp src/renderer_environment.cpp src/renderer_inrun.cpp src/renderer_athlete.cpp
     src/renderer_effects.cpp src/renderer_ui.cpp)
   target_link_libraries(renderer-command-tests PRIVATE ski_physics Freetype::Freetype)
   target_link_libraries(renderer-command-tests PRIVATE PkgConfig::SDL3)
