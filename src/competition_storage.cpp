@@ -94,10 +94,13 @@ bool saveCompetition(const std::string &path, const Competition &cup) {
         << w.displayAngle << ' ' << w.angularStep << ' ' << w.angularCap << ' ' << w.frameCounter
         << ' ' << unsigned(w.weatherIntensity) << '\n';
     writeArray(out, cup.sharedAuxiliary);
+    out << int(cup.visualSelection.time) << ' ' << int(cup.visualSelection.weather) << ' '
+        << int(cup.eventEnvironment.time) << ' ' << int(cup.eventEnvironment.weather) << ' '
+        << cup.eventEnvironment.seed << '\n';
     const std::string payload = out.str(), temporary = path + ".tmp";
     std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
     if (!file) return false;
-    file << "SJP_COMPETITION_2\n" << checksum(payload) << '\n' << payload;
+    file << "SJP_COMPETITION_3\n" << checksum(payload) << '\n' << payload;
     file.flush();
     if (!file) { file.close(); std::error_code ec; std::filesystem::remove(temporary, ec); return false; }
     file.close();
@@ -114,9 +117,10 @@ bool loadCompetition(const std::string &path, Competition &cup, std::string *err
     if (ec || bytes > 2 * 1024 * 1024) return fail();
     std::ifstream file(path, std::ios::binary);
     std::string magic, hashLine;
-    if (!std::getline(file, magic) || (magic != "SJP_COMPETITION_1" && magic != "SJP_COMPETITION_2") ||
+    if (!std::getline(file, magic) || (magic != "SJP_COMPETITION_1" && magic != "SJP_COMPETITION_2" &&
+                                     magic != "SJP_COMPETITION_3") ||
         !std::getline(file, hashLine)) return fail();
-    const int version = magic == "SJP_COMPETITION_2" ? 2 : 1;
+    const int version = magic == "SJP_COMPETITION_3" ? 3 : magic == "SJP_COMPETITION_2" ? 2 : 1;
     uint64_t hash;
     std::istringstream hashInput(hashLine);
     if (!(hashInput >> hash) || (hashInput >> std::ws && !hashInput.eof())) return fail();
@@ -195,6 +199,16 @@ bool loadCompetition(const std::string &path, Competition &cup, std::string *err
                         w.angularCap, next.sharedAuxiliary[0], next.sharedAuxiliary[1]})
         if (!std::isfinite(value) || std::abs(value) > 100000) return fail();
     if (w.speed < 0 || w.variationStep < 0 || w.angularCap < 0 || w.angularCap > 1) return fail();
+    if (version >= 3) {
+        int time, weather, selectedTime, selectedWeather;
+        if (!(in >> selectedTime >> selectedWeather >> time >> weather >> next.eventEnvironment.seed))
+            return fail();
+        next.visualSelection = {environment::TimeOfDay(selectedTime), environment::Weather(selectedWeather)};
+        next.eventEnvironment.time = environment::TimeOfDay(time);
+        next.eventEnvironment.weather = environment::Weather(weather);
+        if (!environment::valid(next.visualSelection) || !environment::valid(next.eventEnvironment))
+            return fail();
+    }
     in >> std::ws;
     if (!in.eof()) return fail();
     cup = std::move(next);

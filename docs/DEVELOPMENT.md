@@ -13,9 +13,10 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers seven standalone suites:
+Without external fixtures, CTest registers eight standalone suites:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
+- `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
 - `presentation-timing`: frame deadlines without accumulated timer overshoot, recovery after a stall and camera smoothing independent of frame cadence.
 - `camera-paths`: finished camera 2 rails on all 32 hills, continuous spline velocity, snow clearance and sightlines during normal jumps and falls with varying wind and frame cadence.
 - `render-interpolation`: presentation interpolation between simulation ticks.
@@ -50,7 +51,7 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
-relative mouse mode and Ready/Next button hit testing. The seven standalone suites
+relative mouse mode and Ready/Next button hit testing. The eight standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
@@ -166,22 +167,42 @@ competitions and replay files stay available. The executable prints the actual
 save directory at startup; `--data-dir PATH` overrides it. Native `.SJR` replay
 and `.SJC` competition formats also retain their identifiers for compatibility.
 
-## Cosmetic wind and snowfall
+## Time, weather and wind
 
-The windsock uses the same smoothed x/y wind angle as the HUD arrow, with light
-cloth sag and flutter. Snow and moving boughs use that direction as well. These
-vectors are drawing inputs and are never fed back into the simulation.
+Time and weather are cosmetic. Only the existing original wind affects physics,
+AI, input, scoring or jump distance; cosmetic selection uses its own stateless
+hash without advancing gameplay RNG. Day and sun are the defaults. Settings let
+the player independently choose Morning, Day, Evening, Night or Random, and
+Sunny/clear, Overcast, Snowfall, Fog or Random. The controls preview the chosen
+lighting and save with the existing preferences.
 
-Light snowfall is selected once per jump with approximately 15 percent probability,
-using a cosmetic hash of the existing jump seed without advancing gameplay RNG.
-A selected jump keeps snowfall throughout. A compact world-space volume considers
-at most 225 atmospheric flakes and draws only those inside the camera view.
-Sizes and fall speeds vary, with weak wind drift and a mostly downward fall;
-small screen footprints keep them readable without large foreground dots. Soft
-volume and lifetime fades prevent popping, and no extra textures are used. Their
-animation uses the frame/replay clock, so pause freezes flakes and seeking is repeatable. Menus
-do not display jump snowfall. Original replays reuse their seed; native recordings
-without original metadata use a stable visual hash of their recorded frames.
+Practice resolves random choices once per new jump. A cup resolves choices once
+per event and retains them for all participants, team member groups and both
+rounds. Its resolved conditions and selection policy survive checkpoint/resume.
+The next event gets a fresh draw, including a second season on the same hill.
+Random times are equally weighted. Random weather uses 45% sunny, 30% overcast,
+15% snowfall and 10% fog. Native replays store the resolved conditions and cosmetic
+seed, so seeking, camera changes and changed preferences cannot reselect weather.
+Existing replay files and version 1/2 cup saves remain readable, defaulting their
+missing cosmetic metadata to day and sun. Original .RPL exports retain their
+original bytes and cannot carry this modern atmosphere metadata.
+
+Four compact lighting presets set sun/moon direction, sky gradient, ambient and
+directional light, fog color and visibility. Overcast, snow and fog reduce direct
+light and soften the single silhouette shadow. Shadow projection uses the same
+light direction and the local receiver tangent. A broad arena fill makes night
+jumping readable. The sun/moon disc and a small fixed star field are projected as
+background primitives when in view; clouds suppress them. These reuse the existing
+two-light shader and fog blend, without offscreen passes, shadow maps, volumetric
+clouds or new textures. Time and weather do not alter terrain, camera rails or
+collision geometry, and changes reuse the cached terrain meshes.
+
+The windsock, flakes and moving boughs still use the same smoothed x/y wind angle
+as the HUD arrow. Snowfall uses the existing compact world-space volume: at most
+225 candidate flakes, with only visible flakes drawn. Sizes and fall speeds vary,
+with weak wind drift and a mostly downward fall. Soft volume and lifetime fades
+prevent popping. Flake animation uses the frame/replay clock, so pause freezes it
+and seeking is repeatable. Menus preview lighting/fog without snowfall particles.
 
 ## Camera 2 rails
 

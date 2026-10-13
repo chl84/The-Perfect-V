@@ -108,9 +108,10 @@ CupSetup defaultTeamCupSetup() {
     return setup;
 }
 bool Competition::start(const CupSetup &setup, uint32_t skillsSeed, uint32_t weatherSeed,
-                        uint32_t hillFormSeed, std::string *error) {
+                        uint32_t hillFormSeed, std::string *error, environment::Selection environment) {
     if (!validateCupSetup(setup, error)) return false;
     Competition next;
+    next.visualSelection = sjp::environment::valid(environment) ? environment : sjp::environment::Selection{};
     next.config = setup;
     std::sort(next.config.hills.begin(), next.config.hills.end());
     next.competitors.resize(setup.participants.size());
@@ -141,6 +142,8 @@ bool Competition::start(const CupSetup &setup, uint32_t skillsSeed, uint32_t wea
     return true;
 }
 void Competition::initializeEvent(uint32_t weatherSeed, uint32_t hillFormSeed) {
+    eventEnvironment = environment::resolve(
+        visualSelection, environment::hash(weatherSeed ^ uint32_t(eventIndex) * 0x9e3779b9U));
     // Keep the argument for caller compatibility. The original Randomize is
     // in hill setup; subsequent hill-form draws continue that weather RNG.
     (void)hillFormSeed;

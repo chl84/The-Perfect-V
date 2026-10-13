@@ -108,6 +108,8 @@ void command(const char *name, bool allowed = false) {
 uint64_t positionHash = 1469598103934665603ULL, particlePositionHash = 1469598103934665603ULL;
 size_t particleVertices = 0;
 size_t completedFrames = 0;
+std::array<float, 3> primaryLight{}, globalAmbient{};
+float fogStart = 0, fogEnd = 0;
 bool captureBoards = false;
 bool captureCamera = false;
 sjp::Vec3 cameraEye;
@@ -295,6 +297,10 @@ void sjp::gfx::endList(void) {
 void sjp::gfx::fogf(sjp::gfx::Enum pname, float param) {
     audit::command("sjp::gfx::fogf inside sjp::gfx::begin", false);
     audit::finite(param);
+    if (pname == sjp::gfx::FOG_START)
+        audit::fogStart = param;
+    else if (pname == sjp::gfx::FOG_END)
+        audit::fogEnd = param;
 }
 void sjp::gfx::fogfv(sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::fogfv inside sjp::gfx::begin", false);
@@ -357,11 +363,15 @@ void sjp::gfx::lightModelfv(sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::lightModelfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
+    if (pname == sjp::gfx::LIGHT_MODEL_AMBIENT)
+        std::copy_n(params, 3, audit::globalAmbient.begin());
 }
 void sjp::gfx::lightfv(sjp::gfx::Enum light, sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::lightfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
+    if (light == sjp::gfx::LIGHT0 && pname == sjp::gfx::POSITION)
+        std::copy_n(params, 3, audit::primaryLight.begin());
 }
 void sjp::gfx::lineWidth(float width) {
     audit::command("sjp::gfx::lineWidth inside sjp::gfx::begin", false);
@@ -749,7 +759,7 @@ int main() {
             const auto input = sim.frame();
             const auto hashAt = [&](uint32_t seed, float windAngle, float elapsed, double wallTime,
                                     int camera = 0, float height = 0) {
-                r.setJumpWeather(seed);
+                r.setJumpWeather(seed, {sjp::environment::TimeOfDay::Day, sjp::environment::Weather::Random});
                 auto f = input;
                 f.windSpeed = 3;
                 f.windAngle = windAngle;
@@ -762,7 +772,7 @@ int main() {
                 audit::particlePositionHash = 1469598103934665603ULL;
                 r.begin(sim.hill(), f, wallTime, camera, false);
                 audit::balanced();
-                // Fan meshes contain snow and the unchanged jumper shadow;
+                // The daytime view here contains powder/snow fan meshes;
                 // skip trees, flags and crowd animation driven by wall time.
                 return std::pair<size_t, uint64_t>{audit::particleVertices - vertices,
                                                    audit::particlePositionHash};
@@ -793,6 +803,42 @@ int main() {
                                input.windAngle == after.windAngle && input.windSpeed == after.windSpeed &&
                                sim.originalCounter == 1,
                            "Visual weather mutated the simulation");
+        }
+        {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(2, 0);
+            const auto before = sim.frame();
+            r.begin(sim.hill(), before, 0, 0, false);
+            r.finish();
+            const auto cached = audit::nextList;
+            for (int time = 0; time < 4; ++time)
+                for (int weather = 0; weather < 4; ++weather) {
+                    const sjp::environment::Conditions conditions{
+                        sjp::environment::TimeOfDay(time), sjp::environment::Weather(weather), 98765};
+                    r.setEnvironment(conditions, true);
+                    r.resetCamera();
+                    r.begin(sim.hill(), before, 0, 0, false);
+                    r.finish();
+                    audit::balanced();
+                    const auto expected = sjp::visual::environmentLight(conditions);
+                    audit::require(r.environmentConditions() == conditions && audit::nextList == cached,
+                                   "Changing atmosphere rebuilt hill geometry or reselected conditions");
+                    audit::require(std::abs(audit::primaryLight[0] - expected.direction.x) < 1e-6 &&
+                                       std::abs(audit::primaryLight[1] - expected.direction.y) < 1e-6 &&
+                                       std::abs(audit::primaryLight[2] - expected.direction.z) < 1e-6 &&
+                                       std::abs(audit::globalAmbient[0] - expected.ambient.x) < 1e-6 &&
+                                       std::abs(audit::fogEnd - expected.fogEnd * sim.hill().scale()) < 1e-3,
+                                   "Renderer ignored the chosen time or weather lighting");
+                }
+            const auto after = sim.frame();
+            audit::require(before.x == after.x && before.y == after.y && before.pose == after.pose &&
+                               before.windSpeed == after.windSpeed && before.windAngle == after.windAngle &&
+                               sim.originalCounter == 1,
+                           "Time or cosmetic weather affected jumping physics or wind");
+            r.setJumpWeather(98765);
+            audit::require(r.environmentConditions().time == sjp::environment::TimeOfDay::Day &&
+                               r.environmentConditions().weather == sjp::environment::Weather::Sunny,
+                           "A default jump selected random weather instead of day and sun");
         }
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");
         audit::require(audit::maximumLists <= 2, "Terrain cache retains more than two venues");

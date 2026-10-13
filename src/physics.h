@@ -1,4 +1,5 @@
 #pragma once
+#include "environment.h"
 #include "original_ai.h"
 #include "original_controls.h"
 #include "original_outrun.h"
@@ -108,6 +109,8 @@ struct Replay {
     Result result;
     std::vector<Frame> frames;
     std::vector<uint8_t> originalRpl; // Optional original input recording for lossless later export.
+    bool hasEnvironment = false;
+    environment::Conditions environment;
 };
 double scoreStyle(std::array<double, 5> judges);
 double distancePoints(const Hill &, double distance);
@@ -147,7 +150,7 @@ class Simulation {
     const OriginalWind &initialWeather() const { return recordingWeather; }
     uint32_t initialRandomSeed() const { return recordingSeed; }
     float originalRecordedDistance() const { return recordingDistance; }
-    Replay replay() const { return {hillIndex, baseWind, result, frames, {}}; }
+    Replay replay() const { return {hillIndex, baseWind, result, frames, {}, false, {}}; }
 
   private:
     friend struct RuntimeComparisonAccess;

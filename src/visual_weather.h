@@ -5,11 +5,7 @@
 namespace sjp::visual {
 // Cosmetic hash only: never advances OriginalRandom or a simulation.
 inline uint32_t weatherHash(uint32_t seed) {
-    seed ^= seed >> 16;
-    seed *= 0x7feb352dU;
-    seed ^= seed >> 15;
-    seed *= 0x846ca68bU;
-    return seed ^ (seed >> 16);
+    return environment::hash(seed);
 }
 inline bool snowForJump(uint32_t seed) {
     return weatherHash(seed ^ 0x53a9d107U) % 10000U < 1500U;

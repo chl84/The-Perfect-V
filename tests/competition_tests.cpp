@@ -253,7 +253,7 @@ void beforeBoardCheckpoint(const std::filesystem::path &directory, const std::fi
                 restored.entries()[0].results[0].beforeTakeoff && restored.entries()[0].eventTotal == -84 &&
                 restored.entries()[0].results[0].judges == contact.judges,
             "Version2 checkpoints preserve before-board result provenance and untouched judges");
-    require(contents(path).find("SJP_COMPETITION_2\n") == 0, "Write current checkpoint version2");
+    require(contents(path).find("SJP_COMPETITION_3\n") == 0, "Write current checkpoint version3");
     require(loadCompetition(legacyPath.string(), restored) && restored.currentJumper() == 0 &&
                 restored.preparedJumpSeed() == 123456 && !restored.entries()[0].results[0].beforeTakeoff,
             "Version1 checkpoints remain readable with absent before-board flag defaultingfalse");

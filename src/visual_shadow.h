@@ -92,12 +92,15 @@ struct ShadowMask {
     }
 };
 
-inline std::vector<ShadowCapsule> shadowSilhouette(const OriginalSkeleton &skeleton) {
+inline std::vector<ShadowCapsule> shadowSilhouette(const OriginalSkeleton &skeleton,
+                                                Vec3 cast = {.32, 0, -.25}, double clearance = 0,
+                                                double slope = 0) {
     auto project = [&](OriginalJoint joint) {
         const Vec3 p = skeleton[joint];
         // Apply one projection direction to every joint, including feet below
         // the pose origin. The whole silhouette follows the displayed pose.
-        return Vec3{p.x + p.y * .32, 0, p.z - p.y * .25};
+        const double distance = (clearance + p.y - slope * p.x) / std::max(.05, 1 + slope * cast.x);
+        return Vec3{p.x + distance * cast.x, 0, p.z + distance * cast.z};
     };
     std::vector<ShadowCapsule> parts;
     parts.reserve(17);

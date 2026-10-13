@@ -2,6 +2,7 @@
 #include "physics.h"
 #include "draw_commands.h"
 #include "camera_path.h"
+#include "visual_environment.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
@@ -40,7 +41,9 @@ class Renderer {
     void finish();
     void capture(const std::string &path);
     void resetCamera() { cameraInit = false; }
-    void setJumpWeather(uint32_t seed);
+    void setJumpWeather(uint32_t seed, environment::Selection selection = {});
+    void setEnvironment(environment::Conditions, bool restart = false);
+    const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
     void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
     int width = 1440, height = 900;
     float uiScale = 1, offsetX = 0, offsetY = 0;
@@ -74,6 +77,8 @@ class Renderer {
     void athlete(const Hill &, const Frame &, bool ghost);
     void effects(const Hill &, const Frame &, double time, bool showWeather);
     bool snowfall = false;
+    environment::Conditions sceneEnvironment;
+    visual::EnvironmentLight lighting = visual::environmentLight({});
     uint32_t snowfallSeed = 0;
     struct VisualParticle {
         Vec3 origin, velocity;

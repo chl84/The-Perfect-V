@@ -77,8 +77,9 @@ void windsock(Vec3 origin, const Frame &frame, double time) {
     }
 }
 // A sky gradient supplies the atmospheric backdrop without moving the camera.
-void sky(int width, int height) {
-    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT);
+void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye, Vec3 target) {
+    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT |
+                         sjp::gfx::COLOR_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::depthMask(sjp::gfx::FALSE);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
@@ -95,24 +96,78 @@ void sky(int width, int height) {
     for (int band = 0; band <= 24; ++band) {
         const float t = band / 24.f;
         const float smooth = t * t * (3 - 2 * t);
-        col({.79f - smooth * .38f, .86f - smooth * .25f, .88f - smooth * .11f, 1});
+        const Vec3 color = visual::mix(light.skyHorizon, light.skyTop, smooth);
+        col({float(color.x), float(color.y), float(color.z), 1});
         sjp::gfx::vertex2f(0, height * t);
         sjp::gfx::vertex2f(width, height * t);
     }
     sjp::gfx::end();
+    const Vec3 forward = (target - eye).normalized(), right = cross(forward, {0, 1, 0}).normalized(),
+               up = cross(right, forward).normalized();
+    auto screen = [&](Vec3 direction, double &x, double &y) {
+        const double depth = dot(direction, forward), halfFov = std::tan(48 * PI / 360);
+        if (depth <= .01)
+            return false;
+        x = width * .5 + dot(direction, right) / (depth * halfFov) * height * .5;
+        y = height * .5 + dot(direction, up) / (depth * halfFov) * height * .5;
+        return x > -20 && x < width + 20 && y > -20 && y < height + 20;
+    };
+    sjp::gfx::enable(sjp::gfx::BLEND);
+    sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    if (light.celestialVisibility > 0) {
+        double x, y;
+        if (screen(light.direction, x, y)) {
+            const double radius = height * .0055;
+            const Color color = light.moon ? Color{.83f, .89f, .98f, 1} : Color{1, .91f, .69f, 1};
+            sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
+            col({color.r, color.g, color.b, .12f});
+            sjp::gfx::vertex2f(float(x), float(y));
+            col({color.r, color.g, color.b, 0});
+            for (int i = 0; i <= 24; ++i)
+                sjp::gfx::vertex2f(float(x + std::cos(i * 2 * PI / 24) * radius * 5),
+                                  float(y + std::sin(i * 2 * PI / 24) * radius * 5));
+            sjp::gfx::end();
+            sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
+            col(color);
+            sjp::gfx::vertex2f(float(x), float(y));
+            for (int i = 0; i <= 24; ++i)
+                sjp::gfx::vertex2f(float(x + std::cos(i * 2 * PI / 24) * radius),
+                                  float(y + std::sin(i * 2 * PI / 24) * radius));
+            sjp::gfx::end();
+        }
+        if (light.moon) {
+            sjp::gfx::begin(sjp::gfx::QUADS);
+            for (uint32_t i = 0; i < 48; ++i) {
+                const double azimuth = (environment::hash(i + 701) / double(UINT32_MAX)) * 2 * PI;
+                const double altitude = .2 + (environment::hash(i + 1701) / double(UINT32_MAX)) * 1.2;
+                const Vec3 star{std::cos(azimuth) * std::cos(altitude), std::sin(altitude),
+                                std::sin(azimuth) * std::cos(altitude)};
+                if (!screen(star, x, y))
+                    continue;
+                col({.75f, .82f, .94f, .58f});
+                const float r = .6f + float(i % 3) * .2f;
+                for (const auto &p : std::array<std::array<float, 2>, 4>{{{-r, -r}, {r, -r}, {r, r}, {-r, r}}})
+                    sjp::gfx::vertex2f(float(x) + p[0], float(y) + p[1]);
+            }
+            sjp::gfx::end();
+        }
+    }
     sjp::gfx::popMatrix();
     sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
     sjp::gfx::popMatrix();
     sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
     sjp::gfx::popAttrib();
 }
-void jumperShadow(const Hill &h, const Frame &f) {
+void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight &light) {
     const bool onInrun = f.x <= 0;
     const auto surface = [&](double x) { return onInrun ? h.inrun(x) : h.ground(x); };
     const double clearance = std::max(0.0, f.y - surface(f.x));
-    const double offsetX = onInrun ? 0 : std::min(14.0, clearance * .32);
-    const double offsetZ = onInrun ? 0 : -std::min(10.0, clearance * .25);
-    const double softness = .025 + std::min(.18, clearance * .007);
+    const double slope = onInrun ? h.inrunSlope(f.x) : h.slope(f.x);
+    const Vec3 cast{-light.direction.x / light.direction.y, 0, -light.direction.z / light.direction.y};
+    const double facing = dot(Vec3{-slope, 1, 0}.normalized(), light.direction);
+    if (facing <= .06)
+        return;
+    const double softness = (.025 + std::min(.18, clearance * .007)) * light.shadowSoftness;
     const float visibility = float(std::exp(-clearance / 85));
     // Use exactly the same displayed joints as the athlete. Shadow projection
     // is presentation only; neither this pose nor the origin is changed.
@@ -126,7 +181,7 @@ void jumperShadow(const Hill &h, const Frame &f) {
     const auto skeleton =
         f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
     visual::ShadowMask silhouette;
-    silhouette.build(visual::shadowSilhouette(skeleton), softness);
+    silhouette.build(visual::shadowSilhouette(skeleton, cast, clearance, slope), softness);
     const visual::CameraSurface receiver(h);
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::COLOR_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
@@ -137,12 +192,12 @@ void jumperShadow(const Hill &h, const Frame &f) {
     sjp::gfx::enable(sjp::gfx::POLYGON_OFFSET_FILL);
     sjp::gfx::polygonOffset(-1, -1);
     const bool central = onInrun ||
-                         std::max(std::abs(offsetZ + silhouette.z),
-                                  std::abs(offsetZ + silhouette.z + (visual::ShadowMask::rows - 1) * silhouette.dz)) <=
+                         std::max(std::abs(silhouette.z),
+                                  std::abs(silhouette.z + (visual::ShadowMask::rows - 1) * silhouette.dz)) <=
                              19 * h.scale();
     std::array<double, visual::ShadowMask::columns> xs{}, ground{}, ramp{};
     for (int column = 0; column < visual::ShadowMask::columns; ++column) {
-        xs[size_t(column)] = f.x + offsetX + silhouette.x + column * silhouette.dx;
+        xs[size_t(column)] = f.x + silhouette.x + column * silhouette.dx;
         if (onInrun)
             xs[size_t(column)] = std::min(0.0, xs[size_t(column)]);
         if (central) {
@@ -152,11 +207,11 @@ void jumperShadow(const Hill &h, const Frame &f) {
     }
     const auto shadowVertex = [&](int column, int row) {
         const double x = xs[size_t(column)];
-        double z = offsetZ + silhouette.z + row * silhouette.dz;
+        double z = silhouette.z + row * silhouette.dz;
         if (onInrun)
             z = clamp(z, -2.25, 2.25);
         const float alpha = silhouette.coverage[size_t(row * visual::ShadowMask::columns + column)];
-        col({.09f, .15f, .20f, alpha * visibility * .38f});
+        col({.09f, .15f, .20f, alpha * visibility * float(light.shadowStrength * std::min(1.0, facing * 4))});
         const double y = central ? (std::abs(z) <= 2.3 ? ramp[size_t(column)] : ground[size_t(column)])
                                  : receiver.height(x, z);
         sjp::gfx::vertex3d(x, y + .012, z);
@@ -276,7 +331,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     height = std::max(1, height);
     sjp::gfx::beginFrame(width, height);
     sjp::gfx::viewport(0, 0, width, height);
-    sjp::gfx::clearColor(.79f, .86f, .88f, 1);
+    sjp::gfx::clearColor(float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1);
     sjp::gfx::clear(sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::DEPTH_BUFFER_BIT);
     sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
     sjp::gfx::loadIdentity();
@@ -285,7 +340,6 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::frustum(-top * aspect, top * aspect, -top, top, near, 2400 * h.scale());
     sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
     sjp::gfx::loadIdentity();
-    sky(width, height);
     double s = h.scale();
     const visual::ChaseCameraPath *chasePath = nullptr;
     if (!panorama && camera == 1) {
@@ -325,27 +379,31 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
         target = target + (wantTarget - target) * blend;
     }
     cameraTime = time;
+    sky(width, height, lighting, eye, target);
     lookAt(eye, target);
     sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::enable(sjp::gfx::LIGHTING);
     sjp::gfx::enable(sjp::gfx::LIGHT0);
     sjp::gfx::enable(sjp::gfx::COLOR_MATERIAL);
-    float ambient[] = {.28f, .34f, .40f, 1}, diffuse[] = {.78f, .73f, .64f, 1},
-            position[] = {-120, 240, 150, 0}, sunAmbient[] = {.025f, .028f, .032f, 1};
+    float ambient[] = {float(lighting.ambient.x), float(lighting.ambient.y), float(lighting.ambient.z), 1},
+          diffuse[] = {float(lighting.direct.x), float(lighting.direct.y), float(lighting.direct.z), 1},
+          position[] = {float(lighting.direction.x), float(lighting.direction.y), float(lighting.direction.z), 0},
+          sunAmbient[] = {0, 0, 0, 1};
     sjp::gfx::lightModelfv(sjp::gfx::LIGHT_MODEL_AMBIENT, ambient);
     sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::AMBIENT, sunAmbient);
     sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::DIFFUSE, diffuse);
     sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::POSITION, position);
-    float fill[] = {.13f, .19f, .24f, 1}, fillPosition[] = {90, 110, -160, 0};
+    float fill[] = {float(lighting.fill.x), float(lighting.fill.y), float(lighting.fill.z), 1},
+          fillPosition[] = {90, 110, -160, 0};
     sjp::gfx::enable(sjp::gfx::LIGHT1);
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::DIFFUSE, fill);
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::POSITION, fillPosition);
     sjp::gfx::enable(sjp::gfx::FOG);
-    float fog[] = {.79f, .86f, .88f, 1};
+    float fog[] = {float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1};
     sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, fog);
     sjp::gfx::fogi(sjp::gfx::FOG_MODE, sjp::gfx::LINEAR);
-    sjp::gfx::fogf(sjp::gfx::FOG_START, 170 * s);
-    sjp::gfx::fogf(sjp::gfx::FOG_END, 1050 * s);
+    sjp::gfx::fogf(sjp::gfx::FOG_START, lighting.fogStart * s);
+    sjp::gfx::fogf(sjp::gfx::FOG_END, lighting.fogEnd * s);
     terrain(h);
     scenery(h, f, time);
     // The start signal and the moving windsock.
@@ -358,7 +416,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
     const Frame display = displayedAthleteFrame(h, f);
-    jumperShadow(h, display);
+    jumperShadow(h, display, lighting);
     athlete(h, display, false);
     if (ghost && gf) {
         sjp::gfx::depthMask(sjp::gfx::FALSE);

@@ -44,7 +44,8 @@ CupSetup defaultTeamCupSetup();
 class Competition {
   public:
     bool start(const CupSetup &, uint32_t skillsSeed, uint32_t weatherSeed,
-               uint32_t hillFormSeed, std::string *error = nullptr);
+               uint32_t hillFormSeed, std::string *error = nullptr,
+               environment::Selection environment = {});
     // hillFormSeed is retained for API compatibility; form continues the
     // post-weather RNG, because original hill setup Randomize precedes both.
     bool active() const { return started && !finished; }
@@ -72,6 +73,7 @@ class Competition {
     void prepareJump(uint32_t seed) { jumpSeed = seed; jumpSeedPrepared = true; }
     bool hasPreparedJump() const { return jumpSeedPrepared; }
     uint32_t preparedJumpSeed() const { return jumpSeed; }
+    const environment::Conditions &visualEnvironment() const { return eventEnvironment; }
     bool submitResult(const Result &, std::string *error = nullptr);
     bool advanceEvent(uint32_t weatherSeed, uint32_t hillFormSeed);
 
@@ -88,6 +90,8 @@ class Competition {
     bool started = false, eventFinished = false, finished = false;
     uint32_t jumpSeed = 0;
     bool jumpSeedPrepared = false;
+    environment::Selection visualSelection;
+    environment::Conditions eventEnvironment;
     void initializeEvent(uint32_t weatherSeed, uint32_t hillFormSeed);
     void scoreEvent();
     void makeTeamGroupOrder();

@@ -6,12 +6,15 @@ Cup competitions, CPU opponents, saved records and replay playback. The scenery,
 athlete, snow effects and sports interface use a modern stylized presentation.
 The compact HUD keeps the venue, wind, speed and distance at the screen edges,
 leaving the jumper clear of coaching text and progress meters.
+Settings include morning, day, evening and night, with sunny, overcast, snowfall
+and fog conditions. Day and sun are the defaults; time and weather are cosmetic.
+Random choices stay fixed per practice jump and throughout each cup event.
 
 The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
 2.10. The original game's executable, data, reference recordings and analysis
 captures are not distributed in this repository and are not needed to play.
 
-Vulkan/SDL3 is now the version on `main`. The seven standalone test suites and
+Vulkan/SDL3 is now the version on `main`. The eight standalone test suites and
 the full-game Vulkan smoke test passed on Intel Iris Xe; long-session stability
 and other GPUs remain unverified. See [migration notes](docs/vulkan-sdl3-migration.md).
 

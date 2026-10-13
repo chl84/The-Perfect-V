@@ -24,13 +24,13 @@ void vertex(Vec3 p) {
 }
 // Soft, untextured billboards: the centre carries the opacity, the shared
 // outside ring is transparent. Fixed small meshes remain sharp when close.
-void powder(Vec3 center, Vec3 right, Vec3 up, double radius, double opacity) {
+void powder(Vec3 center, Vec3 right, Vec3 up, double radius, double opacity, Vec3 color) {
     if (opacity <= .001)
         return;
     sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
-    sjp::gfx::color4f(.91f, .97f, 1, float(opacity));
+    sjp::gfx::color4f(float(color.x), float(color.y), float(color.z), float(opacity));
     vertex(center);
-    sjp::gfx::color4f(.91f, .97f, 1, 0);
+    sjp::gfx::color4f(float(color.x), float(color.y), float(color.z), 0);
     for (int corner = 0; corner <= 6; ++corner) {
         const double angle = corner * PI / 3;
         vertex(center + right * (std::cos(angle) * radius) + up * (std::sin(angle) * radius));
@@ -51,9 +51,18 @@ OriginalSkeleton effectSkeleton(const Hill &h, const Frame &f) {
 }
 } // namespace
 
-void Renderer::setJumpWeather(uint32_t seed) {
-    snowfallSeed = visual::weatherHash(seed);
-    snowfall = visual::snowForJump(seed);
+void Renderer::setJumpWeather(uint32_t seed, environment::Selection selection) {
+    setEnvironment(environment::resolve(selection, seed), true);
+}
+void Renderer::setEnvironment(environment::Conditions conditions, bool restart) {
+    if (!environment::valid(conditions))
+        conditions = {};
+    if (!restart && sceneEnvironment == conditions)
+        return;
+    sceneEnvironment = conditions;
+    lighting = visual::environmentLight(conditions);
+    snowfallSeed = visual::weatherHash(conditions.seed);
+    snowfall = conditions.weather == environment::Weather::Snowfall;
     snowParticles.clear();
     effectsInitialized = false;
 }
@@ -75,6 +84,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
     }
     const double windSpeed = clamp(double(f.windSpeed), 0.0, 18.0);
     const Vec3 wind = visual::windDirection(f) * windSpeed;
+    const Vec3 powderColor = lighting.moon ? Vec3{.56, .66, .82} : Vec3{.91, .97, 1};
     const OriginalSkeleton skeleton = effectSkeleton(h, f);
     const Vec3 origin{f.x, f.y, 0};
     const auto snowSurface = [&](double x) { return x <= 0 ? h.inrun(x) : h.ground(x); };
@@ -140,7 +150,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
         const double surface = snowSurface(position.x);
         if (position.y < surface + .015)
             continue;
-        powder(position, right, up, particle.size * (1 + life * 2.4), .62 * std::pow(1 - life, 1.2));
+        powder(position, right, up, particle.size * (1 + life * 2.4), .62 * std::pow(1 - life, 1.2), powderColor);
     }
 
     // Ongoing ski powder is analytic rather than emitted per render call.
@@ -157,7 +167,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
                 const double x = contact.x - double(f.vx) * age + wind.x * age * .15 - age * 1.4;
                 const double y = snowSurface(x) + .04 + age * (1.15 + pattern(seed + 2)) - age * age * 2;
                 const double z = contact.z + (pattern(seed + 3) - .5) * age * 3.4;
-                powder({x, y, z}, right, up, .035 + life * .14, strength * .33 * (1 - life));
+                powder({x, y, z}, right, up, .035 + life * .14, strength * .33 * (1 - life), powderColor);
             }
     }
 
@@ -209,7 +219,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
                                                 : .026 + pattern(seed + 5) * .066 + life * .025;
                     const double fade =
                         cloud ? std::sin(life * PI) * (1 - life * .35) : std::pow(1 - life, 1.2);
-                    powder({x, y, z}, right, up, radius, motion * contact * fade * (cloud ? .27 : .58));
+                    powder({x, y, z}, right, up, radius, motion * contact * fade * (cloud ? .27 : .58), powderColor);
                 }
             }
     }
@@ -282,7 +292,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
                         const double radius = std::min(depth * .0035, std::max(.055 + pattern(seed + 4) * .075,
                                                                             depth * .0013));
                         powder(position, right, up, radius,
-                               (.8 + pattern(seed + 5) * .15) * edgeFade * lifeFade * nearFade);
+                               (.8 + pattern(seed + 5) * .15) * edgeFade * lifeFade * nearFade, powderColor);
                     }
     }
     sjp::gfx::popAttrib();

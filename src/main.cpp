@@ -77,6 +77,9 @@ enum class Action {
     SensitivityUp,
     SensitivityReset,
     Wind,
+    TimeOfDay,
+    Weather,
+    EnvironmentReset,
     Ghost,
     CupSetupMode,
     CupSetupTab,
@@ -147,6 +150,9 @@ class App {
     OriginalWind sessionWeather;
     std::array<float, 2> sessionAuxiliary{};
     int weatherHill = -1;
+    environment::Conditions activeEnvironment;
+    environment::Conditions replayEnvironment;
+    uint32_t visualJumpSerial = 0;
     bool synchronousRendering = false, noMsaa = false, gpuValidation = false;
     bool smokeMouseCapture = false;
     size_t mouseCaptureTransitions = 0;
@@ -439,7 +445,10 @@ class App {
         pending = {};
         accumulator = 0;
         newRecord = false;
-        renderer->setJumpWeather(sim.initialRandomSeed());
+        activeEnvironment = competition ? cup.visualEnvironment()
+            : environment::resolve(records.environment,
+                environment::hash(sim.initialRandomSeed() ^ ++visualJumpSerial * 0x9e3779b9U));
+        renderer->setEnvironment(activeEnvironment, true);
         renderer->resetCamera();
         changeScreen(destination);
         if (records.sound)
@@ -448,7 +457,7 @@ class App {
     void beginCup() {
         std::string error;
         if (!cup.start(editableSetup(), originalClockSeed(), originalClockSeed(), originalClockSeed(),
-                       &error)) {
+                       &error, records.environment)) {
             message = error;
             return;
         }
@@ -510,6 +519,8 @@ class App {
         }
         if (sim.frames.size() > 2) {
             lastReplay = sim.replay();
+            lastReplay.hasEnvironment = true;
+            lastReplay.environment = activeEnvironment;
             hasReplay = true;
             canExportOriginal = buildOriginalReplay(sim, originalReplayData, &replayExportError);
             if (canExportOriginal) {
@@ -613,8 +624,10 @@ class App {
         replayTime = 0;
         replaySpeed = 1;
         replayPlaying = true;
-        renderer->setJumpWeather(canExportOriginal ? originalReplayData.seed
-                                                  : visual::replayWeatherSeed(lastReplay));
+        replayEnvironment = lastReplay.hasEnvironment ? lastReplay.environment
+            : environment::resolve({}, canExportOriginal ? originalReplayData.seed
+                                                        : visual::replayWeatherSeed(lastReplay));
+        renderer->setEnvironment(replayEnvironment, true);
         renderer->resetCamera();
         changeScreen(Screen::Replay);
     }
@@ -879,6 +892,17 @@ class App {
             break;
         case Action::Wind:
             windMode = (windMode + 1) % 4;
+            break;
+        case Action::TimeOfDay:
+            if (value >= 0 && value <= 4)
+                records.environment.time = environment::TimeOfDay(value);
+            break;
+        case Action::Weather:
+            if (value >= 0 && value <= 4)
+                records.environment.weather = environment::Weather(value);
+            break;
+        case Action::EnvironmentReset:
+            records.environment = {};
             break;
         case Action::Ghost:
             ghost = !ghost;
@@ -1275,27 +1299,39 @@ class App {
             Action action;
         };
         const Setting rows[] = {
-            {"Camera", "Cycle the viewpoint during a jump with C.", cams[camera], Action::Camera},
-            {"Sound", "Procedural wind, takeoff and landing cues. M toggles sound.",
-             records.sound ? "On" : "Off", Action::Sound},
-            {"Wind conditions", "Practice wind. Cups use original variable conditions.", winds[windMode],
-             Action::Wind},
-            {"Last jump ghost", "Compare your approach and flight on the same hill.", ghost ? "On" : "Off",
-             Action::Ghost}};
-        for (int i = 0; i < 4; i++) {
-            float y = 253 + i * 103;
-            r.glassPanel(64, y, 1310, 89, 10, .9f);
-            r.text(rows[i].title, 90, y + 16, 19, colors::white, true);
-            r.text(rows[i].detail, 90, y + 49, 13, colors::muted);
-            button(rows[i].value + "  >", 1080, y + 20, 268, rows[i].action);
+            {"Camera", "Press C during a jump.", cams[camera], Action::Camera},
+            {"Sound", "Press M to toggle sound.", records.sound ? "On" : "Off", Action::Sound},
+            {"Wind conditions", "Practice only; cup wind stays original.", winds[windMode], Action::Wind},
+            {"Last jump ghost", "Show the last jump on this hill.", ghost ? "On" : "Off", Action::Ghost}};
+        for (int i = 0; i < 4; ++i) {
+            const float y = 253 + i * 87;
+            r.glassPanel(64, y, 644, 74, 10, .9f);
+            r.text(rows[i].title, 86, y + 12, 18, colors::white, true);
+            r.text(rows[i].detail, 86, y + 46, 12, colors::muted);
+            button(rows[i].value + "  >", 456, y + 13, 230, rows[i].action);
         }
-        r.glassPanel(64, 671, 1310, 99, 10, .9f);
-        r.text("Mouse sensitivity", 90, 691, 19, colors::white, true);
-        r.text("1.0x matches original mouse counts. Small movements work best.", 90, 729, 13, colors::muted);
-        button("Original 1.0x", 888, 695, 174, Action::SensitivityReset);
-        button("-", 1090, 695, 56, Action::SensitivityDown);
-        r.text(number(records.sensitivity) + "x", 1164, 708, 18, colors::teal, true);
-        button("+", 1276, 695, 56, Action::SensitivityUp);
+        r.glassPanel(738, 253, 636, 185, 10, .9f);
+        r.text("Time of day", 758, 271, 19, colors::white, true);
+        for (int i = 0; i <= 4; ++i)
+            button(environment::name(environment::TimeOfDay(i)), 758 + (i % 3) * 205,
+                   307 + (i / 3) * 59, 186, Action::TimeOfDay, i, int(records.environment.time) == i);
+        r.glassPanel(738, 456, 636, 214, 10, .9f);
+        r.text("Weather", 758, 474, 19, colors::white, true);
+        for (int i = 0; i <= 4; ++i)
+            button(environment::name(environment::Weather(i)), 758 + (i % 3) * 205,
+                   510 + (i / 3) * 59, 186, Action::Weather, i, int(records.environment.weather) == i);
+        r.text("Only wind affects the jump.", 758, 641, 13, colors::muted);
+        r.glassPanel(64, 619, 644, 152, 10, .9f);
+        r.text("Mouse sensitivity", 86, 636, 19, colors::white, true);
+        r.text("1.0x matches original mouse counts.", 86, 671, 13, colors::muted);
+        button("Original 1.0x", 86, 710, 169, Action::SensitivityReset);
+        button("-", 326, 710, 56, Action::SensitivityDown);
+        r.text(number(records.sensitivity) + "x", 430, 722, 18, colors::teal, true);
+        button("+", 630, 710, 56, Action::SensitivityUp);
+        r.text("Practice: fixed for each jump.", 758, 692, 14, colors::white);
+        r.text("Cups: fixed for all jumpers and both rounds of each event.", 758, 720, 13, colors::muted);
+        smallButton("Day & sun", 1202, 751, 151, Action::EnvironmentReset);
+        r.text("Choose conditions before starting practice or a new cup.", 758, 764, 12, colors::muted);
         r.text("F11 switches between windowed and fullscreen. Your progress is stored locally.", 66, 809, 14,
                colors::muted);
     }
@@ -1338,7 +1374,8 @@ class App {
         // Keep venue and weather at the edges; the jumper has the center.
         r.glassPanel(32, 28, 360, 74, 10, .76f);
         r.text(h.name, 50, 40, 21, colors::white, true);
-        r.text("K" + std::to_string(h.k) + (competition ? "" : "  /  Practice"), 50, 76, 11,
+        r.text("K" + std::to_string(h.k) + (competition ? "" : " / Practice") +
+                   " / " + environment::description(activeEnvironment), 50, 76, 11,
                colors::muted);
         if (competition) {
             r.glassPanel(470, 28, 490, 74, 10, .76f);
@@ -1528,6 +1565,7 @@ class App {
         r.text(sim.hill().name + " / EVENT " + std::to_string(cup.event() + 1) + " OF " +
                    std::to_string(cup.eventCount()) + " / ROUND " + std::to_string(cup.round() + 1),
                343, 423, 16, colors::teal);
+        r.text(environment::description(activeEnvironment), 813, 266, 13, colors::muted);
         if (cup.setup().mode == CupMode::Team) {
             const auto &p = cup.entries()[size_t(activeJumper())].participant;
             r.text(cup.setup().teams[size_t(p.team)].name + " / MEMBER " + std::to_string(p.member + 1), 343,
@@ -1543,7 +1581,7 @@ class App {
         bool final = cup.finalEvent() && cup.eventComplete();
         top(final ? "The cup is decided." : "Every jump counts.",
             hills()[cup.hill()].name + " / EVENT " + std::to_string(cup.event() + 1) + " OF " +
-                std::to_string(cup.eventCount()));
+                std::to_string(cup.eventCount()) + " / " + environment::description(cup.visualEnvironment()));
         auto &r = *renderer;
         bool team = cup.setup().mode == CupMode::Team;
         auto order = cup.standings(final), rank = cup.ranks(final);
@@ -1623,7 +1661,7 @@ class App {
     }
     void replayUI() {
         auto &r = *renderer;
-        r.glassPanel(38, 35, 394, canExportOriginal ? 116 : 88, 12, .86f);
+        r.glassPanel(38, 35, 394, canExportOriginal ? 142 : 114, 12, .86f);
         r.pill("REPLAY", 57, 49);
         r.text(hills()[lastReplay.hill].name + " / " + number(lastReplay.result.distance) + " m", 58, 87, 15,
                colors::white, true);
@@ -1631,6 +1669,8 @@ class App {
             r.text(originalReplayData.athleteName + " / " + originalReplayData.date + " / " +
                        originalReplayData.author,
                    58, 119, 10, colors::muted);
+        r.text(environment::description(replayEnvironment), 58, canExportOriginal ? 148 : 119, 11,
+               colors::muted);
         smallButton("<  Back", 1268, 39, 126, Action::Back);
         smallButton("Export .RPL", 1110, 39, 142, Action::ReplayExport);
         r.glassPanel(180, 752, 1080, 102, 14, .9f);
@@ -1670,6 +1710,14 @@ class App {
                          !sim.frames.empty();
         if (showGhost)
             g = replayFrame(f.elapsed - sim.frames.front().elapsed);
+        auto conditions = activeEnvironment;
+        if (screen == Screen::Replay)
+            conditions = replayEnvironment;
+        else if (competition)
+            conditions = cup.visualEnvironment();
+        else if (panorama)
+            conditions = environment::resolve(records.environment, 0x7abc9013U);
+        renderer->setEnvironment(conditions);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
         renderer->overlay();
         switch (screen) {
@@ -1737,11 +1785,13 @@ class App {
             if (smokeMouseCapture && bool(SDL_GetWindowRelativeMouseMode(window)) != expected)
                 throw std::runtime_error("Unexpected relative mouse mode on cup screen");
         };
-        auto clickButton = [&](Action requested) {
+        auto clickButton = [&](Action requested, int value = -1) {
             render();
             renderer->finish();
             const auto button = std::find_if(buttons.begin(), buttons.end(),
-                                             [&](const Button &b) { return b.action == requested; });
+                                             [&](const Button &b) {
+                                                 return b.action == requested && (value < 0 || b.value == value);
+                                             });
             if (button == buttons.end())
                 throw std::runtime_error("Smoke test button is missing");
             int ww = 0, hh = 0;
@@ -1966,6 +2016,22 @@ class App {
                 renderer->capture(captureDir + "/settings.ppm");
             renderer->finish();
         }
+        changeScreen(Screen::Settings);
+        for (int dayTime = 0; dayTime <= 4; ++dayTime) {
+            clickButton(Action::TimeOfDay, dayTime);
+            for (int weather = 0; weather <= 4; ++weather) {
+                clickButton(Action::Weather, weather);
+                render();
+                if (!(renderer->environmentConditions() == environment::resolve(records.environment, 0x7abc9013U)) ||
+                    int(records.environment.time) != dayTime || int(records.environment.weather) != weather)
+                    throw std::runtime_error("Time/weather controls or preview failed");
+                renderer->finish();
+            }
+        }
+        clickButton(Action::EnvironmentReset);
+        if (records.environment.time != environment::TimeOfDay::Day ||
+            records.environment.weather != environment::Weather::Sunny)
+            throw std::runtime_error("Day and sun defaults failed");
         // Verify every page has selectable entries and keyboard navigation reaches the final hill.
         for (Screen s : {Screen::Hills, Screen::Records}) {
             changeScreen(s);
@@ -2019,6 +2085,7 @@ class App {
         }
         worldSetup = defaultCupSetup();
         setupPage = 0;
+        records.environment = {environment::TimeOfDay::Random, environment::Weather::Random};
         const auto beforeCup = mouseCaptureTransitions;
         beginCup();
         requireCapture(false);
@@ -2026,9 +2093,12 @@ class App {
             throw std::runtime_error("Preparing the cup unnecessarily captured the pointer");
         int cupFalls = 0;
         for (int event = 0; event < hillCount(); event++) {
+            const auto fixedEnvironment = cup.visualEnvironment();
             for (int jump = 0; jump < 2; jump++) {
                 if (screen != Screen::JumpReady)
                     throw std::runtime_error("Cup hotseat readiness missing");
+                if (!(activeEnvironment == fixedEnvironment))
+                    throw std::runtime_error("Time/weather changed within one cup event");
                 startTurn();
                 for (int n = 0; n < 6000 && screen == Screen::Playing; n++) {
                     sim.step(1. / 120, autopilot(sim));
@@ -2043,6 +2113,8 @@ class App {
                               << '\n';
                     return 1;
                 }
+                if (!lastReplay.hasEnvironment || !(lastReplay.environment == fixedEnvironment))
+                    throw std::runtime_error("Cup replay lost its fixed event atmosphere");
                 Replay restored;
                 if (storageError || !loadReplay(dataDir + "/latest-dsj2.sjr", restored) ||
                     restored.hill != selectedHill || restored.frames.size() != sim.frames.size() ||
@@ -2055,6 +2127,8 @@ class App {
                 cupNext();
             }
             render();
+            if (!(renderer->environmentConditions() == fixedEnvironment))
+                throw std::runtime_error("Cup standings changed the event atmosphere");
             if (!captureDir.empty() && (event == 0 || event + 1 == hillCount()))
                 renderer->capture(captureDir + (event == 0 ? "/cup-event.ppm" : "/cup-final.ppm"));
             renderer->finish();
@@ -2069,6 +2143,7 @@ class App {
         cupNext();
         if (screen != Screen::Menu)
             throw std::runtime_error("Finishing the cup did not return to the main menu");
+        records.environment = {};
         // Exercise configuration, checkpoint reload, human handoff and Team Cup frontend.
         action(Action::Cup);
         action(Action::CupSetupMode, 1);

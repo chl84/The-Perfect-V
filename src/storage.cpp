@@ -33,6 +33,8 @@ bool replaceFile(const std::string &path, std::ofstream &out) {
 }
 } // namespace
 bool saveRecords(const std::string &path, const Records &r) {
+    if (!environment::valid(r.environment))
+        return false;
     for (size_t i = 0; i < r.best.size(); i++)
         if (hills()[i].id.empty() || !std::isfinite(r.best[i]) || r.best[i] < 0 || r.best[i] > 1000)
             return false;
@@ -44,6 +46,7 @@ bool saveRecords(const std::string &path, const Records &r) {
     for (size_t i = 0; i < r.best.size(); i++)
         out << std::quoted(hills()[i].id) << ' ' << r.best[i] << '\n';
     out << r.camera << ' ' << r.sound << ' ' << r.sensitivity << '\n';
+    out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -83,9 +86,18 @@ Records loadRecords(const std::string &path) {
         return {};
     if (oldPhysics)
         r.best.fill(0);
+    std::string tag;
+    int version, time, weather;
+    if (in >> tag >> version >> time >> weather) {
+        const environment::Selection selection{environment::TimeOfDay(time), environment::Weather(weather)};
+        if (tag == "ENV" && version == 1 && environment::valid(selection))
+            r.environment = selection;
+    }
     return r;
 }
 bool saveReplay(const std::string &path, const Replay &r) {
+    if (r.hasEnvironment && !environment::valid(r.environment))
+        return false;
     if ((r.originalRpl.size() != 0 && r.originalRpl.size() != 1222) || r.frames.size() < 2 ||
         r.frames.size() > 20000 || r.hill < 0 || size_t(r.hill) >= hills().size() ||
         hills()[r.hill].id.empty())
@@ -112,6 +124,9 @@ bool saveReplay(const std::string &path, const Replay &r) {
     for (uint8_t byte : r.originalRpl)
         out << ' ' << unsigned(byte);
     out << '\n';
+    if (r.hasEnvironment)
+        out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << ' '
+            << r.environment.seed << '\n';
     return replaceFile(path, out);
 }
 bool loadReplay(const std::string &path, Replay &output) {
@@ -174,6 +189,17 @@ bool loadReplay(const std::string &path, Replay &output) {
                 return false;
             byte = uint8_t(value);
         }
+    }
+    std::string tag;
+    if (in >> tag) {
+        int version, time, weather;
+        if (tag != "ENV" || !(in >> version >> time >> weather >> r.environment.seed) || version != 1)
+            return false;
+        r.environment.time = environment::TimeOfDay(time);
+        r.environment.weather = environment::Weather(weather);
+        if (!environment::valid(r.environment))
+            return false;
+        r.hasEnvironment = true;
     }
     output = std::move(r);
     return true;
