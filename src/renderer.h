@@ -1,6 +1,7 @@
 #pragma once
 #include "physics.h"
 #include "draw_commands.h"
+#include "camera_path.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
@@ -65,6 +66,8 @@ class Renderer {
     Vec3 eye{}, target{};
     bool cameraInit = false;
     double cameraTime = 0;
+    double cameraProgress = 0;
+    std::array<visual::ChaseCameraPath, HILL_COUNT> chasePaths;
     Font loadFont(const std::string &);
     void terrain(const Hill &);
     void scenery(const Hill &, const Frame &, double time);

@@ -13,10 +13,11 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers six standalone suites:
+Without external fixtures, CTest registers seven standalone suites:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `presentation-timing`: frame deadlines without accumulated timer overshoot, recovery after a stall and camera smoothing independent of frame cadence.
+- `camera-paths`: finished camera 2 rails on all 32 hills, continuous spline velocity, snow clearance and sightlines during normal jumps and falls with varying wind and frame cadence.
 - `render-interpolation`: presentation interpolation between simulation ticks.
 - `fall-presentation`: deterministic display contact, unchanged physics/poses and no GL calls in the contact calculation.
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
@@ -49,7 +50,7 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
-relative mouse mode and Ready/Next button hit testing. The six standalone suites
+relative mouse mode and Ready/Next button hit testing. The seven standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
@@ -173,3 +174,21 @@ volume and lifetime fades prevent popping, and no extra textures are used. Their
 animation uses the frame/replay clock, so pause freezes flakes and seeking is repeatable. Menus
 do not display jump snowfall. Original replays reuse their seed; native recordings
 without original metadata use a stable visual hash of their recorded frames.
+
+## Camera 2 rails
+
+Chase (camera 2 in the interface) follows a separate fixed spline for each of
+the 32 hills. All rails are calculated at startup from the existing snow
+triangles and inrun deck, with clearance and sightlines accounted for before
+play. The original terrain vertices, profiles and physics are unchanged.
+
+The camera moves along the finished rail using smoothed jumper progress and
+aims at the jumper's upper body. Cubic interpolation keeps velocity continuous
+through rail points. No terrain checks, ray tests or corrective height changes
+run during a jump. The side and wide cameras retain their previous behavior.
+
+The CPU tests independently sample the receiver planes and exercise normal
+jumps, falls, headwind/tailwind, 30/144 FPS and irregular frame intervals on
+all 32 hills. Renderer command tests check actual rail selection, frame cadence
+and paused camera position. Native Vulkan captures and the full-game smoke
+test cover the installed renderer.

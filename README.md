@@ -11,7 +11,7 @@ The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
 2.10. The original game's executable, data, reference recordings and analysis
 captures are not distributed in this repository and are not needed to play.
 
-Vulkan/SDL3 is now the version on `main`. The six standalone test suites and
+Vulkan/SDL3 is now the version on `main`. The seven standalone test suites and
 the full-game Vulkan smoke test passed on Intel Iris Xe; long-session stability
 and other GPUs remain unverified. See [migration notes](docs/vulkan-sdl3-migration.md).
 

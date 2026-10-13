@@ -270,6 +270,8 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
 }
 Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool vsync, bool validation)
     : window(w) {
+    for (size_t i = 0; i < chasePaths.size(); ++i)
+        chasePaths[i].build(hills()[i]);
     sjp::gfx::initialize(window, noMsaa, vsync, validation);
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
@@ -323,13 +325,21 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::loadIdentity();
     sky(width, height);
     double s = h.scale();
+    const visual::ChaseCameraPath *chasePath = nullptr;
+    if (!panorama && camera == 1) {
+        size_t index = 0;
+        for (size_t i = 0; i < hills().size(); ++i)
+            if (h.id == hills()[i].id)
+                index = i;
+        chasePath = &chasePaths[index];
+    }
     Vec3 wantEye, wantTarget;
     if (panorama) {
         wantEye = {35 * s + std::sin(time * .05) * 10 * s, 37 * s, 145 * s};
         wantTarget = {24 * s, -13 * s, -4 * s};
     } else if (camera == 1) {
-        wantEye = {f.x - 13, f.y + 7, 9};
-        wantTarget = {f.x + 18, f.y - 3, 0};
+        wantEye = chasePath->eye(f.x);
+        wantTarget = {f.x, f.y + 1.1, 0};
     } else if (camera == 2) {
         wantEye = {f.x + 12, f.y + 22, 65};
         wantTarget = {f.x + 13, f.y - 9, 0};
@@ -340,10 +350,16 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     if (!cameraInit || panorama) {
         eye = wantEye;
         target = wantTarget;
+        cameraProgress = f.x;
         cameraInit = true;
     } else {
         const double blend = visual::cameraBlend(time - cameraTime);
-        eye = eye + (wantEye - eye) * blend;
+        if (chasePath) {
+            cameraProgress += (f.x - cameraProgress) * blend;
+            eye = chasePath->eye(cameraProgress);
+        } else {
+            eye = eye + (wantEye - eye) * blend;
+        }
         target = target + (wantTarget - target) * blend;
     }
     cameraTime = time;

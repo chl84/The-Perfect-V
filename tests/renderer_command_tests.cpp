@@ -556,10 +556,17 @@ int main() {
                 r.finish();
                 audit::balanced();
                 ++frames;
+                sjp::visual::ChaseCameraPath chasePath;
+                chasePath.build(s.hill());
                 for (const auto &f : samples)
                     for (int camera = 0; camera < 3; ++camera) {
                         r.resetCamera();
+                        audit::captureCamera = camera == 1;
                         r.begin(s.hill(), f, f.elapsed, camera, false, true, &f);
+                        if (camera == 1)
+                            audit::require(!audit::captureCamera &&
+                                               (audit::cameraEye - chasePath.eye(f.x)).length() < 1e-9,
+                                           "Camera 2 did not follow its finished hill rail");
                         r.overlay();
                         r.glassPanel(20, 20, 280, 100);
                         r.text(s.hill().name, 35, 35, 20);
@@ -642,10 +649,11 @@ int main() {
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
+            int camera = 0;
             auto settle = [&](const std::vector<double> &cadence) {
                 auto f = sim.frame();
                 r.resetCamera();
-                r.begin(sim.hill(), f, 0, 0, false);
+                r.begin(sim.hill(), f, 0, camera, false);
                 r.finish();
                 f.x += 10;
                 f.y -= 4;
@@ -653,18 +661,30 @@ int main() {
                 for (size_t i = 0; elapsed < .3 - 1e-12; ++i) {
                     elapsed += std::min(cadence[i % cadence.size()], .3 - elapsed);
                     audit::captureCamera = true;
-                    r.begin(sim.hill(), f, elapsed, 0, false);
+                    r.begin(sim.hill(), f, elapsed, camera, false);
                     r.finish();
                     audit::require(!audit::captureCamera, "Camera transform was not recorded");
                     audit::balanced();
                 }
                 return audit::cameraEye;
             };
-            const auto at60 = settle({1. / 60});
-            for (const auto &cadence : {std::vector<double>{1. / 30}, {1. / 120}, {1. / 144},
-                                       {.004, .013, .007, .021, .005}})
-                audit::require((settle(cadence) - at60).length() < 1e-9,
-                               "Rendered camera response changes with frame cadence");
+            for (camera = 0; camera <= 1; ++camera) {
+                const auto at60 = settle({1. / 60});
+                for (const auto &cadence : {std::vector<double>{1. / 30}, {1. / 120}, {1. / 144},
+                                           {.004, .013, .007, .021, .005}})
+                    audit::require((settle(cadence) - at60).length() < 1e-9,
+                                   "Rendered camera response changes with frame cadence");
+            }
+            camera = 1;
+            const auto before = settle({1. / 60});
+            auto f = sim.frame();
+            f.x += 10;
+            f.y += 40;
+            audit::captureCamera = true;
+            r.begin(sim.hill(), f, .3, camera, false);
+            r.finish();
+            audit::require((audit::cameraEye - before).length() < 1e-9,
+                           "Paused camera rail moved or reacted to jumper height");
         }
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
