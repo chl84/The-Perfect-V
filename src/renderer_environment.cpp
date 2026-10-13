@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "render_batch.h"
@@ -24,6 +25,15 @@ Color shade(Color c, double value) {
 }
 double hash(double n) {
     return std::fmod(std::abs(std::sin(n * 12.9898) * 43758.5453), 1.0);
+}
+double smoothNoise(double x, double seed) {
+    const double cell = std::floor(x), t = x - cell;
+    const double blend = t * t * (3 - 2 * t);
+    return hash(cell + seed) * (1 - blend) + hash(cell + seed + 1) * blend;
+}
+double smoothRange(double low, double high, double x) {
+    const double t = clamp((x - low) / (high - low), 0.0, 1.0);
+    return t * t * (3 - 2 * t);
 }
 void quad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     col(color);
@@ -169,6 +179,170 @@ sjp::gfx::Id makeSnowTexture(bool groomed) {
     sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, oldAlignment);
     sjp::visual::popAttrib();
     return texture;
+}
+sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int height) {
+    sjp::gfx::Id texture = 0;
+    sjp::gfx::genTextures(1, &texture);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    int oldAlignment = 4;
+    sjp::gfx::getIntegerv(sjp::gfx::UNPACK_ALIGNMENT, &oldAlignment);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
+    for (int level = 0;; ++level) {
+        sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, level, sjp::gfx::ALPHA, width, height, 0,
+                           sjp::gfx::ALPHA, sjp::gfx::UNSIGNED_BYTE, pixels.data());
+        if (width == 1 && height == 1)
+            break;
+        const int nextWidth = std::max(1, width / 2), nextHeight = std::max(1, height / 2);
+        std::vector<uint8_t> next(nextWidth * nextHeight);
+        for (int y = 0; y < nextHeight; ++y)
+            for (int x = 0; x < nextWidth; ++x) {
+                int sum = 0;
+                for (int dy = 0; dy < 2; ++dy)
+                    for (int dx = 0; dx < 2; ++dx)
+                        sum += pixels[std::min(height - 1, y * 2 + dy) * width +
+                                      std::min(width - 1, x * 2 + dx)];
+                next[y * nextWidth + x] = uint8_t((sum + 2) / 4);
+            }
+        pixels.swap(next);
+        width = nextWidth;
+        height = nextHeight;
+    }
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MIN_FILTER, sjp::gfx::LINEAR_MIPMAP_LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAG_FILTER, sjp::gfx::LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::CLAMP_TO_EDGE);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, oldAlignment);
+    sjp::visual::popAttrib();
+    return texture;
+}
+sjp::gfx::Id makeSpruceMarkerTexture() {
+    int width = 128, height = 64;
+    std::vector<uint8_t> pixels(width * height, 0);
+    // Flat overlapping twigs: the alpha mask supplies needles and uneven edges.
+    // Wrap strokes across the tile seam; all markers share this small texture.
+    auto stroke = [&](double x0, double y0, double x1, double y1, double radius, double opacity) {
+        const double dx = x1 - x0, dy = y1 - y0, length2 = dx * dx + dy * dy;
+        for (int y = std::max(0, int(std::floor(std::min(y0, y1) - radius - 1)));
+             y <= std::min(height - 1, int(std::ceil(std::max(y0, y1) + radius + 1))); ++y)
+            for (int x = int(std::floor(std::min(x0, x1) - radius - 1));
+                 x <= int(std::ceil(std::max(x0, x1) + radius + 1)); ++x) {
+                const double t = clamp(((x + .5 - x0) * dx + (y + .5 - y0) * dy) / length2, 0.0, 1.0);
+                const double distance = std::hypot(x + .5 - x0 - t * dx, y + .5 - y0 - t * dy);
+                const auto alpha = uint8_t(clamp(radius + .5 - distance, 0.0, 1.0) * opacity * 255);
+                auto &pixel = pixels[y * width + (x % width + width) % width];
+                pixel = std::max(pixel, alpha);
+            }
+    };
+    for (int twig = 0; twig < 4; ++twig) {
+        const double seed = twig * 71.3;
+        const double x0 = twig * 32 - 12, y0 = 26 + hash(seed + 1) * 10;
+        const double dx = 48 + hash(seed + 2) * 12, dy = (hash(seed + 3) - .5) * 12;
+        stroke(x0, y0, x0 + dx, y0 + dy, .85, .95);
+        for (int needle = 0; needle < 14; ++needle) {
+            const double t = (needle + .5) / 14;
+            const double x = x0 + dx * t, y = y0 + dy * t;
+            for (int side : {-1, 1}) {
+                const double length = (11 + hash(seed + needle * 13 + side) * 11) * (1 - .55 * t);
+                stroke(x, y, x + 5 + hash(seed + needle * 7) * 6, y + side * length,
+                       .55 + hash(seed + needle * 17 + side) * .35, .8 + hash(seed + needle) * .2);
+            }
+        }
+    }
+    return makeMarkerTexture(std::move(pixels), width, height);
+}
+sjp::gfx::Id makeSprayMarkerTexture() {
+    constexpr int width = 128, height = 64;
+    std::vector<uint8_t> pixels(width * height);
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+            const double center = .5 + .025 * std::sin(x * 2 * PI / width);
+            const double radius = .32 + .02 * std::cos(x * 4 * PI / width);
+            const double edge = clamp((radius - std::abs((y + .5) / height - center)) / .19, 0.0, 1.0);
+            const double grain = hash(x * 13.71 + y * 8.17);
+            pixels[y * width + x] = uint8_t(edge * (.62 + .38 * grain) * 245);
+        }
+    return makeMarkerTexture(std::move(pixels), width, height);
+}
+void distanceMarkerStrip(const Hill &h, double x, int distance, double width, double extent, Color color) {
+    const double scale = h.scale(), step = 3 * scale, zStep = 10 * scale;
+    const double gridStart = std::min(-170 * scale, h.inrunStart() - 60 * scale);
+    const double halfWidth = width * .5 / std::hypot(1.0, h.slope(x));
+    const double left = x - halfWidth * 1.7, right = x + halfWidth * 1.7;
+    const double hillSeed = h.k * 17.13 + h.kMarkerX * .031;
+    const double seed = hillSeed + distance * 31.71, phase = hash(seed) * 11;
+    const double repeatLength = .75 + hash(seed + 7) * .6;
+    const double sampleStep = clamp(1.25 * std::sqrt(scale), .8, 1.5);
+    // Jumpers wear a broad, slightly wandering central lane from the landing
+    // region into the outrun. The field is fixed per hill, never per frame.
+    const double landingWear = smoothRange(h.k * .62, h.k * .95, distance);
+    const double laneCenter = (smoothNoise(x / (22 * scale), hillSeed + 3) - .5) * 2.2;
+    const double laneWidth = (3.8 + smoothNoise(x / (15 * scale), hillSeed + 9) * 1.4) * std::sqrt(scale);
+    auto appearance = [&](Vec3 p) {
+        const double broad = smoothNoise(p.z / 3.7, seed + 11);
+        const double patch = smoothNoise(p.z / 1.1, seed + 23);
+        const double gap = smoothRange(.12, .42, patch);
+        const double lane = (p.z - laneCenter) / laneWidth;
+        const double wear = landingWear * std::exp(-lane * lane) *
+                            (.78 + .22 * smoothNoise(p.z / 2.4 + x / (9 * scale), hillSeed + 41));
+        Color c = shade(color, .88 + .19 * broad);
+        c.a = float(color.a * (.38 + .62 * broad) * gap * (1 - .88 * wear));
+        return c;
+    };
+    // Use the already rendered snow mesh's straight segments as the receiver.
+    // No hill heights, curve samples or measurement positions are modified.
+    for (double a = left; a < right - 1e-8;) {
+        const double cell = gridStart + std::floor((a - gridStart) / step + 1e-7) * step;
+        const double b = std::min(right, cell + step);
+        for (double z = -extent * scale; z < extent * scale - 1e-8;) {
+            const double zCell = std::floor(z / zStep + 1e-7) * zStep;
+            const double zz = std::min({extent * scale, zCell + zStep, z + sampleStep});
+            const double y00 = terrainY(h, cell, zCell), y01 = terrainY(h, cell, zCell + zStep),
+                         y11 = terrainY(h, cell + step, zCell + zStep), y10 = terrainY(h, cell + step, zCell);
+            auto diagonal = [&](Vec3 p) { return (p.z - zCell) / zStep - (p.x - cell) / step; };
+            // Clip the strip to both receiver triangles, including their shared
+            // diagonal. The overlay then stays exactly on the unchanged snow.
+            for (int side : {-1, 1}) {
+                const std::array<Vec3, 4> corners{{{a, 0, z}, {a, 0, zz}, {b, 0, zz}, {b, 0, z}}};
+                std::vector<Vec3> polygon;
+                polygon.reserve(5);
+                Vec3 previous = corners.back();
+                double before = side * diagonal(previous);
+                for (Vec3 p : corners) {
+                    const double after = side * diagonal(p);
+                    if ((before >= 0) != (after >= 0))
+                        polygon.push_back(previous + (p - previous) * (before / (before - after)));
+                    if (after >= 0)
+                        polygon.push_back(p);
+                    previous = p;
+                    before = after;
+                }
+                if (polygon.size() < 3)
+                    continue;
+                for (auto &p : polygon) {
+                    const double u = (p.x - cell) / step, v = (p.z - zCell) / zStep;
+                    p.y = side > 0 ? y00 * (1 - v) + y01 * (v - u) + y11 * u
+                                   : y00 * (1 - u) + y11 * v + y10 * (u - v);
+                }
+                sjp::visual::begin(sjp::gfx::TRIANGLE_FAN);
+                const Vec3 normal = cross(polygon[1] - polygon[0], polygon[2] - polygon[0]).normalized();
+                sjp::visual::normal(normal.x, normal.y, normal.z);
+                for (const auto &p : polygon) {
+                    // Vary twig size and edge position smoothly, keeping the
+                    // nominal measurement location and receiver mesh intact.
+                    const double size = .65 + .7 * smoothNoise(p.z / 2.2, seed + 53);
+                    const double drift = (smoothNoise(p.z / 3.1, seed + 67) - .5) * halfWidth * .55;
+                    col(appearance(p));
+                    sjp::visual::texCoord(p.z / repeatLength + phase + .25 * smoothNoise(p.z / 2.7, seed + 79),
+                                         .5 + (p.x - x - drift) / (2 * halfWidth * size));
+                    vertex(p);
+                }
+                sjp::visual::end();
+            }
+            z = zz;
+        }
+        a = b;
+    }
 }
 void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
     constexpr int sides = 16, rings = 4;
@@ -381,6 +555,10 @@ std::array<uint8_t, 7> glyph(char c) {
         return {30, 17, 17, 17, 17, 17, 30};
     case 'E':
         return {31, 16, 16, 30, 16, 16, 31};
+    case 'F':
+        return {31, 16, 16, 30, 16, 16, 16};
+    case 'H':
+        return {17, 17, 17, 31, 17, 17, 17};
     case 'I':
         return {31, 4, 4, 4, 4, 4, 31};
     case 'J':
@@ -403,6 +581,8 @@ std::array<uint8_t, 7> glyph(char c) {
         return {31, 4, 4, 4, 4, 4, 4};
     case 'U':
         return {17, 17, 17, 17, 17, 17, 14};
+    case 'V':
+        return {17, 17, 17, 17, 17, 10, 4};
     case '0':
         return {14, 17, 19, 21, 25, 17, 14};
     case '1':
@@ -449,33 +629,24 @@ void signText(const std::string &text, Vec3 center, double width, double height,
                 }
     }
 }
-struct BoardSpan {
-    double left, right, z;
-    int segments;
-};
-double boardBase(const Hill &h, const BoardSpan &span, double x) {
-    const double segment = (span.right - span.left) / span.segments;
-    const int index = clamp(int(std::floor((x - span.left) / segment)), 0, span.segments - 1);
-    const double a = span.left + index * segment, b = a + segment;
-    const double t = clamp((x - a) / segment, 0.0, 1.0);
-    return terrainY(h, a, span.z) * (1 - t) + terrainY(h, b, span.z) * t;
-}
-void boardFace(const Hill &h, const BoardSpan &span, double left, double right, double bottom, double top,
-               double z, int side, Color color) {
-    const double segment = (span.right - span.left) / span.segments;
-    for (double x = left; x < right - 1e-8;) {
-        const int index = clamp(int(std::floor((x - span.left) / segment + 1e-7)), 0, span.segments - 1);
-        const double xx = std::min(right, span.left + (index + 1) * segment);
-        const double y = boardBase(h, span, x), yy = boardBase(h, span, xx);
-        const Vec3 a{x, y + bottom, z}, b{xx, yy + bottom, z}, c{xx, yy + top, z}, d{x, y + top, z};
-        if (side > 0)
-            quad(d, c, b, a, color);
-        else
-            quad(a, b, c, d, color);
-        x = xx;
+struct BoardFrame {
+    Vec3 origin, along, up;
+
+    Vec3 point(double x, double height, double z) const {
+        const Vec3 p = origin + along * x + up * height;
+        return {p.x, p.y, z};
     }
+};
+void boardFace(const BoardFrame &frame, double left, double right, double bottom, double top,
+               double z, int side, Color color) {
+    const Vec3 a = frame.point(left, bottom, z), b = frame.point(right, bottom, z),
+               c = frame.point(right, top, z), d = frame.point(left, top, z);
+    if (side > 0)
+        quad(d, c, b, a, color);
+    else
+        quad(a, b, c, d, color);
 }
-void boardText(const Hill &h, const BoardSpan &span, const std::string &text, double x, double offset,
+void boardText(const BoardFrame &frame, const std::string &text, double x, double offset,
                double width, double height, double z, int side, Color color) {
     const double cell = std::min(height / 7, width / std::max(1.0, double(text.size() * 6 - 1)));
     const double left = -cell * (text.size() * 6 - 1) * .5;
@@ -492,53 +663,61 @@ void boardText(const Hill &h, const BoardSpan &span, const std::string &text, do
                     const double xx = x + (side > 0 ? -logicalRight : logicalLeft);
                     const double right = x + (side > 0 ? -logicalLeft : logicalRight);
                     const double yy = offset + (3.5 - row) * cell;
-                    // Split a glyph cell at the same knots as the board face.
-                    // Its top and bottom therefore share that exact curve.
-                    boardFace(h, span, xx, right, yy - cell * .88, yy, z, side, color);
+                    boardFace(frame, xx, right, yy - cell * .88, yy, z, side, color);
                 }
     }
 }
 void advertisement(const Hill &h, double x, double width, double front, int side, Color accent,
                    const std::string &text) {
-    const BoardSpan span{x - width * .5, x + width * .5, front, std::max(2, int(std::ceil(width / .55)))};
+    // Rotate a rigid rectangle along the existing terrain's local tangent.
+    // The valley term is the x derivative of terrainY, not a terrain change.
+    const double edge = std::max(0.0, std::abs(front) - 19 * h.scale());
+    const double slope = h.slope(x) + std::cos(x * .017 + front * .013) * edge * .018 * .017;
+    const Vec3 along = Vec3{1, slope, 0}.normalized();
+    BoardFrame frame{{x, terrainY(h, x, front), front}, along, {-along.y, along.x, 0}};
+    const double left = -width * .5, right = width * .5;
     const double zFront = front - side * .15, zBack = front + side * .15;
-    const double segment = width / span.segments;
-    for (int i = 0; i < span.segments; ++i) {
-        const double a = span.left + i * segment, b = a + segment;
-        const double y = boardBase(h, span, a), yy = boardBase(h, span, b);
-        const Vec3 ta{a, y + 1.79, zFront}, tb{a, y + 1.79, zBack}, tc{b, yy + 1.79, zBack},
-            td{b, yy + 1.79, zFront};
-        const Vec3 ba{a, y + .16, zFront}, bb{b, yy + .16, zFront}, bc{b, yy + .16, zBack},
-            bd{a, y + .16, zBack};
-        if (side > 0) {
-            quad(ta, tb, tc, td, {.73f, .82f, .84f, 1});
-            quad(ba, bb, bc, bd, {.31f, .43f, .48f, 1});
-        } else {
-            quad(td, tc, tb, ta, {.73f, .82f, .84f, 1});
-            quad(bd, bc, bb, ba, {.31f, .43f, .48f, 1});
+    // A tangent can intersect a curved surface away from its centre. Lift the
+    // whole board if necessary, leaving the terrain and the rectangle intact.
+    double lift = 0;
+    const int samples = std::max(2, int(std::ceil(width / .25)));
+    for (int i = 0; i <= samples; ++i)
+        for (double z : {zFront, zBack}) {
+            const Vec3 p = frame.point(left + width * i / samples, .16, z);
+            lift = std::max(lift, terrainY(h, p.x, p.z) + .08 - p.y);
         }
+    frame.origin.y += lift;
+    const Vec3 ta = frame.point(left, 1.79, zFront), tb = frame.point(left, 1.79, zBack),
+               tc = frame.point(right, 1.79, zBack), td = frame.point(right, 1.79, zFront);
+    const Vec3 ba = frame.point(left, .16, zFront), bb = frame.point(right, .16, zFront),
+               bc = frame.point(right, .16, zBack), bd = frame.point(left, .16, zBack);
+    if (side > 0) {
+        quad(ta, tb, tc, td, {.73f, .82f, .84f, 1});
+        quad(ba, bb, bc, bd, {.31f, .43f, .48f, 1});
+    } else {
+        quad(td, tc, tb, ta, {.73f, .82f, .84f, 1});
+        quad(bd, bc, bb, ba, {.31f, .43f, .48f, 1});
     }
-    boardFace(h, span, span.left, span.right, .16, 1.79, zFront, side, {.10f, .28f, .33f, 1});
-    boardFace(h, span, span.left, span.right, .16, 1.79, zBack, -side, {.20f, .32f, .37f, 1});
-    for (double edge : {span.left, span.right}) {
-        const double y = boardBase(h, span, edge);
-        quad({edge, y + .16, zFront}, {edge, y + 1.79, zFront}, {edge, y + 1.79, zBack},
-             {edge, y + .16, zBack}, {.42f, .54f, .58f, 1});
-    }
+    boardFace(frame, left, right, .16, 1.79, zFront, side, {.10f, .28f, .33f, 1});
+    boardFace(frame, left, right, .16, 1.79, zBack, -side, {.20f, .32f, .37f, 1});
+    for (double end : {left, right})
+        quad(frame.point(end, .16, zFront), frame.point(end, 1.79, zFront),
+             frame.point(end, 1.79, zBack), frame.point(end, .16, zBack), {.42f, .54f, .58f, 1});
     for (int face : {side, -side}) {
         const double z = face == side ? zFront : zBack;
-        boardFace(h, span, span.left, span.right, 1.745, 1.82, z - face * .02, face, {.73f, .82f, .84f, 1});
-        const double accentLeft = face > 0 ? span.right - width * .1025 : span.left + width * .0175;
-        const double accentRight = face > 0 ? span.right - width * .0175 : span.left + width * .1025;
-        boardFace(h, span, accentLeft, accentRight, .29, 1.61, z - face * .025, face, accent);
-        boardText(h, span, text, x - face * width * .025, .97, width * .78, .74, z - face * .035, face,
+        boardFace(frame, left, right, 1.745, 1.82, z - face * .02, face, {.73f, .82f, .84f, 1});
+        const double accentLeft = face > 0 ? right - width * .1025 : left + width * .0175;
+        const double accentRight = face > 0 ? right - width * .0175 : left + width * .1025;
+        boardFace(frame, accentLeft, accentRight, .29, 1.61, z - face * .025, face, accent);
+        boardText(frame, text, -face * width * .025, .97, width * .78, .74, z - face * .035, face,
                   {.91f, .96f, .95f, 1});
     }
     for (double offset : {-.39, .39}) {
-        const double xx = x + offset * width, z = zBack + side * .12;
-        beam({xx, terrainY(h, xx, z) - .035, z}, {xx, boardBase(h, span, xx) + 1.78, z}, .04,
+        const double z = zBack + side * .12;
+        const Vec3 foot = frame.point(offset * width, 0, z);
+        beam({foot.x, terrainY(h, foot.x, z) - .035, z}, frame.point(offset * width, 1.78, z), .04,
              {.43f, .54f, .58f, 1});
-        beam({xx, boardBase(h, span, xx) + .80, z}, {xx, boardBase(h, span, xx) + .80, zBack}, .035,
+        beam(frame.point(offset * width, .80, z), frame.point(offset * width, .80, zBack), .035,
              {.43f, .54f, .58f, 1});
     }
 }
@@ -682,6 +861,10 @@ void Renderer::terrain(const Hill &h) {
         snowTexture = makeSnowTexture(true);
     if (!naturalSnowTexture)
         naturalSnowTexture = makeSnowTexture(false);
+    if (!spruceMarkerTexture)
+        spruceMarkerTexture = makeSpruceMarkerTexture();
+    if (!sprayMarkerTexture)
+        sprayMarkerTexture = makeSprayMarkerTexture();
     // Keep the current and most recently visited venue. The full 32-venue
     // cache retained millions of unused vertices between jumps.
     size_t count = 0, oldest = index;
@@ -839,18 +1022,29 @@ void Renderer::terrain(const Hill &h) {
         beam({x, cabinFloor + 1.13, cabinZ + .815}, {x, cabinFloor + 2.16, cabinZ + .815}, .021,
              {.65f, .74f, .78f, 1});
     signText("PRO", {cabinX, cabinFloor + .55, cabinZ + .762}, 1.55, .43, -1, {.88f, .94f, .94f, 1});
-    // Source-defined distance and K markers retain their original positions.
-    for (int d = 10; d <= h.k + 50; d += 10) {
-        const double x = h.atDistance(d), y = h.ground(x) + .045;
-        const Color c = d == h.k ? Color{.91f, .30f, .28f, 1} : Color{.46f, .67f, .74f, .6f};
-        quad({x, y, -18 * s}, {x + .18, y + h.slope(x) * .18, -18 * s},
-             {x + .18, y + h.slope(x) * .18, 18 * s}, {x, y, 18 * s}, c);
-    }
+    // Granbar and red spray share a cached overlay pass with two small textures.
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT |
+                          sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::CURRENT_BIT);
+    sjp::visual::disable(sjp::gfx::LIGHTING);
+    sjp::visual::enable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, spruceMarkerTexture);
+    sjp::visual::enable(sjp::gfx::BLEND);
+    sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::visual::depthMask(sjp::gfx::FALSE);
+    sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
+    sjp::visual::polygonOffset(-1, -1);
+    for (int d = 10; d <= h.k + 50; d += 10)
+        if (d != h.k)
+            distanceMarkerStrip(h, h.atDistance(d), d, .52, 18, {.23f, .30f, .24f, .76f});
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, sprayMarkerTexture);
+    if (h.k % 10 == 0)
+        distanceMarkerStrip(h, h.atDistance(h.k) + .09, h.k, .48, 18, {.76f, .38f, .36f, .72f});
+    distanceMarkerStrip(h, h.kMarkerX + .2, h.k, .75, 20, {.79f, .36f, .34f, .76f});
+    sjp::visual::popAttrib();
+    // The source-defined red K-point signs stay at their existing positions.
     {
         const double x = h.kMarkerX;
         const Color c{.94f, .28f, .28f, 1};
-        quad({x, h.ground(x) + .06, -20 * s}, {x + .4, h.ground(x + .4) + .06, -20 * s},
-             {x + .4, h.ground(x + .4) + .06, 20 * s}, {x, h.ground(x) + .06, 20 * s}, c);
         for (int side : {-1, 1}) {
             const double z = side * 20 * s, y = terrainY(h, x, z);
             beam({x, h.ground(x), z}, {x, h.ground(x) + 3, z}, .08, c);

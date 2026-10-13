@@ -3,6 +3,7 @@
 #include "original_replay.h"
 #include "physics.h"
 #include "renderer.h"
+#include "presentation_timing.h"
 #include "storage.h"
 #include "visual_weather.h"
 #include "draw_commands.h"
@@ -323,8 +324,8 @@ class App {
             return smokeTest();
         }
         uint64_t previous = SDL_GetPerformanceCounter();
+        visual::FrameSchedule frameSchedule(std::chrono::steady_clock::now());
         while (running) {
-            const auto frameStarted = std::chrono::steady_clock::now();
             uint64_t now = SDL_GetPerformanceCounter();
             double dt = std::min(.08, double(now - previous) / SDL_GetPerformanceFrequency());
             previous = now;
@@ -366,7 +367,7 @@ class App {
             render();
             renderer->finish();
             // Bound submission rate even when VSync is unavailable or ignored.
-            std::this_thread::sleep_until(frameStarted + std::chrono::nanoseconds(1000000000 / 60));
+            std::this_thread::sleep_until(frameSchedule.nextDeadline(std::chrono::steady_clock::now()));
         }
         return 0;
     }

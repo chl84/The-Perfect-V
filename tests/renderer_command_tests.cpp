@@ -57,13 +57,62 @@ void command(const char *name, bool allowed = false) {
 uint64_t positionHash = 1469598103934665603ULL, particlePositionHash = 1469598103934665603ULL;
 size_t particleVertices = 0;
 size_t completedFrames = 0;
+bool captureBoards = false;
+bool captureCamera = false;
+sjp::Vec3 cameraEye;
+std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 void position(double x, double y, double z) {
+    if (captureBoards && compiling)
+        for (size_t face = 0; face < boardFaces.size(); ++face) {
+            const std::array<float, 4> color = face == 0 ? std::array<float, 4>{.10f, .28f, .33f, 1}
+                                                       : std::array<float, 4>{.20f, .32f, .37f, 1};
+            if (current.color == color)
+                boardFaces[face].push_back({x, y, z});
+        }
     for (double v : {x, y, z}) {
         uint64_t b;
         std::memcpy(&b, &v, sizeof(b));
         positionHash = (positionHash ^ b) * 1099511628211ULL;
         if (!compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN)
             particlePositionHash = (particlePositionHash ^ b) * 1099511628211ULL;
+    }
+}
+void rectangularBoards(const sjp::Hill &hill) {
+    const double scale = hill.scale();
+    auto ground = [&](double x, double z) {
+        const double edge = std::max(0.0, std::abs(z) - 19 * scale);
+        return hill.ground(x) - edge * .08 + std::sin(x * .017 + z * .013) * edge * .018;
+    };
+    for (const auto &faces : boardFaces) {
+        require(faces.size() == 28 * 6, "Advertisements must have one rectangular face per board");
+        for (size_t i = 0; i < faces.size(); i += 6) {
+            // The static batch triangulates a quad as (a,b,c), (a,c,d).
+            const auto a = faces[i], b = faces[i + 1], c = faces[i + 2], d = faces[i + 5];
+            const auto along = b - a, vertical = d - a;
+            require((faces[i + 3] - a).length() < 1e-9 && (faces[i + 4] - c).length() < 1e-9 &&
+                        (a + c - b - d).length() < 1e-9,
+                    "Advertisement opposite edges must be straight and parallel");
+            require(std::abs(sjp::dot(along, vertical)) < 1e-9,
+                    "Advertisement corners must be right angles");
+            require(std::abs(along.length() - 5.8 * scale) < 1e-9 &&
+                        std::abs(vertical.length() - 1.63) < 1e-9,
+                    "Advertisement rotation must preserve its width and height");
+            const auto up = vertical.normalized() * (vertical.y < 0 ? -1 : 1);
+            const auto origin = (a + c) * .5 - up * .975;
+            const double x = (79 + (i / 6 % 14) * 6.2) * scale;
+            const double z = (a.z < 0 ? -1 : 1) * (std::max(25 * scale, 8.0) - 1);
+            const auto tangent = sjp::Vec3{.2, ground(x + .1, z) - ground(x - .1, z), 0}.normalized();
+            require(std::abs(origin.x - x) < 1e-9 &&
+                        sjp::dot(along.normalized(), tangent) > 1 - 1e-6,
+                    "Advertisement must follow the terrain tangent at its mounting position");
+            const auto bottomLeft = vertical.y > 0 ? a : d;
+            const auto bottomRight = vertical.y > 0 ? b : c;
+            for (int sample = 0; sample <= 32; ++sample) {
+                const auto p = bottomLeft + (bottomRight - bottomLeft) * (sample / 32.0);
+                require(p.y >= ground(p.x, p.z) + .07,
+                        "Rigid advertisement must stay above the existing terrain");
+            }
+        }
     }
 }
 void vertex() {
@@ -410,6 +459,10 @@ void sjp::gfx::translated(double x, double y, double z) {
     audit::finite(x);
     audit::finite(y);
     audit::finite(z);
+    if (audit::captureCamera) {
+        audit::cameraEye = {-x, -y, -z};
+        audit::captureCamera = false;
+    }
 }
 void sjp::gfx::translatef(float x, float y, float z) {
     audit::command("sjp::gfx::translatef inside sjp::gfx::begin", false);
@@ -493,7 +546,12 @@ int main() {
                         samples.push_back(healthy.frame());
                 }
                 r.resetCamera();
+                for (auto &faces : audit::boardFaces)
+                    faces.clear();
+                audit::captureBoards = true;
                 r.begin(s.hill(), s.frame(), 4, 0, true);
+                audit::captureBoards = false;
+                audit::rectangularBoards(s.hill());
                 r.overlay();
                 r.finish();
                 audit::balanced();
@@ -584,6 +642,33 @@ int main() {
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
+            auto settle = [&](const std::vector<double> &cadence) {
+                auto f = sim.frame();
+                r.resetCamera();
+                r.begin(sim.hill(), f, 0, 0, false);
+                r.finish();
+                f.x += 10;
+                f.y -= 4;
+                double elapsed = 0;
+                for (size_t i = 0; elapsed < .3 - 1e-12; ++i) {
+                    elapsed += std::min(cadence[i % cadence.size()], .3 - elapsed);
+                    audit::captureCamera = true;
+                    r.begin(sim.hill(), f, elapsed, 0, false);
+                    r.finish();
+                    audit::require(!audit::captureCamera, "Camera transform was not recorded");
+                    audit::balanced();
+                }
+                return audit::cameraEye;
+            };
+            const auto at60 = settle({1. / 60});
+            for (const auto &cadence : {std::vector<double>{1. / 30}, {1. / 120}, {1. / 144},
+                                       {.004, .013, .007, .021, .005}})
+                audit::require((settle(cadence) - at60).length() < 1e-9,
+                               "Rendered camera response changes with frame cadence");
+        }
+        {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(2, 0);
             uint32_t wet = 0, dry = 0;
             while (!sjp::visual::snowForJump(wet))
                 ++wet;
@@ -629,7 +714,8 @@ int main() {
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");
         audit::require(audit::maximumLists <= 2, "Terrain cache retains more than two venues");
         std::cout << "PASS: finite commands, balanced stacks, bounded cache, live current attributes, "
-                     "zero-size window, resource cleanup; no GPU used\n";
+                     "zero-size window, resource cleanup, rectangular terrain-aligned advertisements "
+                     "on all 32 hills; no GPU used\n";
     } catch (const std::exception &e) {
         std::cerr << "Command audit: " << e.what() << '\n';
         return 1;

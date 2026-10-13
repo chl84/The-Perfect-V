@@ -13,9 +13,10 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers five standalone suites:
+Without external fixtures, CTest registers six standalone suites:
 
-- `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables and graphics resource lifetime. It does not use a GPU or emulate rasterization.
+- `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
+- `presentation-timing`: frame deadlines without accumulated timer overshoot, recovery after a stall and camera smoothing independent of frame cadence.
 - `render-interpolation`: presentation interpolation between simulation ticks.
 - `fall-presentation`: deterministic display contact, unchanged physics/poses and no GL calls in the contact calculation.
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
@@ -48,7 +49,7 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
-relative mouse mode and Ready/Next button hit testing. The five standalone suites
+relative mouse mode and Ready/Next button hit testing. The six standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
@@ -101,7 +102,11 @@ The CPU command test covers all 32 venues, three cameras, panorama, ghosts, HUD,
 falls and autopilot trajectories. These checks do not establish GPU driver stability
 or prove that a previously observed AMD graphics timeout is resolved.
 
-Normal play has an independent 60 FPS submission limit. The renderer uses
+Normal play has an independent 60 FPS submission limit. Its deadlines advance
+from a fixed clock schedule so timer wake-up delays do not accumulate; long
+stalls discard missed deadlines. Camera smoothing uses elapsed presentation
+time, retaining the previous 16 percent response per frame at 60 FPS. The
+original 70 Hz physics and terrain geometry remain unchanged. The renderer uses
 SDL3's GPU API with Vulkan selected explicitly, embedded SPIR-V shaders and at
 most one frame in flight. `--graphics-compat` and `--sync-rendering` wait for each
 submitted frame immediately. `--no-msaa` disables multisample antialiasing;

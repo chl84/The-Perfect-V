@@ -57,11 +57,14 @@ class Renderer {
     Font regular, boldFont;
     sjp::gfx::Id snowTexture = 0;
     sjp::gfx::Id naturalSnowTexture = 0;
+    sjp::gfx::Id spruceMarkerTexture = 0;
+    sjp::gfx::Id sprayMarkerTexture = 0;
     std::array<sjp::gfx::Id, HILL_COUNT> landscapes{};
     std::array<uint64_t, HILL_COUNT> landscapeUse{};
     uint64_t landscapeClock = 0;
     Vec3 eye{}, target{};
     bool cameraInit = false;
+    double cameraTime = 0;
     Font loadFont(const std::string &);
     void terrain(const Hill &);
     void scenery(const Hill &, const Frame &, double time);

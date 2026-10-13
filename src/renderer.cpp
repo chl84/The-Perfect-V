@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "presentation_timing.h"
 #include "original_skeleton.h"
 #include "visual_weather.h"
 #include <ft2build.h>
@@ -298,6 +299,10 @@ Renderer::~Renderer() {
         sjp::gfx::deleteTextures(1, &snowTexture);
     if (naturalSnowTexture)
         sjp::gfx::deleteTextures(1, &naturalSnowTexture);
+    if (spruceMarkerTexture)
+        sjp::gfx::deleteTextures(1, &spruceMarkerTexture);
+    if (sprayMarkerTexture)
+        sjp::gfx::deleteTextures(1, &sprayMarkerTexture);
     sjp::gfx::shutdown();
 }
 void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, bool panorama, bool ghost,
@@ -337,9 +342,11 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
         target = wantTarget;
         cameraInit = true;
     } else {
-        eye = eye + (wantEye - eye) * .16;
-        target = target + (wantTarget - target) * .16;
+        const double blend = visual::cameraBlend(time - cameraTime);
+        eye = eye + (wantEye - eye) * blend;
+        target = target + (wantTarget - target) * blend;
     }
+    cameraTime = time;
     lookAt(eye, target);
     sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::enable(sjp::gfx::LIGHTING);

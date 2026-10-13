@@ -16,6 +16,7 @@ inline constexpr Enum ALPHA = 0x1906;
 inline constexpr Enum AMBIENT = 0x1200;
 inline constexpr Enum AMBIENT_AND_DIFFUSE = 0x1602;
 inline constexpr Enum BLEND = 0x0BE2;
+inline constexpr Enum CLAMP_TO_EDGE = 0x812F;
 inline constexpr Enum COLOR_BUFFER_BIT = 0x00004000;
 inline constexpr Enum COLOR_MATERIAL = 0x0B57;
 inline constexpr Enum COMPILE_AND_EXECUTE = 0x1301;
