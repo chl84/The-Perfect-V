@@ -48,8 +48,9 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
-relative mouse mode and Ready/Next button hit testing. The migration was compiled
-without running these checks; see [migration status](vulkan-sdl3-migration.md).
+relative mouse mode and Ready/Next button hit testing. The five standalone suites
+and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
+mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
 ## Packaging
 

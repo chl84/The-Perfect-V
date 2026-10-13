@@ -1,15 +1,33 @@
 # Vulkan and SDL3 migration
 
 The previous game state was committed and pushed to `origin/main` as `7cd871e`
-before migration began. Implementation is on `vulkan-sdl3`. The new executable
+before migration began. Implementation from `vulkan-sdl3` was promoted to `main`
+on 2026-10-13 after the build and runtime checks below passed. The new executable
 builds in `build-vulkan`; the existing executable in `build` and its desktop
 shortcut remain available. A local binary copy and source hashes are retained
 in the ignored `captures/vulkan-migration/` directory.
 
-The migration has been implemented and compiled. No game sessions, GPU probes,
-CTest suites or visual comparisons have been run after the request to stop
-testing. Compilation does not establish image equivalence, performance or a
-fix for the previous GPU/system resets.
+## Validation on 2026-10-13
+
+Commit `b73d016` was built in Release mode and installed locally with SDL 3.4.16.
+All five standalone CTest suites passed. After the user authorized runtime testing,
+the installed executable passed `--smoke-test` on Intel Iris Xe Graphics (ADL GT2)
+using Vulkan, 4× MSAA, one frame in flight and the normal asynchronous submission
+mode. The smoke test disables the normal 60 FPS cap and used dummy audio and an
+isolated temporary save directory.
+
+The test covered all 32 venues, menus, input, native replay, a 64-jump World Cup
+and Team Cup/checkpoint flows. The optional original replay fixture was absent,
+so its import check was skipped. Captured menu, flight, replay and final standings
+images were visually inspected without apparent rendering defects. No GPU faults
+were recorded in the kernel journal during the test. Logs and screenshots are
+retained locally in the ignored `captures/vulkan-runtime-2026-10-13/` directory.
+The user also reported that normal gameplay graphics worked correctly.
+
+This does not establish image equivalence with the OpenGL checkpoint, long-session
+stability, audio behavior or a fix for the previous AMD GPU/system resets. Other
+GPUs, the fullscreen mouse-capture test and the extended render probe remain
+unverified.
 
 ## Renderer
 
@@ -93,7 +111,6 @@ shader selection is no longer part of these switches. `--no-msaa` and
 `--gpu-validation` remain explicit diagnostic choices. The optional native
 render probe also builds, but is never run by CMake or registered with CTest.
 
-Before replacing the normal desktop launch, the next validation phase needs
-image comparisons against the checkpoint, normal controls and replay, a full
-World/Team Cup and a bounded stability/performance session with kernel logging.
-That phase awaits the user's decision to resume testing.
+The locally installed Vulkan version has its own desktop entry. Remaining
+validation includes image comparisons against the checkpoint, the fullscreen
+mouse-capture test and longer stability/performance sessions with kernel logging.
