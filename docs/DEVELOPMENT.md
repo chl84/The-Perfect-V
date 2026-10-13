@@ -103,6 +103,14 @@ The CPU command test covers all 32 venues, three cameras, panorama, ghosts, HUD,
 falls and autopilot trajectories. These checks do not establish GPU driver stability
 or prove that a previously observed AMD graphics timeout is resolved.
 
+The jumper casts one silhouette shadow from the displayed body and ski joints.
+A bounded 96 by 64 CPU coverage mask combines their shapes before softening;
+overlapping parts never accumulate opacity. Gaussian softening increases with
+height above the snow and preserves the silhouette's coverage rather than adding
+an oval underneath it. One non-overlapping mesh draws the result onto the existing
+snow triangles, without new textures, shadow maps or offscreen rendering passes.
+The CPU command suite checks overlap, ski gaps and height-dependent softening.
+
 Normal play has an independent 60 FPS submission limit. Its deadlines advance
 from a fixed clock schedule so timer wake-up delays do not accumulate; long
 stalls discard missed deadlines. Camera smoothing uses elapsed presentation

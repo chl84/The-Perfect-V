@@ -5,6 +5,7 @@
 // not emulate rasterization, lighting, or the driver's complete display list.
 #include "renderer.h"
 #include "visual_weather.h"
+#include "visual_shadow.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -19,6 +20,56 @@ namespace audit {
 void require(bool ok, const char *message) {
     if (!ok)
         throw std::runtime_error(message);
+}
+void singleShadow() {
+    using sjp::visual::ShadowCapsule;
+    using sjp::visual::ShadowMask;
+    const ShadowCapsule body{{-.6, 0, 0}, {.6, 0, 0}, .18};
+    ShadowMask single, overlap;
+    for (double blur : {0.0, .025, .10, .205}) {
+        single.build({body}, blur);
+        overlap.build({body, body, body}, blur);
+        require(single.coverage == overlap.coverage,
+                "Overlapping body parts darken the silhouette shadow");
+        for (float alpha : overlap.coverage)
+            require(std::isfinite(alpha) && alpha >= 0 && alpha <= 1.000001f,
+                    "Shadow coverage exceeds one layer");
+    }
+    auto at = [](const ShadowMask &mask, double x, double z) {
+        const int column = std::clamp(int(std::round((x - mask.x) / mask.dx)), 0, ShadowMask::columns - 1);
+        const int row = std::clamp(int(std::round((z - mask.z) / mask.dz)), 0, ShadowMask::rows - 1);
+        return mask.coverage[size_t(row * ShadowMask::columns + column)];
+    };
+    const std::vector<ShadowCapsule> silhouette{
+        {{-.25, 0, 0}, {.25, 0, 0}, .18},
+        {{-1.5, 0, -.7}, {1.5, 0, -.7}, .036},
+        {{-1.5, 0, .7}, {1.5, 0, .7}, .036}};
+    single.build(silhouette, .025);
+    require(at(single, 1, 0) == 0, "A separate oval fills the space between the skis");
+    require(at(single, 0, 0) > .9 && at(single, 1, .7) > .5,
+            "The unified shadow lost its body or ski silhouette");
+    overlap.build(silhouette, .205);
+    require(at(overlap, 1, .7) < at(single, 1, .7),
+            "Thin ski shadows do not soften with height above snow");
+    auto area = [](const ShadowMask &mask) {
+        double sum = 0;
+        for (float alpha : mask.coverage)
+            sum += alpha;
+        return sum * mask.dx * mask.dz;
+    };
+    require(std::abs(area(overlap) / area(single) - 1) < .08,
+            "Shadow softening creates an extra dark footprint");
+    sjp::OriginalPose pose;
+    pose.reset(-.4);
+    std::array<float, 22> state{};
+    std::copy(pose.angles.begin(), pose.angles.end(), state.begin());
+    std::copy(pose.offsets.begin(), pose.offsets.end(), state.begin() + 18);
+    const auto source = sjp::originalSkeleton(state);
+    auto changed = source;
+    changed.points[size_t(sjp::OriginalJoint::Hand1)].z += .8;
+    single.build(sjp::visual::shadowSilhouette(source), .025);
+    overlap.build(sjp::visual::shadowSilhouette(changed), .025);
+    require(single.coverage != overlap.coverage, "Shadow does not follow the displayed joints");
 }
 struct Current {
     std::array<float, 4> color{1, 1, 1, 1};
@@ -498,6 +549,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 
 int main() {
     try {
+        audit::singleShadow();
         size_t snowy = 0;
         constexpr size_t weatherSamples = 100000;
         for (uint32_t i = 0; i < weatherSamples; ++i) {

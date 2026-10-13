@@ -2,6 +2,7 @@
 #include "presentation_timing.h"
 #include "original_skeleton.h"
 #include "visual_weather.h"
+#include "visual_shadow.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -111,7 +112,7 @@ void jumperShadow(const Hill &h, const Frame &f) {
     const double clearance = std::max(0.0, f.y - surface(f.x));
     const double offsetX = onInrun ? 0 : std::min(14.0, clearance * .32);
     const double offsetZ = onInrun ? 0 : -std::min(10.0, clearance * .25);
-    const double softness = .035 + std::min(.12, clearance * .003);
+    const double softness = .025 + std::min(.18, clearance * .007);
     const float visibility = float(std::exp(-clearance / 85));
     // Use exactly the same displayed joints as the athlete. Shadow projection
     // is presentation only; neither this pose nor the origin is changed.
@@ -124,11 +125,9 @@ void jumperShadow(const Hill &h, const Frame &f) {
     }
     const auto skeleton =
         f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
-    const auto project = [&](OriginalJoint joint) {
-        const Vec3 local = skeleton[joint];
-        const double lift = std::max(0.0, local.y);
-        return Vec3{f.x + local.x + offsetX + lift * .12, 0, local.z + offsetZ - lift * .15};
-    };
+    visual::ShadowMask silhouette;
+    silhouette.build(visual::shadowSilhouette(skeleton), softness);
+    const visual::CameraSurface receiver(h);
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::COLOR_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
     sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
@@ -137,84 +136,47 @@ void jumperShadow(const Hill &h, const Frame &f) {
     sjp::gfx::depthMask(sjp::gfx::FALSE);
     sjp::gfx::enable(sjp::gfx::POLYGON_OFFSET_FILL);
     sjp::gfx::polygonOffset(-1, -1);
-    const auto shadowVertex = [&](Vec3 p, float alpha) {
-        if (onInrun) {
-            // The receiver is the actual ramp, bounded by its lip and rails.
-            p.x = std::min(0.0, p.x);
-            p.z = clamp(p.z, -2.25, 2.25);
+    const bool central = onInrun ||
+                         std::max(std::abs(offsetZ + silhouette.z),
+                                  std::abs(offsetZ + silhouette.z + (visual::ShadowMask::rows - 1) * silhouette.dz)) <=
+                             19 * h.scale();
+    std::array<double, visual::ShadowMask::columns> xs{}, ground{}, ramp{};
+    for (int column = 0; column < visual::ShadowMask::columns; ++column) {
+        xs[size_t(column)] = f.x + offsetX + silhouette.x + column * silhouette.dx;
+        if (onInrun)
+            xs[size_t(column)] = std::min(0.0, xs[size_t(column)]);
+        if (central) {
+            ground[size_t(column)] = receiver.height(xs[size_t(column)], 2.31);
+            ramp[size_t(column)] = receiver.height(xs[size_t(column)], 0);
         }
-        col({.055f, .10f, .14f, alpha});
-        sjp::gfx::vertex3d(p.x, surface(p.x) + .025, p.z);
-    };
-    const auto ellipse = [&](Vec3 center, double rx, double rz, float opacity) {
-        constexpr int sides = 24;
-        sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
-        shadowVertex(center, opacity);
-        for (int i = 0; i <= sides; ++i) {
-            const double angle = i * 2 * PI / sides;
-            shadowVertex(center + Vec3{std::cos(angle) * rx * .66, 0, std::sin(angle) * rz * .66},
-                         opacity * .93f);
-        }
-        sjp::gfx::end();
-        sjp::gfx::begin(sjp::gfx::TRIANGLE_STRIP);
-        for (int i = 0; i <= sides; ++i) {
-            const double angle = i * 2 * PI / sides;
-            shadowVertex(center + Vec3{std::cos(angle) * rx * .66, 0, std::sin(angle) * rz * .66},
-                         opacity * .93f);
-            shadowVertex(center + Vec3{std::cos(angle) * rx, 0, std::sin(angle) * rz}, 0);
-        }
-        sjp::gfx::end();
-    };
-    const auto segment = [&](OriginalJoint from, OriginalJoint to, double radius, float opacity) {
-        const Vec3 a = project(from), b = project(to);
-        const double dx = b.x - a.x, dz = b.z - a.z, length = std::hypot(dx, dz);
-        if (length < 1e-5) {
-            ellipse(a, radius + softness, radius + softness, opacity);
-            return;
-        }
-        const Vec3 side{-dz / length, 0, dx / length};
-        sjp::gfx::begin(sjp::gfx::QUADS);
-        shadowVertex(a - side * radius, opacity);
-        shadowVertex(b - side * radius, opacity);
-        shadowVertex(b + side * radius, opacity);
-        shadowVertex(a + side * radius, opacity);
-        sjp::gfx::end();
-        for (double sign : {-1.0, 1.0}) {
-            sjp::gfx::begin(sjp::gfx::TRIANGLE_STRIP);
-            shadowVertex(a + side * (radius * sign), opacity);
-            shadowVertex(a + side * ((radius + softness) * sign), 0);
-            shadowVertex(b + side * (radius * sign), opacity);
-            shadowVertex(b + side * ((radius + softness) * sign), 0);
-            sjp::gfx::end();
-        }
-        ellipse(a, radius + softness, radius + softness, opacity * .7f);
-        ellipse(b, radius + softness, radius + softness, opacity * .7f);
-    };
-    // A restrained soft footprint ties the silhouette to the snow. Most of
-    // the contrast now comes from the visible body and ski shapes, rather
-    // than a large pale oval that loses the athlete's outline in flight.
-    const double spread = std::min(.65, clearance * .016);
-    ellipse({f.x + offsetX + .12, 0, offsetZ}, 1.35 + spread, .43 + spread * .45, visibility * .32f);
-    segment(OriginalJoint::HipCenter, OriginalJoint::ShoulderCenter, .17, visibility * .43f);
-    segment(OriginalJoint::ShoulderCenter, OriginalJoint::Head, .09, visibility * .34f);
-    ellipse(project(OriginalJoint::Head), .20 + softness, .19 + softness, visibility * .42f);
-    const OriginalJoint ankles[]{OriginalJoint::Ankle1, OriginalJoint::Ankle2};
-    const OriginalJoint knees[]{OriginalJoint::Knee1, OriginalJoint::Knee2};
-    const OriginalJoint hips[]{OriginalJoint::Hip1, OriginalJoint::Hip2};
-    const OriginalJoint shoulders[]{OriginalJoint::Shoulder1, OriginalJoint::Shoulder2};
-    const OriginalJoint elbows[]{OriginalJoint::Elbow1, OriginalJoint::Elbow2};
-    const OriginalJoint hands[]{OriginalJoint::Hand1, OriginalJoint::Hand2};
-    const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
-    const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
-    const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
-    for (size_t side = 0; side < 2; ++side) {
-        segment(hips[side], knees[side], .105, visibility * .28f);
-        segment(knees[side], ankles[side], .075, visibility * .24f);
-        segment(shoulders[side], elbows[side], .06, visibility * .22f);
-        segment(elbows[side], hands[side], .05, visibility * .22f);
-        segment(rear[side], front[side], .036, visibility * .29f);
-        segment(front[side], tips[side], .033, visibility * .26f);
     }
+    const auto shadowVertex = [&](int column, int row) {
+        const double x = xs[size_t(column)];
+        double z = offsetZ + silhouette.z + row * silhouette.dz;
+        if (onInrun)
+            z = clamp(z, -2.25, 2.25);
+        const float alpha = silhouette.coverage[size_t(row * visual::ShadowMask::columns + column)];
+        col({.09f, .15f, .20f, alpha * visibility * .38f});
+        const double y = central ? (std::abs(z) <= 2.3 ? ramp[size_t(column)] : ground[size_t(column)])
+                                 : receiver.height(x, z);
+        sjp::gfx::vertex3d(x, y + .012, z);
+    };
+    // Each receiver cell is drawn once. Body/limb/ski overlap has already been
+    // resolved in the mask; no oval or second contact shadow is drawn.
+    sjp::gfx::begin(sjp::gfx::QUADS);
+    for (int row = 0; row < visual::ShadowMask::rows - 1; ++row)
+        for (int column = 0; column < visual::ShadowMask::columns - 1; ++column) {
+            const size_t at = size_t(row * visual::ShadowMask::columns + column);
+            if (std::max({silhouette.coverage[at], silhouette.coverage[at + 1],
+                          silhouette.coverage[at + visual::ShadowMask::columns],
+                          silhouette.coverage[at + visual::ShadowMask::columns + 1]}) * visibility < .004f)
+                continue;
+            shadowVertex(column, row);
+            shadowVertex(column, row + 1);
+            shadowVertex(column + 1, row + 1);
+            shadowVertex(column + 1, row);
+        }
+    sjp::gfx::end();
     sjp::gfx::popAttrib();
 }
 void lookAt(Vec3 eye, Vec3 center) {
