@@ -21,6 +21,9 @@ struct StandSection {
 };
 struct GrandstandLayout {
     static constexpr int sectionCount = 14, rowCount = 3;
+    static double center(const Hill &h, int index) { return (79 + index * 6.2) * h.scale(); }
+    static double sectionWidth(const Hill &h) { return 5.8 * h.scale(); }
+    static double nearDistance(const Hill &h) { return std::max(25 * h.scale(), 8.0); }
     double near = 0;
     std::array<StandSection, sectionCount * 2> sections;
 
@@ -29,13 +32,12 @@ struct GrandstandLayout {
     }
     void build(const Hill &h) {
         const CameraSurface snow(h);
-        const double s = h.scale();
-        near = std::max(25 * s, 8.0);
+        near = nearDistance(h);
         for (int side : {-1, 1})
             for (int index = 0; index < sectionCount; ++index) {
                 auto &stand = sections[size_t((side > 0 ? sectionCount : 0) + index)];
-                stand.center = (79 + index * 6.2) * s;
-                stand.width = 5.8 * s;
+                stand.center = center(h, index);
+                stand.width = sectionWidth(h);
                 stand.terraces.clear();
                 const double first = stand.center - stand.width * .5, last = stand.center + stand.width * .5;
                 const double front = side * (near + 1.35), back = side * (near + 4.95);

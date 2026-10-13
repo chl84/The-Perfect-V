@@ -13,7 +13,7 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers eight standalone suites:
+Without external fixtures, CTest registers nine standalone suites:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
@@ -23,6 +23,7 @@ Without external fixtures, CTest registers eight standalone suites:
 - `fall-presentation`: deterministic display contact, unchanged physics/poses and no GL calls in the contact calculation.
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
 - `storage-migration`: stable hill identifiers and compatibility with older saves.
+- `crowd-audio`: approach/flight envelopes on all hills, distant and nearby falls, replay seeking/speed, one-shot reactions, smooth fades, valid sample mixing and the sound toggle through a dummy SDL audio device.
 
 `BUILD_TESTING=OFF` builds only the game and its simulation library.
 
@@ -51,7 +52,7 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
-relative mouse mode and Ready/Next button hit testing. The eight standalone suites
+relative mouse mode and Ready/Next button hit testing. The standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
@@ -116,6 +117,29 @@ Each venue's layout is built once. Static bodies and animated arms use the
 same cached landing and keep both shoe soles inside its wooden surface.
 Adult heights vary from 1.60 to 1.90 m while preserving shoe width and crowd
 density. The command suite checks actual floor and shoe vertices on all venues.
+
+## Crowd audio
+
+The spectator bed and cheering loop follow the athlete's proximity to the actual
+stand positions, with a smooth arrival envelope and increasing excitement up to
+a long jump. The stand coordinates are shared with the visual layout. They are
+cached per venue; no per-person sources or new simulation behavior are involved.
+
+A fall hushes cheers to a quiet background with a 25 ms smoothing time and triggers
+a restrained sequence of gasps and concerned voices. Subdued crowd conversation
+continues underneath. There is no minimum reaction volume: early falls
+outside hearing range are silent, and intermediate distances attenuate the
+reaction. The general crowd bed remains audible at reduced volume after the fall.
+
+Recorded crash/landing times restore the correct reaction position after replay
+seeks. Pausing fades the audio, resuming synchronizes it with the athlete, and
+replay speed controls sample playback. New jumps/menu changes clear reactions;
+the result screen allows an unfinished reaction to finish and fades ambience.
+
+Three WAV assets based on CC0 recordings occupy about 1.5 MiB on disk and 6 MiB as mono 48 kHz float
+samples. Loading/conversion happens once at startup. The audio callback mixes
+fixed blocks without allocation, disk access or application locks. Source
+credits and the reproducible preparation script accompany the assets.
 
 ## Fall model visibility
 

@@ -233,9 +233,9 @@ class App {
         std::string assets;
         const char *base = SDL_GetBasePath();
         std::filesystem::path executableDir = base ? base : ".";
-        for (auto candidate :
-             {executableDir / "assets", executableDir / "../assets", executableDir / "../share/the-perfect-v",
-              std::filesystem::path(SJP_ASSET_DIR)}) {
+        for (auto candidate : {executableDir / "assets", executableDir / "../assets",
+                               executableDir / "../share/the-perfect-v/assets",
+                               executableDir / "../share/the-perfect-v", std::filesystem::path(SJP_ASSET_DIR)}) {
             if (std::filesystem::exists(candidate / "fonts/Interim-Regular.ttf")) {
                 assets = candidate.string();
                 break;
@@ -245,7 +245,7 @@ class App {
             throw std::runtime_error("Game fonts are missing. Keep the assets directory with the game.");
         renderer = std::make_unique<Renderer>(window, assets, noMsaa, !smoke, gpuValidation);
         renderer->setSynchronousRendering(synchronousRendering);
-        audio = std::make_unique<Audio>();
+        audio = std::make_unique<Audio>(assets);
         if (dataDir.empty()) {
             // Retain the legacy namespace so the rename keeps existing saves.
             char *pref = SDL_GetPrefPath("SkiJumpPro", "SkiJumpPro");
@@ -357,8 +357,6 @@ class App {
                     if (sim.phase != before) {
                         if (sim.phase == Phase::Flight && records.sound)
                             audio->cue(2);
-                        if (sim.phase == Phase::Outrun && records.sound)
-                            audio->cue(sim.crashed ? 4 : 3);
                     }
                     if (sim.phase == Phase::Finished || sim.phase == Phase::Disqualified) {
                         completeJump();
@@ -369,8 +367,7 @@ class App {
                 accumulator = 0;
             if (screen == Screen::Replay && replayPlaying)
                 replayTime = std::min(replayTime + dt * replaySpeed, replayDuration());
-            audio->set(screen == Screen::Playing ? std::sqrt(sim.vx * sim.vx + sim.vy * sim.vy) : 0,
-                       records.sound);
+            updateAudio(dt);
             render();
             renderer->finish();
             // Bound submission rate even when VSync is unavailable or ignored.
@@ -380,6 +377,18 @@ class App {
     }
 
   private:
+    void updateAudio(double dt) {
+        if (screen == Screen::Replay) {
+            const auto mode = replayPlaying && replayTime < replayDuration()
+                                  ? CrowdPlayback::Active : CrowdPlayback::Paused;
+            audio->update(replayFrame(replayTime), dt, mode, records.sound, float(replaySpeed));
+        } else {
+            const auto mode = screen == Screen::Playing ? CrowdPlayback::Active
+                              : screen == Screen::Paused ? CrowdPlayback::Paused
+                              : screen == Screen::Result ? CrowdPlayback::Result : CrowdPlayback::Off;
+            audio->update(sim.renderFrame(accumulator), dt, mode, records.sound);
+        }
+    }
     double chosenWind() { return windMode == 1 ? 0 : windMode == 2 ? 3 : -2.5; }
     void captureMouse() {
         const bool capture = screen == Screen::Playing && (!smoke || smokeMouseCapture);
@@ -427,6 +436,8 @@ class App {
     }
     void changeScreen(Screen s) {
         screen = s;
+        if (s != Screen::Playing && s != Screen::Paused && s != Screen::Result && s != Screen::Replay)
+            audio->stop();
         if (s == Screen::Hills || s == Screen::Records)
             hillPage = selectedHill / HILLS_PER_PAGE;
         captureMouse();
@@ -451,6 +462,7 @@ class App {
                 environment::hash(sim.initialRandomSeed() ^ ++visualJumpSerial * 0x9e3779b9U));
         renderer->setEnvironment(activeEnvironment, true);
         renderer->resetCamera();
+        audio->beginJump(sim.hill());
         changeScreen(destination);
         if (records.sound)
             audio->cue(1);
@@ -652,7 +664,13 @@ class App {
                                                         : visual::replayWeatherSeed(lastReplay));
         renderer->setEnvironment(replayEnvironment, true);
         renderer->resetCamera();
+        audio->beginJump(hills()[lastReplay.hill], &lastReplay.frames);
         changeScreen(Screen::Replay);
+    }
+    void seekReplay(double position) {
+        replayTime = clamp(position, 0.0, replayDuration());
+        audio->seekCrowd();
+        renderer->resetCamera();
     }
     double replayDuration() const {
         return lastReplay.frames.empty()
@@ -885,9 +903,11 @@ class App {
             beginReplay();
             break;
         case Action::ReplayPlay:
-            if (replayTime >= replayDuration())
-                replayTime = 0;
-            replayPlaying = !replayPlaying;
+            if (replayTime >= replayDuration()) {
+                seekReplay(0);
+                replayPlaying = true;
+            } else
+                replayPlaying = !replayPlaying;
             break;
         case Action::ReplaySlow:
             replaySpeed = std::max(.25, replaySpeed / 2);
@@ -896,8 +916,7 @@ class App {
             replaySpeed = std::min(2.0, replaySpeed * 2);
             break;
         case Action::ReplaySeek:
-            replayTime = clamp((mouseX - 290) / 860 * replayDuration(), 0.0, replayDuration());
-            renderer->resetCamera();
+            seekReplay((mouseX - 290) / 860 * replayDuration());
             break;
         case Action::Camera:
             camera = (camera + 1) % 3;
@@ -1068,12 +1087,10 @@ class App {
                     if (key == SDLK_SPACE)
                         action(Action::ReplayPlay);
                     if (key == SDLK_LEFT) {
-                        replayTime = std::max(0.0, replayTime - 2);
-                        renderer->resetCamera();
+                        seekReplay(replayTime - 2);
                     }
                     if (key == SDLK_RIGHT) {
-                        replayTime = std::min(replayDuration(), replayTime + 2);
-                        renderer->resetCamera();
+                        seekReplay(replayTime + 2);
                     }
                     if (key == SDLK_1)
                         replaySpeed = .25;
@@ -1966,6 +1983,7 @@ class App {
                 in.buttonMask = 0;
             }
             sim.step(1. / 120, in);
+            updateAudio(1. / 120);
             if (n % 4 == 0) {
                 render();
                 if (sim.phase == Phase::Flight && sim.phaseTime > 1.4 && !flightCaptured) {
@@ -1992,7 +2010,8 @@ class App {
             return 1;
         }
         beginReplay();
-        replayTime = replayDuration() * .6;
+        seekReplay(replayDuration() * .6);
+        updateAudio(0);
         std::string previousExport;
         for (int copy = 0; copy < 2; ++copy) {
             clickButton(Action::ReplayExportNative);
@@ -2149,6 +2168,7 @@ class App {
                 startTurn();
                 for (int n = 0; n < 6000 && screen == Screen::Playing; n++) {
                     sim.step(1. / 120, autopilot(sim));
+                    updateAudio(1. / 120);
                     if (sim.phase == Phase::Finished)
                         completeJump();
                 }
