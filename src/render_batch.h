@@ -1,17 +1,18 @@
 #pragma once
-#include <GL/gl.h>
+#include "draw_commands.h"
 #include <array>
 #include <vector>
 
 namespace sjp::visual {
 // Consolidate static scenery into long primitive streams while compiling its
-// existing display list. State changes remain in their original order, and
-// dynamic scenery still uses ordinary OpenGL. No persistent CPU mesh is kept.
+// existing cached mesh. State changes remain in their original order, and
+// dynamic scenery uses the same Vulkan command recorder. Uploaded meshes
+// release their temporary CPU vertex data.
 struct MeshVertex {
-    std::array<GLdouble, 3> position{};
-    std::array<GLdouble, 3> normal{0, 1, 0};
-    std::array<GLfloat, 4> color{1, 1, 1, 1};
-    std::array<GLdouble, 2> uv{};
+    std::array<double, 3> position{};
+    std::array<double, 3> normal{0, 1, 0};
+    std::array<float, 4> color{1, 1, 1, 1};
+    std::array<double, 2> uv{};
 };
 class StaticBatch;
 inline thread_local StaticBatch *activeBatch = nullptr;
@@ -19,14 +20,14 @@ class StaticBatch {
   public:
     MeshVertex current;
     std::vector<MeshVertex> primitive, triangles;
-    GLenum mode = GL_TRIANGLES;
+    sjp::gfx::Enum mode = sjp::gfx::TRIANGLES;
     bool passthrough = false;
 
     StaticBatch() {
-        GLfloat color[4], normal[3], uv[4];
-        ::glGetFloatv(GL_CURRENT_COLOR, color);
-        ::glGetFloatv(GL_CURRENT_NORMAL, normal);
-        ::glGetFloatv(GL_CURRENT_TEXTURE_COORDS, uv);
+        float color[4], normal[3], uv[4];
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_COLOR, color);
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_NORMAL, normal);
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_TEXTURE_COORDS, uv);
         for (int i = 0; i < 4; ++i)
             current.color[i] = color[i];
         for (int i = 0; i < 3; ++i)
@@ -42,23 +43,23 @@ class StaticBatch {
     void flush() {
         if (triangles.empty())
             return;
-        ::glBegin(GL_TRIANGLES);
+        ::sjp::gfx::begin(sjp::gfx::TRIANGLES);
         for (const auto &v : triangles) {
-            ::glColor4fv(v.color.data());
-            ::glNormal3dv(v.normal.data());
-            ::glTexCoord2dv(v.uv.data());
-            ::glVertex3dv(v.position.data());
+            ::sjp::gfx::color4fv(v.color.data());
+            ::sjp::gfx::normal3dv(v.normal.data());
+            ::sjp::gfx::texCoord2dv(v.uv.data());
+            ::sjp::gfx::vertex3dv(v.position.data());
         }
-        ::glEnd();
+        ::sjp::gfx::end();
         triangles.clear();
     }
     void finish() {
         if (activeBatch != this)
             return;
         flush();
-        ::glColor4fv(current.color.data());
-        ::glNormal3dv(current.normal.data());
-        ::glTexCoord2dv(current.uv.data());
+        ::sjp::gfx::color4fv(current.color.data());
+        ::sjp::gfx::normal3dv(current.normal.data());
+        ::sjp::gfx::texCoord2dv(current.uv.data());
         activeBatch = nullptr;
     }
     void emit(size_t a, size_t b, size_t c) {
@@ -69,27 +70,27 @@ class StaticBatch {
     void end() {
         const size_t count = primitive.size();
         switch (mode) {
-        case GL_TRIANGLES:
+        case sjp::gfx::TRIANGLES:
             for (size_t i = 0; i + 2 < count; i += 3)
                 emit(i, i + 1, i + 2);
             break;
-        case GL_QUADS:
+        case sjp::gfx::QUADS:
             for (size_t i = 0; i + 3 < count; i += 4) {
                 emit(i, i + 1, i + 2);
                 emit(i, i + 2, i + 3);
             }
             break;
-        case GL_QUAD_STRIP:
+        case sjp::gfx::QUAD_STRIP:
             for (size_t i = 0; i + 3 < count; i += 2) {
                 emit(i, i + 1, i + 3);
                 emit(i, i + 3, i + 2);
             }
             break;
-        case GL_TRIANGLE_STRIP:
+        case sjp::gfx::TRIANGLE_STRIP:
             for (size_t i = 0; i + 2 < count; ++i)
                 i % 2 ? emit(i + 1, i, i + 2) : emit(i, i + 1, i + 2);
             break;
-        case GL_TRIANGLE_FAN:
+        case sjp::gfx::TRIANGLE_FAN:
             for (size_t i = 1; i + 1 < count; ++i)
                 emit(0, i, i + 1);
             break;
@@ -104,73 +105,73 @@ inline void flush() {
     if (activeBatch)
         activeBatch->flush();
 }
-inline void begin(GLenum mode) {
+inline void begin(sjp::gfx::Enum mode) {
     if (!activeBatch) {
-        ::glBegin(mode);
+        ::sjp::gfx::begin(mode);
         return;
     }
     activeBatch->mode = mode;
     activeBatch->primitive.clear();
-    activeBatch->passthrough = mode != GL_TRIANGLES && mode != GL_QUADS && mode != GL_QUAD_STRIP &&
-                               mode != GL_TRIANGLE_STRIP && mode != GL_TRIANGLE_FAN;
+    activeBatch->passthrough = mode != sjp::gfx::TRIANGLES && mode != sjp::gfx::QUADS && mode != sjp::gfx::QUAD_STRIP &&
+                               mode != sjp::gfx::TRIANGLE_STRIP && mode != sjp::gfx::TRIANGLE_FAN;
     if (activeBatch->passthrough) {
         activeBatch->flush();
-        ::glBegin(mode);
+        ::sjp::gfx::begin(mode);
     }
 }
 inline void end() {
     if (!activeBatch || activeBatch->passthrough)
-        ::glEnd();
+        ::sjp::gfx::end();
     else
         activeBatch->end();
     if (activeBatch)
         activeBatch->passthrough = false;
 }
-inline void color(GLfloat r, GLfloat g, GLfloat b, GLfloat a) {
+inline void color(float r, float g, float b, float a) {
     if (activeBatch)
         activeBatch->current.color = {r, g, b, a};
     if (!activeBatch || activeBatch->passthrough)
-        ::glColor4f(r, g, b, a);
+        ::sjp::gfx::color4f(r, g, b, a);
 }
-inline void normal(GLdouble x, GLdouble y, GLdouble z) {
+inline void normal(double x, double y, double z) {
     if (activeBatch)
         activeBatch->current.normal = {x, y, z};
     if (!activeBatch || activeBatch->passthrough)
-        ::glNormal3d(x, y, z);
+        ::sjp::gfx::normal3d(x, y, z);
 }
-inline void texCoord(GLdouble u, GLdouble v) {
+inline void texCoord(double u, double v) {
     if (activeBatch)
         activeBatch->current.uv = {u, v};
     if (!activeBatch || activeBatch->passthrough)
-        ::glTexCoord2d(u, v);
+        ::sjp::gfx::texCoord2d(u, v);
 }
-inline void vertex(GLdouble x, GLdouble y, GLdouble z) {
+inline void vertex(double x, double y, double z) {
     if (activeBatch && !activeBatch->passthrough) {
         activeBatch->current.position = {x, y, z};
         activeBatch->primitive.push_back(activeBatch->current);
     } else
-        ::glVertex3d(x, y, z);
+        ::sjp::gfx::vertex3d(x, y, z);
 }
-inline void enable(GLenum cap) {
+inline void enable(sjp::gfx::Enum cap) {
     flush();
-    ::glEnable(cap);
+    ::sjp::gfx::enable(cap);
 }
-inline void disable(GLenum cap) {
+inline void disable(sjp::gfx::Enum cap) {
     flush();
-    ::glDisable(cap);
+    ::sjp::gfx::disable(cap);
 }
-inline void pushAttrib(GLbitfield bits) {
+inline void pushAttrib(sjp::gfx::Flags bits) {
     flush();
-    ::glPushAttrib(bits);
+    ::sjp::gfx::pushAttrib(bits);
 }
 inline void popAttrib() {
     flush();
-    ::glPopAttrib();
+    ::sjp::gfx::popAttrib();
     if (activeBatch) {
-        GLfloat color[4], normal[3], uv[4];
-        ::glGetFloatv(GL_CURRENT_COLOR, color);
-        ::glGetFloatv(GL_CURRENT_NORMAL, normal);
-        ::glGetFloatv(GL_CURRENT_TEXTURE_COORDS, uv);
+        float color[4], normal[3], uv[4];
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_COLOR, color);
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_NORMAL, normal);
+        ::sjp::gfx::getFloatv(sjp::gfx::CURRENT_TEXTURE_COORDS, uv);
         for (int i = 0; i < 4; ++i)
             activeBatch->current.color[i] = color[i];
         for (int i = 0; i < 3; ++i)
@@ -178,32 +179,32 @@ inline void popAttrib() {
         activeBatch->current.uv = {uv[0], uv[1]};
     }
 }
-inline void materialfv(GLenum face, GLenum pname, const GLfloat *value) {
+inline void materialfv(sjp::gfx::Enum face, sjp::gfx::Enum pname, const float *value) {
     flush();
-    ::glMaterialfv(face, pname, value);
+    ::sjp::gfx::materialfv(face, pname, value);
 }
-inline void materialf(GLenum face, GLenum pname, GLfloat value) {
+inline void materialf(sjp::gfx::Enum face, sjp::gfx::Enum pname, float value) {
     flush();
-    ::glMaterialf(face, pname, value);
+    ::sjp::gfx::materialf(face, pname, value);
 }
-inline void bindTexture(GLenum target, GLuint texture) {
+inline void bindTexture(sjp::gfx::Enum target, sjp::gfx::Id texture) {
     flush();
-    ::glBindTexture(target, texture);
+    ::sjp::gfx::bindTexture(target, texture);
 }
-inline void polygonOffset(GLfloat factor, GLfloat units) {
+inline void polygonOffset(float factor, float units) {
     flush();
-    ::glPolygonOffset(factor, units);
+    ::sjp::gfx::polygonOffset(factor, units);
 }
-inline void depthMask(GLboolean value) {
+inline void depthMask(bool value) {
     flush();
-    ::glDepthMask(value);
+    ::sjp::gfx::depthMask(value);
 }
-inline void blendFunc(GLenum source, GLenum destination) {
+inline void blendFunc(sjp::gfx::Enum source, sjp::gfx::Enum destination) {
     flush();
-    ::glBlendFunc(source, destination);
+    ::sjp::gfx::blendFunc(source, destination);
 }
-inline void texEnvi(GLenum target, GLenum pname, GLint value) {
+inline void texEnvi(sjp::gfx::Enum target, sjp::gfx::Enum pname, int value) {
     flush();
-    ::glTexEnvi(target, pname, value);
+    ::sjp::gfx::texEnvi(target, pname, value);
 }
 } // namespace sjp::visual

@@ -1,7 +1,7 @@
 #pragma once
 #include "physics.h"
-#include <GL/gl.h>
-#include <SDL.h>
+#include "draw_commands.h"
+#include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -20,7 +20,8 @@ constexpr Color ink{.045f, .09f, .13f, 1}, panel{.065f, .12f, .16f, .94f}, white
 }
 class Renderer {
   public:
-    Renderer(SDL_Window *window, const std::string &assetPath);
+    Renderer(SDL_Window *window, const std::string &assetPath, bool noMsaa = false,
+             bool vsync = true, bool validation = false);
     ~Renderer();
     void begin(const Hill &, const Frame &, double time, int camera, bool panorama, bool ghost = false,
                const Frame *ghostFrame = nullptr);
@@ -49,14 +50,14 @@ class Renderer {
         float u, v, w, h, bearingX, bearingY, advance;
     };
     struct Font {
-        GLuint tex = 0;
+        sjp::gfx::Id tex = 0;
         std::array<Glyph, 128> glyphs{};
     };
     SDL_Window *window;
     Font regular, boldFont;
-    GLuint snowTexture = 0;
-    GLuint naturalSnowTexture = 0;
-    std::array<GLuint, HILL_COUNT> landscapes{};
+    sjp::gfx::Id snowTexture = 0;
+    sjp::gfx::Id naturalSnowTexture = 0;
+    std::array<sjp::gfx::Id, HILL_COUNT> landscapes{};
     std::array<uint64_t, HILL_COUNT> landscapeUse{};
     uint64_t landscapeClock = 0;
     Vec3 eye{}, target{};

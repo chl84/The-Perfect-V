@@ -32,7 +32,8 @@ def main():
     meta = {"started": datetime.datetime.now().astimezone().isoformat(), "command": command,
             "timeout": args.timeout,
             "environment": {key: os.environ.get(key) for key in
-                            ("AMD_DEBUG", "SDL_VIDEODRIVER", "LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER")}}
+                            ("AMD_DEBUG", "SDL_VIDEODRIVER", "LIBGL_ALWAYS_SOFTWARE", "GALLIUM_DRIVER",
+                             "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "SDL_GPU_DRIVER")}}
     (args.output / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
     journal_log = (args.output / "kernel.log").open("w", buffering=1)
     journal = subprocess.Popen(["journalctl", "-k", "-f", "--since=now", "--no-pager", "-o", "short-iso"],

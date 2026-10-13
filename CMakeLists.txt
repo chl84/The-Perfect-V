@@ -3,14 +3,34 @@ project(ThePerfectV VERSION 1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(SDL2 REQUIRED IMPORTED_TARGET sdl2)
-find_package(OpenGL REQUIRED)
+pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3>=3.4.0)
+find_program(GLSLC glslc)
+if(NOT GLSLC)
+  message(FATAL_ERROR "glslc (shaderc) is required to compile the Vulkan shaders.")
+endif()
 find_package(Freetype REQUIRED)
+set(TPV_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated-shaders")
+foreach(stage vert frag)
+  add_custom_command(OUTPUT "${TPV_SHADER_DIR}/scene.${stage}.inc"
+    COMMAND "${CMAKE_COMMAND}" -E make_directory "${TPV_SHADER_DIR}"
+    COMMAND "${GLSLC}" -mfmt=c --target-env=vulkan1.0
+      "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+      -o "${TPV_SHADER_DIR}/scene.${stage}.inc"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+    VERBATIM)
+endforeach()
+add_custom_target(tpv-shaders DEPENDS
+  "${TPV_SHADER_DIR}/scene.vert.inc" "${TPV_SHADER_DIR}/scene.frag.inc")
+add_library(tpv_vulkan src/draw_commands.cpp src/vulkan_backend.cpp)
+add_dependencies(tpv_vulkan tpv-shaders)
+target_include_directories(tpv_vulkan PUBLIC src PRIVATE "${TPV_SHADER_DIR}")
+target_link_libraries(tpv_vulkan PUBLIC PkgConfig::SDL3)
+target_compile_options(tpv_vulkan PRIVATE -Wall -Wextra -Wpedantic)
 add_library(ski_physics src/physics.cpp src/original_physics.cpp src/original_pose.cpp src/original_scoring.cpp src/original_controls.cpp src/original_wind.cpp src/original_ai.cpp src/original_outrun.cpp src/competition.cpp src/competition_storage.cpp src/original_replay.cpp src/original_skeleton.cpp)
 target_include_directories(ski_physics PUBLIC src)
 target_compile_options(ski_physics PRIVATE -Wall -Wextra -Wpedantic)
 add_executable(the-perfect-v src/main.cpp src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp src/renderer_effects.cpp src/renderer_ui.cpp src/storage.cpp src/audio.cpp)
-target_link_libraries(the-perfect-v PRIVATE ski_physics PkgConfig::SDL2 OpenGL::GL Freetype::Freetype)
+target_link_libraries(the-perfect-v PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
 target_compile_options(the-perfect-v PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_definitions(the-perfect-v PRIVATE SJP_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 include(CTest)
@@ -19,7 +39,7 @@ if(TPV_BUILD_RENDER_PROBE)
   add_executable(render-probe tools/render_probe.cpp src/storage.cpp
     src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp
     src/renderer_effects.cpp src/renderer_ui.cpp)
-  target_link_libraries(render-probe PRIVATE ski_physics PkgConfig::SDL2 OpenGL::GL Freetype::Freetype)
+  target_link_libraries(render-probe PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
   target_compile_options(render-probe PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 # Reference recordings are local development data and are not distributed.
@@ -31,23 +51,19 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/reference/EXAMPLE.RPL" AND
 endif()
 option(SJP_REFERENCE_TESTS "Enable tests requiring local reference files and captures" ${SJP_REFERENCE_TESTS_DEFAULT})
 if(BUILD_TESTING)
-  # CPU command model supplies GL/SDL entry points; do not link to OpenGL.
+  # CPU command model supplies drawing/SDL entry points; it does not use a GPU.
   add_executable(renderer-command-tests tests/renderer_command_tests.cpp
     src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp
     src/renderer_effects.cpp src/renderer_ui.cpp)
   target_link_libraries(renderer-command-tests PRIVATE ski_physics Freetype::Freetype)
-  target_include_directories(renderer-command-tests PRIVATE ${SDL2_INCLUDE_DIRS} ${OPENGL_INCLUDE_DIR})
-  target_compile_options(renderer-command-tests PRIVATE ${SDL2_CFLAGS_OTHER})
+  target_link_libraries(renderer-command-tests PRIVATE PkgConfig::SDL3)
   target_compile_definitions(renderer-command-tests PRIVATE SJP_TEST_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
   add_test(NAME renderer-commands COMMAND renderer-command-tests)
   add_executable(render-interpolation-tests tests/render_interpolation_tests.cpp)
   target_link_libraries(render-interpolation-tests PRIVATE ski_physics)
   add_test(NAME render-interpolation COMMAND render-interpolation-tests)
   add_executable(fall-presentation-tests tests/fall_presentation_tests.cpp src/renderer_athlete.cpp)
-  target_link_libraries(fall-presentation-tests PRIVATE ski_physics PkgConfig::SDL2 OpenGL::GL)
-  target_link_options(fall-presentation-tests PRIVATE
-    -Wl,--wrap=glBegin -Wl,--wrap=glEnd -Wl,--wrap=glNormal3d
-    -Wl,--wrap=glVertex3d -Wl,--wrap=glColor4f)
+  target_link_libraries(fall-presentation-tests PRIVATE ski_physics PkgConfig::SDL3)
   add_test(NAME fall-presentation COMMAND fall-presentation-tests)
   add_executable(physics-tests tests/physics_tests.cpp src/storage.cpp)
   target_link_libraries(physics-tests PRIVATE ski_physics)

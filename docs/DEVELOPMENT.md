@@ -2,14 +2,15 @@
 
 ## Standalone source checkout
 
-The game requires CMake, a C++17 compiler, pkg-config, SDL2, OpenGL and FreeType.
+The game requires CMake, a C++17 compiler, pkg-config, SDL3 3.4+, FreeType and glslc.
+The runtime requires a Vulkan driver. Compiled SPIR-V shaders are embedded in the executable.
 The compiled hill and pose tables are included in `src/`; gameplay does not read
 external reference data or analysis captures.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Release
+cmake --build build-vulkan --parallel 4
+ctest --test-dir build-vulkan --output-on-failure
 ```
 
 Without external fixtures, CTest registers five standalone suites:
@@ -29,9 +30,9 @@ It defaults to ON only when the local demo replay and hill fixtures are present.
 A standalone checkout defaults to OFF and does not require Python.
 
 ```sh
-cmake -S . -B build -DSJP_REFERENCE_TESTS=ON
-cmake --build build --parallel 4
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-vulkan -DSJP_REFERENCE_TESTS=ON
+cmake --build build-vulkan --parallel 4
+ctest --test-dir build-vulkan --output-on-failure
 ```
 
 These suites also require Python 3 and the separately retained reference and
@@ -42,10 +43,13 @@ and are intentionally excluded from Git. Enabling the option does not download
 or redistribute the original game. Keep a complete matching fixture set when
 running these tests.
 
-The full-game `--smoke-test` checks native input flow, all 32 venues, competition
+The explicit full-game `--smoke-test` checks native input flow, all 32 venues, competition
 checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is conditional on the local sample file.
 Use `--data-dir` with a temporary directory to keep personal records intact.
+`--smoke-mouse-capture` additionally uses a visible fullscreen window, real
+relative mouse mode and Ready/Next button hit testing. The migration was compiled
+without running these checks; see [migration status](vulkan-sdl3-migration.md).
 
 ## Packaging
 
@@ -80,13 +84,13 @@ pose, including interpolated replay joints, so pause and seeking are determinist
 
 Camera tracking, input, scoring, collision, replay storage and the terrain use
 the original Frame. Only athlete, shadow and cosmetic snow drawing receive the
-display copy. The contact calculation reuses the athlete's mesh without OpenGL
-calls and accounts for terrain-grid crossings along its faces. Airborne models
+display copy. The contact calculation reuses the athlete's mesh without drawing
+commands and accounts for terrain-grid crossings along its faces. Airborne models
 that do not intersect snow receive no offset.
 
 ## Rendering resource limits
 
-The terrain display-list cache retains the two most recently used venues. Returning
+The terrain GPU mesh cache retains the two most recently used venues. Returning
 to an evicted venue rebuilds its unchanged geometry. Static batching finishes before
 the outer attribute restoration so cached scenery preserves the caller's current
 color, normal and texture coordinates. Drawable dimensions are clamped to at least
@@ -96,35 +100,34 @@ The CPU command test covers all 32 venues, three cameras, panorama, ghosts, HUD,
 falls and autopilot trajectories. These checks do not establish GPU driver stability
 or prove that a previously observed AMD graphics timeout is resolved.
 
-Normal play has an independent 60 FPS submission limit. `--graphics-compat`
-selects AMD's LLVM shader path before SDL initializes video and calls `glFinish`
-before each swap. `--sync-rendering` enables just that synchronization;
-`--no-msaa` disables multisample antialiasing independently. These options do not
-change simulation, hill geometry, saved data or replay formats. Shader flags are
-set only in the game process. Actual graphics settings are printed and flushed at
-startup. The smoke test is not frame limited.
+Normal play has an independent 60 FPS submission limit. The renderer uses
+SDL3's GPU API with Vulkan selected explicitly, embedded SPIR-V shaders and at
+most one frame in flight. `--graphics-compat` and `--sync-rendering` wait for each
+submitted frame immediately. `--no-msaa` disables multisample antialiasing;
+`--gpu-validation` enables SDL GPU/Vulkan validation explicitly. Actual graphics
+settings are printed and flushed at startup. The smoke test is not frame limited.
 
-An optional diagnostic executable exercises all 32 venues and the affected
-replay through the real OpenGL driver. It is never registered as an automatic
-test and only reads the supplied save files:
+An optional diagnostic executable exercises all 32 venues and a supplied replay
+through the Vulkan renderer. It is never registered as an automatic test and
+only reads supplied save files. The following commands are for later explicitly
+authorized validation; no GPU probe was run during migration:
 
 ```sh
-cmake -S . -B build-diagnostics -DTPV_BUILD_RENDER_PROBE=ON
-cmake --build build-diagnostics --target render-probe --parallel 4
-AMD_DEBUG=usellvm SDL_VIDEODRIVER=offscreen \
-  python3 tools/watch_gpu_test.py --output captures/llvm-test --timeout 330 -- \
-  build-diagnostics/render-probe --assets assets --cup /path/to/cup.sjc \
-  --replay /path/to/latest-dsj2.sjr --expect-renderer radeonsi \
-  --expect-compiler LLVM --samples 4 --seconds 300
+cmake -S . -B build-vulkan -DTPV_BUILD_RENDER_PROBE=ON
+cmake --build build-vulkan --target render-probe --parallel 4
+python3 tools/watch_gpu_test.py --output captures/vulkan-test --timeout 330 -- \
+  build-vulkan/render-probe --assets assets --cup /path/to/cup.sjc \
+  --replay /path/to/latest-dsj2.sjr --expect-renderer Vulkan \
+  --samples 4 --seconds 300
 ```
 
 The output directory must be new. The wrapper persists kernel events and GPU
 metrics, bounds test duration, stops the test on a recorded GPU fault and attempts
 to save any new device coredump. A driver hang may still affect the desktop before
-the wrapper can stop it. `--sync` and `--samples 0` on the probe isolate the two
-other rendering variants. For software control tests, set `LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe`
-and pass `--expect-renderer llvmpipe` to the probe instead of the hardware
-renderer/compiler expectations.
+the wrapper can stop it. `--sync` and `--samples 0` on the probe isolate frame
+waiting and antialiasing. Vulkan uses the system's Vulkan driver selection;
+OpenGL variables such as `AMD_DEBUG=usellvm` and `GALLIUM_DRIVER` do not select
+this renderer's shader compiler or software backend.
 
 The physics suite also replays the exact World Cup AI state that reached the
 takeoff lip at `x=0`. The following positive step must launch the athlete; missing

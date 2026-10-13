@@ -13,7 +13,7 @@ struct FallContact {
     Vec3 origin;
     double start, step, firstX, lift = 0;
     std::vector<double> heights;
-    GLenum mode = GL_QUADS;
+    sjp::gfx::Enum mode = sjp::gfx::QUADS;
     size_t count = 0;
     std::array<Vec3, 4> face{};
     FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton)
@@ -66,13 +66,13 @@ struct FallContact {
             measure(a + (b - a) * t);
         }
     }
-    void begin(GLenum primitive) {
+    void begin(sjp::gfx::Enum primitive) {
         mode = primitive;
         count = 0;
     }
     void include(Vec3 local) {
         measure(local);
-        if (mode == GL_TRIANGLE_FAN) {
+        if (mode == sjp::gfx::TRIANGLE_FAN) {
             if (count == 0)
                 face[0] = local;
             else {
@@ -83,8 +83,8 @@ struct FallContact {
             }
         } else {
             face[count % 4] = local;
-            if ((mode == GL_QUADS && count % 4 == 3) ||
-                (mode == GL_QUAD_STRIP && count >= 3 && count % 2 == 1))
+            if ((mode == sjp::gfx::QUADS && count % 4 == 3) ||
+                (mode == sjp::gfx::QUAD_STRIP && count >= 3 && count % 2 == 1))
                 for (size_t a = 0; a < 4; ++a)
                     for (size_t b = a + 1; b < 4; ++b)
                         edge(face[a], face[b]);
@@ -93,29 +93,29 @@ struct FallContact {
     }
 };
 thread_local FallContact *contactPass = nullptr;
-void emitBegin(GLenum mode) {
+void emitBegin(sjp::gfx::Enum mode) {
     if (contactPass)
         contactPass->begin(mode);
     else
-        glBegin(mode);
+        sjp::gfx::begin(mode);
 }
 void emitEnd() {
     if (!contactPass)
-        glEnd();
+        sjp::gfx::end();
 }
 void emitNormal(double x, double y, double z) {
     if (!contactPass)
-        glNormal3d(x, y, z);
+        sjp::gfx::normal3d(x, y, z);
 }
 void vertex(Vec3 p) {
     if (contactPass)
         contactPass->include(p);
     else
-        glVertex3d(p.x, p.y, p.z);
+        sjp::gfx::vertex3d(p.x, p.y, p.z);
 }
 void color(Color c) {
     if (!contactPass)
-        glColor4f(c.r, c.g, c.b, c.a);
+        sjp::gfx::color4f(c.r, c.g, c.b, c.a);
 }
 Color shade(Color c, double amount) {
     return {float(c.r * amount), float(c.g * amount), float(c.b * amount), c.a};
@@ -147,7 +147,7 @@ Basis skiBasis(Vec3 a, Vec3 b) {
 void orientedBox(Vec3 center, const Basis &basis, Vec3 size, Color tint) {
     const Vec3 x = basis.forward * (size.x * .5), y = basis.up * (size.y * .5),
                z = basis.side * (size.z * .5);
-    emitBegin(GL_QUADS);
+    emitBegin(sjp::gfx::QUADS);
     quad(center - x + y - z, center - x + y + z, center + x + y + z, center + x + y - z, tint);
     quad(center - x - y - z, center + x - y - z, center + x - y + z, center - x - y + z, shade(tint, .8));
     quad(center - x - y + z, center + x - y + z, center + x + y + z, center - x + y + z, tint);
@@ -160,7 +160,7 @@ void ellipsoid(Vec3 center, const Basis &basis, Vec3 radii, Color tint, int slic
     color(tint);
     for (int ring = 0; ring < rings; ++ring) {
         const double a = -PI * .5 + ring * PI / rings, b = a + PI / rings;
-        emitBegin(GL_QUAD_STRIP);
+        emitBegin(sjp::gfx::QUAD_STRIP);
         for (int slice = 0; slice <= slices; ++slice) {
             const double angle = slice * 2 * PI / slices;
             for (double latitude : {a, b}) {
@@ -192,7 +192,7 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
         return a + (b - a) * t + basis.forward * (std::cos(angle) * depth) +
                basis.side * (std::sin(angle) * width);
     };
-    emitBegin(GL_QUADS);
+    emitBegin(sjp::gfx::QUADS);
     for (size_t ring = 0; ring + 1 < positions.size(); ++ring)
         for (int face = 0; face < 8; ++face) {
             const double left = face * PI / 4, right = (face + 1) * PI / 4;
@@ -206,7 +206,7 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
     emitEnd();
     for (bool end : {false, true}) {
         color(shade(tint, .92));
-        emitBegin(GL_TRIANGLE_FAN);
+        emitBegin(sjp::gfx::TRIANGLE_FAN);
         const Vec3 normal = basis.up * (end ? 1 : -1);
         emitNormal(normal.x, normal.y, normal.z);
         vertex(end ? b : a);
@@ -223,7 +223,7 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     auto corner = [&](size_t section, double across, double height) {
         return centers[section] + basis.side * (widths[section] * across) + basis.up * height;
     };
-    emitBegin(GL_QUADS);
+    emitBegin(sjp::gfx::QUADS);
     for (size_t section = 0; section < 2; ++section) {
         // Three adjacent top panels share their edges; stripes do not sit on
         // top of a second nearly coplanar ski surface.
@@ -261,7 +261,7 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
                basis.up * (.207 * std::sin(latitude)) +
                basis.side * (.192 * std::cos(latitude) * std::sin(angle));
     };
-    emitBegin(GL_QUADS);
+    emitBegin(sjp::gfx::QUADS);
     for (size_t ring = 0; ring + 1 < latitudes.size(); ++ring)
         for (int slice = 0; slice < slices; ++slice) {
             const double a = slice * 2 * PI / slices, b = (slice + 1) * 2 * PI / slices;
@@ -371,16 +371,16 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     }
     const auto skeleton =
         f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
-    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT | GL_TEXTURE_BIT | GL_COLOR_BUFFER_BIT |
-                 GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_TEXTURE_2D);
-    const GLfloat specular[]{.2f, .23f, .24f, 1};
-    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
-    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 34);
-    glPushMatrix();
-    glTranslated(f.x, f.y, 0);
+    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::COLOR_BUFFER_BIT |
+                 sjp::gfx::DEPTH_BUFFER_BIT);
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
+    const float specular[]{.2f, .23f, .24f, 1};
+    sjp::gfx::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, specular);
+    sjp::gfx::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SHININESS, 34);
+    sjp::gfx::pushMatrix();
+    sjp::gfx::translated(f.x, f.y, 0);
     drawAthleteGeometry(skeleton, ghost);
-    glPopMatrix();
-    glPopAttrib();
+    sjp::gfx::popMatrix();
+    sjp::gfx::popAttrib();
 }
 } // namespace sjp

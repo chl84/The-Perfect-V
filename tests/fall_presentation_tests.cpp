@@ -6,7 +6,7 @@
 #include <stdexcept>
 
 namespace {
-int glCalls = 0;
+int drawCalls = 0;
 void require(bool value, const char *message) {
     if (!value)
         throw std::runtime_error(message);
@@ -29,7 +29,7 @@ sjp::Frame check(const sjp::Hill &h, const sjp::Frame &f) {
     std::memcpy(bytes.data(), &f, sizeof(f));
     const auto result = sjp::displayedAthleteFrame(h, f);
     require(std::memcmp(bytes.data(), &f, sizeof(f)) == 0, "Presentation mutated its source Frame");
-    require(glCalls == 0, "Contact calculation called OpenGL");
+    require(drawCalls == 0, "Contact calculation issued drawing commands");
     unchangedFields(f, result);
     require(std::isfinite(result.y) && result.y >= f.y, "Invalid presentation lift");
     const auto repeat = sjp::displayedAthleteFrame(h, f);
@@ -40,23 +40,22 @@ sjp::Frame check(const sjp::Hill &h, const sjp::Frame &f) {
 }
 } // namespace
 // The CPU contact calculation must work without a window or graphics context.
-extern "C" {
-void __wrap_glBegin(GLenum) {
-    ++glCalls;
-}
-void __wrap_glEnd() {
-    ++glCalls;
-}
-void __wrap_glNormal3d(GLdouble, GLdouble, GLdouble) {
-    ++glCalls;
-}
-void __wrap_glVertex3d(GLdouble, GLdouble, GLdouble) {
-    ++glCalls;
-}
-void __wrap_glColor4f(GLfloat, GLfloat, GLfloat, GLfloat) {
-    ++glCalls;
-}
-}
+namespace sjp::gfx {
+void begin(Enum) { ++drawCalls; }
+void end() { ++drawCalls; }
+void normal3d(double, double, double) { ++drawCalls; }
+void vertex3d(double, double, double) { ++drawCalls; }
+void color4f(float, float, float, float) { ++drawCalls; }
+void pushAttrib(Flags) { ++drawCalls; }
+void popAttrib() { ++drawCalls; }
+void disable(Enum) { ++drawCalls; }
+void materialfv(Enum, Enum, const float *) { ++drawCalls; }
+void materialf(Enum, Enum, float) { ++drawCalls; }
+void pushMatrix() { ++drawCalls; }
+void popMatrix() { ++drawCalls; }
+void translated(double, double, double) { ++drawCalls; }
+} // namespace sjp::gfx
+
 int main() {
     try {
         size_t samples = 0;
@@ -98,7 +97,7 @@ int main() {
         }
         require(maximumLift > .5 && maximumLift < 5, "Deeply embedded fall poses were not covered");
         std::cout << "Passed all32 hills, " << samples
-                  << " physical/interpolated samples; unchanged source and poses, zero GL calls, max lift="
+                  << " physical/interpolated samples; unchanged source and poses, zero GPU commands, max lift="
                   << maximumLift << " m\n";
     } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';

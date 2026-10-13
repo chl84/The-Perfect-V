@@ -57,39 +57,24 @@ Options options(int argc, char **argv) {
 }
 struct Context {
     SDL_Window *window = nullptr;
-    SDL_GLContext gl = nullptr;
-    explicit Context(int samples) {
-        if (SDL_Init(SDL_INIT_VIDEO))
+    explicit Context(int) {
+        if (!SDL_Init(SDL_INIT_VIDEO))
             throw std::runtime_error(SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, samples ? 1 : 0);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, samples);
-        window = SDL_CreateWindow("The Perfect V graphics diagnostics", 0, 0, 1440, 900,
-                                  SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN);
-        if (window)
-            gl = SDL_GL_CreateContext(window);
-        if (!gl) {
+        window = SDL_CreateWindow("The Perfect V Vulkan diagnostics", 1440, 900,
+                                  SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN);
+        if (!window) {
             const std::string error = SDL_GetError();
-            if (window)
-                SDL_DestroyWindow(window);
             SDL_Quit();
             throw std::runtime_error(error);
         }
-        const int result = SDL_GL_SetSwapInterval(1);
-        std::cout << "video=" << SDL_GetCurrentVideoDriver() << " swap_set_result=" << result
-                  << " swap_interval=" << SDL_GL_GetSwapInterval() << '\n';
+        std::cout << "video=" << SDL_GetCurrentVideoDriver() << " backend=Vulkan\n";
     }
     ~Context() {
-        if (gl)
-            SDL_GL_DeleteContext(gl);
-        if (window)
-            SDL_DestroyWindow(window);
+        if (window) SDL_DestroyWindow(window);
         SDL_Quit();
     }
 };
+
 sjp::Frame sample(const std::vector<sjp::Frame> &frames, double fraction) {
     const double position = std::clamp(fraction, 0.0, 1.0) * (frames.size() - 1);
     const size_t i = size_t(position);
@@ -119,12 +104,13 @@ int run(const Options &o) {
         jumps[hi] = std::move(s.frames);
     }
     Context context(o.samples);
-    sjp::Renderer renderer(context.window, o.assets);
+    sjp::Renderer renderer(context.window, o.assets, o.samples == 0);
+    renderer.setSynchronousRendering(o.synchronize);
     if (renderer.device.find(o.expectedRenderer) == std::string::npos ||
         (!o.expectedCompiler.empty() && renderer.device.find(o.expectedCompiler) == std::string::npos))
         throw std::runtime_error("Unexpected renderer/compiler: " + renderer.device);
-    GLint samples = 0;
-    glGetIntegerv(GL_SAMPLES, &samples);
+    int samples = 0;
+    sjp::gfx::getIntegerv(sjp::gfx::SAMPLES, &samples);
     if (samples != o.samples)
         throw std::runtime_error("Requested MSAA was not obtained");
     std::cout << "renderer=" << renderer.device << " samples=" << samples << " sync=" << o.synchronize
@@ -139,10 +125,7 @@ int run(const Options &o) {
         renderer.text(sjp::hills()[hi].name, 20, 20, 20);
         renderer.finish();
         if (o.synchronize)
-            glFinish();
-        const GLenum e = glGetError();
-        if (e != GL_NO_ERROR)
-            throw std::runtime_error("OpenGL error " + std::to_string(e) + " on hill " + std::to_string(hi));
+            sjp::gfx::finish();
         ++draws;
         next = std::max(next + std::chrono::microseconds(1000000 / o.fps), Clock::now());
         std::this_thread::sleep_until(next);
@@ -185,9 +168,7 @@ int run(const Options &o) {
             lastLog = elapsed;
         }
     }
-    glFinish();
-    if (glGetError() != GL_NO_ERROR)
-        throw std::runtime_error("Final OpenGL error");
+    sjp::gfx::finish();
     std::cout << "PASS draws=" << draws << " all_hills=32 seconds=" << o.seconds << '\n';
     return 0;
 }

@@ -1,6 +1,6 @@
 # The Perfect V
 
-A native Linux 3D ski jumping game built with C++17, SDL2, OpenGL and FreeType.
+A native Linux 3D ski jumping game built with C++17, SDL3, Vulkan and FreeType.
 It has 32 distinct hill profiles, a 70 Hz simulation, local World Cup and Team
 Cup competitions, CPU opponents, saved records and replay playback. The scenery,
 athlete, snow effects and sports interface use a modern stylized presentation.
@@ -11,35 +11,41 @@ The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
 2.10. The original game's executable, data, reference recordings and analysis
 captures are not distributed in this repository and are not needed to play.
 
+The Vulkan/SDL3 migration builds separately from the previous version. Runtime,
+visual and stability validation is pending; see [migration notes](docs/vulkan-sdl3-migration.md).
+
 ## Build and play
 
 Install a C++17 compiler, CMake 3.16 or newer, pkg-config and the development
-packages for SDL2, OpenGL and FreeType. Then run:
+packages for SDL3 3.4 or newer and FreeType, Vulkan drivers and `glslc` (shaderc).
+Then run:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
 cd The-Perfect-V
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 4
-./play.sh
+cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Release
+cmake --build build-vulkan --parallel 4
+./play-vulkan.sh
 ```
 
-The launcher builds the game if the executable is missing. Normal play requires
+The Vulkan launcher builds into `build-vulkan` if its executable is missing,
+preserving any previous executable in `build`. Normal play requires
 a graphical desktop; no browser, network connection or DOS emulator is needed.
 Use **How to jump** in the game for a short guide. England K50 and Austria K70
 are small practice hills.
 
-For AMD graphics hangs, try the compatibility launch mode:
+The renderer uses SDL3's GPU API with Vulkan selected explicitly. It retains
+the previous scene geometry, materials, cameras, interface and 4× antialiasing
+where supported. One frame may be in flight, with VSync and an independent
+60 FPS cap in normal play. To wait for each submitted frame immediately:
 
 ```sh
-./play.sh --graphics-compat
+./play-vulkan.sh --graphics-compat
 ```
 
-It selects LLVM shaders on AMD and waits for each rendered frame to complete.
-It keeps the usual antialiasing and may reduce rendering throughput. Normal play
-is capped at 60 frames per second even if VSync is unavailable. `--sync-rendering`
-and `--no-msaa` are separate options for diagnosing synchronization and antialiasing.
-Startup output reports the actual renderer, MSAA, VSync and synchronization mode.
+`--sync-rendering` enables the same frame wait. `--no-msaa` disables antialiasing;
+`--gpu-validation` explicitly enables SDL GPU/Vulkan validation. Startup output
+reports the GPU, SDL version, MSAA, synchronization and submission limits.
 
 ## Controls
 
@@ -82,7 +88,7 @@ Personal saves and replays are excluded from Git.
 ## Tests and packaging
 
 ```sh
-ctest --test-dir build --output-on-failure
+ctest --test-dir build-vulkan --output-on-failure
 ./package.sh
 ```
 
@@ -94,12 +100,13 @@ automatically when those fixtures are available. See
 
 `package.sh` creates `dist/ThePerfectV-linux-x86_64.tar.gz`. Extract it and run
 `./play.sh`. The package includes the executable, fonts, icon and documentation;
-it uses the host's SDL2, OpenGL, FreeType and C++ runtime libraries.
+it uses the host's SDL3, Vulkan driver, FreeType and C++ runtime libraries.
+Shaders are embedded in the executable; `glslc` is required only when building.
 
 For an automated full-game check, use an isolated save directory:
 
 ```sh
-SDL_AUDIODRIVER=dummy ./build/the-perfect-v --smoke-test \
+SDL_AUDIODRIVER=dummy ./build-vulkan/the-perfect-v --smoke-test \
   --data-dir /tmp/tpv-test-saves
 ```
 

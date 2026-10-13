@@ -5,8 +5,8 @@
 #include "renderer.h"
 #include "storage.h"
 #include "visual_weather.h"
-#include <GL/gl.h>
-#include <SDL.h>
+#include "draw_commands.h"
+#include <SDL3/SDL.h>
 #include <algorithm>
 #include <chrono>
 #include <ctime>
@@ -109,7 +109,6 @@ struct Button {
 };
 class App {
     SDL_Window *window = nullptr;
-    SDL_GLContext context = nullptr;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<Audio> audio;
     Screen screen = Screen::Menu, replayReturn = Screen::Menu;
@@ -125,6 +124,7 @@ class App {
     float mouseX = -100, mouseY = -100;
     double time = 0, accumulator = 0, replayTime = 0, replaySpeed = 1;
     int mouseDy = 0;
+    double mouseDyFraction = 0;
     Input pending;
     std::vector<Button> buttons;
     static constexpr int HILLS_PER_PAGE = 8;
@@ -146,7 +146,7 @@ class App {
     OriginalWind sessionWeather;
     std::array<float, 2> sessionAuxiliary{};
     int weatherHill = -1;
-    bool synchronousRendering = false, noMsaa = false, llvmShaders = false;
+    bool synchronousRendering = false, noMsaa = false, gpuValidation = false;
     bool smokeMouseCapture = false;
     size_t mouseCaptureTransitions = 0;
 
@@ -161,7 +161,11 @@ class App {
             else if (a == "--hidden")
                 hidden = true;
             else if (a == "--graphics-compat")
-                synchronousRendering = llvmShaders = true;
+                synchronousRendering = true;
+            else if (a == "--vulkan") {
+                // Accepted explicitly by the separate Vulkan launcher.
+            } else if (a == "--gpu-validation")
+                gpuValidation = true;
             else if (a == "--sync-rendering")
                 synchronousRendering = true;
             else if (a == "--no-msaa")
@@ -179,8 +183,10 @@ class App {
                              " use a separate records and replay directory\n  --replay FILE     open an "
                              "original .RPL or native .sjr replay\n"
                              "  --smoke-mouse-capture  fullscreen test of mouse capture and cup clicks\n"
-                             "  --graphics-compat  use LLVM on AMD and finish each rendered frame\n"
-                             "  --sync-rendering   finish each frame before presenting it\n"
+                             "  --graphics-compat  wait for each submitted Vulkan frame\n"
+                             "  --sync-rendering   wait for each submitted frame\n"
+                             "  --vulkan          use the native Vulkan renderer (default)\n"
+                             "  --gpu-validation  enable SDL GPU/Vulkan validation\n"
                              "  --no-msaa          disable multisample antialiasing\n";
                 running = false;
                 return;
@@ -189,48 +195,36 @@ class App {
         }
         if (smokeMouseCapture && hidden)
             throw std::runtime_error("Mouse capture testing requires a visible window");
+        struct StartupCleanup {
+            App &app;
+            bool complete = false;
+            ~StartupCleanup() {
+                if (complete)
+                    return;
+                app.audio.reset();
+                app.renderer.reset();
+                if (app.window)
+                    SDL_DestroyWindow(app.window);
+                app.window = nullptr;
+                SDL_Quit();
+            }
+        } startup{*this};
         // Keep original mouse counts independent of DPI/render size and the
         // desktop acceleration curve. Sensitivity is applied once by physics.
-        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "0");
-        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, "0");
+        SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_WARP_MOTION, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
-        if (llvmShaders) {
-            const char *existing = SDL_getenv("AMD_DEBUG");
-            const std::string flags = std::string(existing && *existing ? existing : "") +
-                                      (existing && *existing ? ",usellvm" : "usellvm");
-            if (SDL_setenv("AMD_DEBUG", flags.c_str(), 1))
-                throw std::runtime_error("Could not select AMD LLVM shaders");
-        }
-        if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS))
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
             throw std::runtime_error(SDL_GetError());
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
-        SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
-        SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-        SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, noMsaa ? 0 : 1);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, noMsaa ? 0 : 4);
-        window = SDL_CreateWindow("The Perfect V", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
-                                  SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
-                                      (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN));
-        if (!window) {
-            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 0);
-            SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 0);
-            window = SDL_CreateWindow(
-                "The Perfect V", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
-                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN));
-        }
+        window = SDL_CreateWindow("The Perfect V", 1440, 900,
+                                  SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
+                                      (hidden ? SDL_WINDOW_HIDDEN : 0));
         if (!window)
             throw std::runtime_error(std::string("Window creation failed: ") + SDL_GetError());
-        context = SDL_GL_CreateContext(window);
-        if (!context)
-            throw std::runtime_error(std::string("OpenGL context failed: ") + SDL_GetError());
-        const int swapResult = SDL_GL_SetSwapInterval(smoke ? 0 : 1);
         SDL_SetWindowMinimumSize(window, 960, 600);
         std::string assets;
-        char *base = SDL_GetBasePath();
+        const char *base = SDL_GetBasePath();
         std::filesystem::path executableDir = base ? base : ".";
-        SDL_free(base);
         for (auto candidate :
              {executableDir / "assets", executableDir / "../assets", executableDir / "../share/the-perfect-v",
               std::filesystem::path(SJP_ASSET_DIR)}) {
@@ -241,7 +235,7 @@ class App {
         }
         if (assets.empty())
             throw std::runtime_error("Game fonts are missing. Keep the assets directory with the game.");
-        renderer = std::make_unique<Renderer>(window, assets);
+        renderer = std::make_unique<Renderer>(window, assets, noMsaa, !smoke, gpuValidation);
         renderer->setSynchronousRendering(synchronousRendering);
         audio = std::make_unique<Audio>();
         if (dataDir.empty()) {
@@ -276,19 +270,21 @@ class App {
                 worldSetup = saved.setup();
         }
         replayDirectory = dataDir;
-        SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
+        SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
         hasReplay = loadReplay(dataDir + "/latest-dsj2.sjr", lastReplay);
         if (hasReplay && !lastReplay.originalRpl.empty())
             canExportOriginal =
                 decodeOriginalReplay(lastReplay.originalRpl, originalReplayData, &replayExportError);
         if (!replayArgument.empty())
             openReplayFile(replayArgument);
-        GLint actualSamples = 0;
-        glGetIntegerv(GL_SAMPLES, &actualSamples);
+        const int sdlVersion = SDL_GetVersion();
         std::cout << "The Perfect V | " << renderer->device << "\nSaves: " << dataDir
-                  << "\nGraphics: MSAA=" << actualSamples << ", VSync=" << SDL_GL_GetSwapInterval()
-                  << ", VSync setup=" << swapResult << ", synchronous=" << synchronousRendering
+                  << "\nGraphics: Vulkan, SDL " << SDL_VERSIONNUM_MAJOR(sdlVersion) << '.'
+                  << SDL_VERSIONNUM_MINOR(sdlVersion) << '.' << SDL_VERSIONNUM_MICRO(sdlVersion)
+                  << ", MSAA=" << sjp::gfx::sampleCount()
+                  << ", synchronous=" << synchronousRendering << ", frames in flight=1"
                   << ", frame cap=" << (smoke ? 0 : 60) << '\n' << std::flush;
+        startup.complete = true;
     }
     ~App() {
         if (renderer) {
@@ -297,8 +293,6 @@ class App {
         }
         audio.reset();
         renderer.reset();
-        if (context)
-            SDL_GL_DeleteContext(context);
         if (window)
             SDL_DestroyWindow(window);
         SDL_Quit();
@@ -311,10 +305,12 @@ class App {
                 // Keep the real desktop pointer within the test window during
                 // pause/unpause. Otherwise focus-follows-mouse can correctly
                 // pause the automated control test when capture is released.
-                if (SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
+                if (!SDL_SetWindowFullscreen(window, true))
                     throw std::runtime_error(std::string("Test fullscreen failed: ") + SDL_GetError());
                 fullscreen = true;
                 SDL_RaiseWindow(window);
+                render();
+                renderer->finish();
                 const Uint32 focusDeadline = SDL_GetTicks() + 10000;
                 do {
                     SDL_Delay(20);
@@ -343,7 +339,7 @@ class App {
                     input.mouseDy = mouseDy;
                     input.mouseSensitivity = records.sensitivity;
                     mouseDy = 0;
-                    const Uint8 *keys = SDL_GetKeyboardState(nullptr);
+                    const bool *keys = SDL_GetKeyboardState(nullptr);
                     input.pitchDelta +=
                         (keys[SDL_SCANCODE_UP] || keys[SDL_SCANCODE_W] ? 1 : 0) * .65 * ORIGINAL_TICK -
                         (keys[SDL_SCANCODE_DOWN] || keys[SDL_SCANCODE_S] ? 1 : 0) * .65 * ORIGINAL_TICK;
@@ -378,13 +374,11 @@ class App {
   private:
     double chosenWind() { return windMode == 1 ? 0 : windMode == 2 ? 3 : -2.5; }
     void captureMouse() {
-        const SDL_bool capture = screen == Screen::Playing && (!smoke || smokeMouseCapture)
-                                     ? SDL_TRUE
-                                     : SDL_FALSE;
+        const bool capture = screen == Screen::Playing && (!smoke || smokeMouseCapture);
         // Relative mode already hides the cursor. Only change it when needed:
         // repeated hide/show requests also reach the desktop's cursor path.
-        if (SDL_GetRelativeMouseMode() != capture) {
-            if (SDL_SetRelativeMouseMode(capture) != 0) {
+        if (SDL_GetWindowRelativeMouseMode(window) != capture) {
+            if (!SDL_SetWindowRelativeMouseMode(window, capture)) {
                 if (smokeMouseCapture)
                     throw std::runtime_error(std::string("Mouse capture failed: ") + SDL_GetError());
                 std::cerr << "Mouse capture failed: " << SDL_GetError() << '\n';
@@ -393,6 +387,7 @@ class App {
         }
         mouseLeft = mouseRight = false;
         mouseDy = 0;
+        mouseDyFraction = 0;
     }
     int hillCount() const { return int(hills().size()); }
     int hillPages() const { return (hillCount() + HILLS_PER_PAGE - 1) / HILLS_PER_PAGE; }
@@ -557,7 +552,7 @@ class App {
             }
         }
         editingName = -1;
-        SDL_StopTextInput();
+        SDL_StopTextInput(window);
     }
     void scanReplays() {
         replayFiles.clear();
@@ -742,7 +737,7 @@ class App {
                                               : editableSetup().teams[size_t(value)].name)
                             : (editingCountry ? editableSetup().participants[size_t(value)].country
                                               : editableSetup().participants[size_t(value)].name);
-            SDL_StartTextInput();
+            SDL_StartTextInput(window);
             break;
         }
         case Action::CupPlayerType:
@@ -894,26 +889,25 @@ class App {
     void events() {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            if (e.type == SDL_DROPFILE) {
-                std::string path(e.drop.file);
-                SDL_free(e.drop.file);
+            if (e.type == SDL_EVENT_DROP_FILE) {
+                std::string path(e.drop.data);
                 if (screen == Screen::Playing)
                     changeScreen(Screen::Paused);
                 openReplayFile(path);
                 continue;
             }
-            if (e.type == SDL_TEXTINPUT && editingName != -1) {
+            if (e.type == SDL_EVENT_TEXT_INPUT && editingName != -1) {
                 std::string value = editText + e.text.text;
                 if (value.size() <= (editingCountry ? 3u : 25u))
                     editText = value;
                 continue;
             }
-            if (e.type == SDL_KEYDOWN && editingName != -1) {
-                if (e.key.keysym.sym == SDLK_RETURN)
+            if (e.type == SDL_EVENT_KEY_DOWN && editingName != -1) {
+                if (e.key.key == SDLK_RETURN)
                     finishNameEdit(true);
-                else if (e.key.keysym.sym == SDLK_ESCAPE)
+                else if (e.key.key == SDLK_ESCAPE)
                     finishNameEdit(false);
-                else if (e.key.keysym.sym == SDLK_BACKSPACE && !editText.empty()) {
+                else if (e.key.key == SDLK_BACKSPACE && !editText.empty()) {
                     size_t start = editText.size() - 1;
                     while (start > 0 && (static_cast<unsigned char>(editText[start]) & 0xc0) == 0x80)
                         --start;
@@ -921,28 +915,33 @@ class App {
                 }
                 continue;
             }
-            if (e.type == SDL_QUIT)
+            if (e.type == SDL_EVENT_QUIT)
                 running = false;
-            if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
+            if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
                 screen == Screen::Playing) {
                 if (smokeMouseCapture)
                     std::cout << "Mouse capture test: window lost focus during play\n" << std::flush;
                 changeScreen(Screen::Paused);
             }
-            if (e.type == SDL_MOUSEMOTION) {
-                if (screen == Screen::Playing && sim.phase == Phase::Flight)
-                    mouseDy =
-                        int(clamp(int64_t(mouseDy) + e.motion.yrel, int64_t(-1000000), int64_t(1000000)));
-                else {
-                    int ww, hh;
-                    SDL_GetWindowSize(window, &ww, &hh);
+            if (e.type == SDL_EVENT_MOUSE_MOTION) {
+                if (screen == Screen::Playing && sim.phase == Phase::Flight) {
+                    // SDL3 reports floats. Carry sub-count movement while keeping
+                    // the original physics controller's integer mouse counts.
+                    const double counts = clamp(double(mouseDy) + mouseDyFraction + e.motion.yrel,
+                                                -1000000.0, 1000000.0);
+                    mouseDy = int(counts);
+                    mouseDyFraction = counts - mouseDy;
+                } else {
+                    int ww = 0, hh = 0;
+                    if (!SDL_GetWindowSize(window, &ww, &hh) || ww <= 0 || hh <= 0)
+                        continue;
                     float px = float(e.motion.x) * renderer->width / ww,
                           py = float(e.motion.y) * renderer->height / hh;
                     mouseX = (px - renderer->offsetX) / renderer->uiScale;
                     mouseY = (py - renderer->offsetY) / renderer->uiScale;
                 }
             }
-            if (e.type == SDL_MOUSEBUTTONDOWN) {
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN) {
                 if (screen == Screen::Playing) {
                     int b = e.button.button == SDL_BUTTON_LEFT    ? 1
                             : e.button.button == SDL_BUTTON_RIGHT ? 2
@@ -969,26 +968,26 @@ class App {
                         }
                 }
             }
-            if (e.type == SDL_MOUSEWHEEL && (screen == Screen::Hills || screen == Screen::Records)) {
+            if (e.type == SDL_EVENT_MOUSE_WHEEL && (screen == Screen::Hills || screen == Screen::Records)) {
                 int direction = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                 if (direction)
                     action(Action::HillPage, direction > 0 ? -1 : 1);
             }
-            if (e.type == SDL_MOUSEBUTTONUP) {
+            if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                 if (e.button.button == SDL_BUTTON_LEFT)
                     mouseLeft = false;
                 if (e.button.button == SDL_BUTTON_RIGHT)
                     mouseRight = false;
             }
-            if (e.type == SDL_KEYDOWN && !e.key.repeat) {
-                auto key = e.key.keysym.sym;
+            if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
+                auto key = e.key.key;
                 if (key == SDLK_F11) {
                     fullscreen = !fullscreen;
-                    SDL_SetWindowFullscreen(window, fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+                    SDL_SetWindowFullscreen(window, fullscreen);
                 }
-                if (key == SDLK_m)
+                if (key == SDLK_M)
                     action(Action::Sound);
-                if (key == SDLK_c)
+                if (key == SDLK_C)
                     action(Action::Camera);
                 if (key == SDLK_ESCAPE) {
                     if (screen == Screen::Playing)
@@ -1008,11 +1007,11 @@ class App {
                         } else if (sim.phase == Phase::Flight)
                             pending.land = Landing::TwoFoot;
                     }
-                    if (key == SDLK_t)
+                    if (key == SDLK_T)
                         pending.land = Landing::Telemark;
-                    if (key == SDLK_b)
+                    if (key == SDLK_B)
                         pending.land = Landing::TwoFoot;
-                    if (key == SDLK_g)
+                    if (key == SDLK_G)
                         action(Action::Ghost);
                 } else if (screen == Screen::Replay) {
                     if (key == SDLK_SPACE)
@@ -1036,7 +1035,7 @@ class App {
                 } else if (screen == Screen::Result) {
                     if (key == SDLK_RETURN || key == SDLK_SPACE)
                         action(competition ? Action::Next : Action::Again);
-                    if (key == SDLK_r)
+                    if (key == SDLK_R)
                         action(Action::Replay);
                 } else if (screen == Screen::Standings && key == SDLK_RETURN)
                     action(Action::Next);
@@ -1049,9 +1048,9 @@ class App {
                 else if (screen == Screen::Menu) {
                     if (key == SDLK_RETURN || key == SDLK_SPACE)
                         action(Action::Practice);
-                    if (key == SDLK_h)
+                    if (key == SDLK_H)
                         action(Action::Help);
-                    if (key == SDLK_r && hasReplay)
+                    if (key == SDLK_R && hasReplay)
                         action(Action::Replay);
                 } else if (screen == Screen::Hills || screen == Screen::Records) {
                     if (key == SDLK_RIGHT || key == SDLK_DOWN)
@@ -1734,7 +1733,7 @@ class App {
     int smokeTest() {
         size_t cupButtonClicks = 0;
         auto requireCapture = [&](bool expected) {
-            if (smokeMouseCapture && bool(SDL_GetRelativeMouseMode()) != expected)
+            if (smokeMouseCapture && bool(SDL_GetWindowRelativeMouseMode(window)) != expected)
                 throw std::runtime_error("Unexpected relative mouse mode on cup screen");
         };
         auto clickButton = [&](Action requested) {
@@ -1744,28 +1743,29 @@ class App {
                                              [&](const Button &b) { return b.action == requested; });
             if (button == buttons.end())
                 throw std::runtime_error("Smoke test button is missing");
-            int ww, hh;
-            SDL_GetWindowSize(window, &ww, &hh);
+            int ww = 0, hh = 0;
+            if (!SDL_GetWindowSize(window, &ww, &hh) || ww <= 0 || hh <= 0)
+                throw std::runtime_error("Smoke test window has no usable size");
             const int x = int(((button->x + button->w / 2) * renderer->uiScale + renderer->offsetX) *
                               ww / renderer->width);
             const int y = int(((button->y + button->h / 2) * renderer->uiScale + renderer->offsetY) *
                               hh / renderer->height);
             SDL_Event e{};
-            e.type = SDL_MOUSEMOTION;
+            e.type = SDL_EVENT_MOUSE_MOTION;
             e.motion.windowID = SDL_GetWindowID(window);
             e.motion.x = x;
             e.motion.y = y;
             if (SDL_PushEvent(&e) != 1)
                 throw std::runtime_error("Could not queue smoke test pointer motion");
             e = {};
-            e.type = SDL_MOUSEBUTTONDOWN;
+            e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
             e.button.windowID = SDL_GetWindowID(window);
             e.button.button = SDL_BUTTON_LEFT;
             e.button.x = x;
             e.button.y = y;
             if (SDL_PushEvent(&e) != 1)
                 throw std::runtime_error("Could not queue smoke test button press");
-            e.type = SDL_MOUSEBUTTONUP;
+            e.type = SDL_EVENT_MOUSE_BUTTON_UP;
             if (SDL_PushEvent(&e) != 1)
                 throw std::runtime_error("Could not queue smoke test button release");
             events();
@@ -1808,12 +1808,12 @@ class App {
             clickButton(Action::Practice);
         else {
             SDL_Event event{};
-            event.type = SDL_MOUSEMOTION;
+            event.type = SDL_EVENT_MOUSE_MOTION;
             event.motion.x = 200;
             event.motion.y = 512;
             SDL_PushEvent(&event);
             event = {};
-            event.type = SDL_MOUSEBUTTONDOWN;
+            event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
             event.button.button = SDL_BUTTON_LEFT;
             SDL_PushEvent(&event);
             events();
@@ -1822,14 +1822,14 @@ class App {
             throw std::runtime_error("Practice button input failed");
         auto key = [&](SDL_Keycode code) {
             SDL_Event e{};
-            e.type = SDL_KEYDOWN;
-            e.key.keysym.sym = code;
+            e.type = SDL_EVENT_KEY_DOWN;
+            e.key.key = code;
             SDL_PushEvent(&e);
             events();
         };
         auto mouse = [&](Uint8 b, bool down) {
             SDL_Event e{};
-            e.type = down ? SDL_MOUSEBUTTONDOWN : SDL_MOUSEBUTTONUP;
+            e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
             e.button.button = b;
             SDL_PushEvent(&e);
             events();
@@ -2195,13 +2195,13 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/replay-library.ppm");
         renderer->finish();
-        GLenum error = glGetError();
+        sjp::gfx::finish();
         std::cout << "Smoke test: all " << hillCount() << " venues, screens, replay and " << hillCount() * 2
-                  << "-jump cup passed (" << cupFalls << " falls). OpenGL error=" << error << '\n';
+                  << "-jump cup passed (" << cupFalls << " falls). Vulkan submissions completed\n";
         if (smokeMouseCapture)
             std::cout << "Mouse capture test: " << mouseCaptureTransitions << " transitions, "
                       << cupButtonClicks << " Next button clicks; no capture on cup preparation\n";
-        return error == GL_NO_ERROR ? 0 : 1;
+        return 0;
     }
 };
 } // namespace

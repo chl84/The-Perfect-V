@@ -1,27 +1,37 @@
 #include "audio.h"
 #include <cmath>
+#include <array>
 
 namespace sjp {
 Audio::Audio() {
     SDL_AudioSpec spec{};
     spec.freq = 48000;
-    spec.format = AUDIO_F32SYS;
+    spec.format = SDL_AUDIO_F32;
     spec.channels = 1;
-    spec.samples = 1024;
-    spec.callback = callback;
-    spec.userdata = this;
-    device = SDL_OpenAudioDevice(nullptr, 0, &spec, nullptr, 0);
-    if (device)
-        SDL_PauseAudioDevice(device, 0);
+    stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
+    if (stream)
+        SDL_ResumeAudioStreamDevice(stream);
 }
 Audio::~Audio() {
-    if (device)
-        SDL_CloseAudioDevice(device);
+    if (stream)
+        SDL_DestroyAudioStream(stream);
 }
-void Audio::callback(void *data, Uint8 *stream, int bytes) {
+void Audio::callback(void *data, SDL_AudioStream *stream, int additional, int) {
     auto &a = *static_cast<Audio *>(data);
-    float *out = reinterpret_cast<float *>(stream);
-    int n = bytes / sizeof(float);
+    // Fixed-sized blocks retain the 48 kHz waveform and avoid allocation in
+    // SDL's audio thread. SDL converts only for the actual output device.
+    std::array<float, 1024> samples{};
+    int remaining = additional > 0 ? (additional + int(sizeof(float)) - 1) / int(sizeof(float)) : 0;
+    while (remaining > 0) {
+        const int count = std::min(remaining, int(samples.size()));
+        a.generate(samples.data(), count);
+        if (!SDL_PutAudioStreamData(stream, samples.data(), count * int(sizeof(float))))
+            break;
+        remaining -= count;
+    }
+}
+void Audio::generate(float *out, int n) {
+    auto &a = *this;
     float v = a.volume.load();
     int initial = a.remaining.load(), left = initial, cue = a.tone.load();
     bool enabled = a.enabled.load();

@@ -21,27 +21,27 @@ void require(bool ok, const char *message) {
         throw std::runtime_error(message);
 }
 struct Current {
-    std::array<GLfloat, 4> color{1, 1, 1, 1};
-    std::array<GLfloat, 3> normal{0, 0, 1};
-    std::array<GLfloat, 4> uv{0, 0, 0, 1};
+    std::array<float, 4> color{1, 1, 1, 1};
+    std::array<float, 3> normal{0, 0, 1};
+    std::array<float, 4> uv{0, 0, 0, 1};
 };
 Current current;
 struct Saved {
-    GLbitfield mask;
+    sjp::gfx::Flags mask;
     Current value;
     bool depth;
 };
 std::vector<Saved> attributes;
-std::map<GLenum, int> matrices{{GL_MODELVIEW, 1}, {GL_PROJECTION, 1}, {GL_TEXTURE, 1}};
-GLenum matrix = GL_MODELVIEW, primitiveMode = GL_TRIANGLES;
+std::map<sjp::gfx::Enum, int> matrices{{sjp::gfx::MODELVIEW, 1}, {sjp::gfx::PROJECTION, 1}, {sjp::gfx::TEXTURE, 1}};
+sjp::gfx::Enum matrix = sjp::gfx::MODELVIEW, primitiveMode = sjp::gfx::TRIANGLES;
 bool primitive = false, depth = true;
-GLuint compiling = 0, nextList = 1, nextTexture = 1;
+sjp::gfx::Id compiling = 0, nextList = 1, nextTexture = 1;
 struct List {
     size_t vertices = 0, commands = 0;
     std::vector<std::function<void()>> tail;
 };
-std::map<GLuint, List> lists;
-std::set<GLuint> textures;
+std::map<sjp::gfx::Id, List> lists;
+std::set<sjp::gfx::Id> textures;
 size_t vertices = 0, commands = 0, maximumDraw = 0, drawVertices = 0, maximumLists = 0,
        maximumCachedVertices = 0, textureBytes = 0;
 int drawableWidth = 960, drawableHeight = 600;
@@ -62,15 +62,15 @@ void position(double x, double y, double z) {
         uint64_t b;
         std::memcpy(&b, &v, sizeof(b));
         positionHash = (positionHash ^ b) * 1099511628211ULL;
-        if (!compiling && primitiveMode == GL_TRIANGLE_FAN)
+        if (!compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN)
             particlePositionHash = (particlePositionHash ^ b) * 1099511628211ULL;
     }
 }
 void vertex() {
-    require(primitive, "Vertex outside glBegin/glEnd");
+    require(primitive, "Vertex outside sjp::gfx::begin/sjp::gfx::end");
     ++vertices;
     ++drawVertices;
-    if (!compiling && primitiveMode == GL_TRIANGLE_FAN)
+    if (!compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN)
         ++particleVertices;
     if (compiling)
         ++lists.at(compiling).vertices;
@@ -91,50 +91,55 @@ size_t cached() {
     return n;
 }
 } // namespace audit
-extern "C" {
-void SDL_GL_GetDrawableSize(SDL_Window *, int *w, int *h) {
+bool SDL_GetWindowSizeInPixels(SDL_Window *, int *w, int *h) {
     *w = audit::drawableWidth;
     *h = audit::drawableHeight;
+    return true;
 }
-void SDL_GL_SwapWindow(SDL_Window *) {}
-void GLAPIENTRY glFinish(void) {
-    audit::command("glFinish inside glBegin", false);
+void sjp::gfx::initialize(SDL_Window *, bool, bool, bool) {}
+void sjp::gfx::shutdown() noexcept {}
+void sjp::gfx::beginFrame(int, int) {}
+void sjp::gfx::captureImage(const std::string &) {}
+int sjp::gfx::sampleCount() { return 4; }
+void sjp::gfx::present(bool synchronous) { if (synchronous) sjp::gfx::finish(); }
+void sjp::gfx::finish(void) {
+    audit::command("sjp::gfx::finish inside sjp::gfx::begin", false);
     audit::require(!audit::compiling && audit::attributes.empty(),
                    "Frame completed before display list/attribute restoration");
     ++audit::completedFrames;
 }
-void GLAPIENTRY glBegin(GLenum mode) {
-    audit::command("glBegin inside glBegin", false);
-    audit::require(!audit::primitive, "Nested glBegin");
+void sjp::gfx::begin(sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::begin inside sjp::gfx::begin", false);
+    audit::require(!audit::primitive, "Nested sjp::gfx::begin");
     audit::primitive = true;
     audit::primitiveMode = mode;
     audit::drawVertices = 0;
 }
-void GLAPIENTRY glBindTexture(GLenum target, GLuint texture) {
-    audit::command("glBindTexture inside glBegin", false);
+void sjp::gfx::bindTexture(sjp::gfx::Enum target, sjp::gfx::Id texture) {
+    audit::command("sjp::gfx::bindTexture inside sjp::gfx::begin", false);
     audit::require(!texture || audit::textures.count(texture), "Bind unknown texture");
 }
-void GLAPIENTRY glBlendFunc(GLenum sfactor, GLenum dfactor) {
-    audit::command("glBlendFunc inside glBegin", false);
+void sjp::gfx::blendFunc(sjp::gfx::Enum sfactor, sjp::gfx::Enum dfactor) {
+    audit::command("sjp::gfx::blendFunc inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glCallList(GLuint list) {
-    audit::command("glCallList inside glBegin", false);
+void sjp::gfx::callList(sjp::gfx::Id list) {
+    audit::command("sjp::gfx::callList inside sjp::gfx::begin", false);
     audit::require(audit::lists.count(list), "Use of missing display list");
     for (auto &op : audit::lists.at(list).tail)
         op();
 }
-void GLAPIENTRY glClear(GLbitfield mask) {
-    audit::command("glClear inside glBegin", false);
+void sjp::gfx::clear(sjp::gfx::Flags mask) {
+    audit::command("sjp::gfx::clear inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glClearColor(GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha) {
-    audit::command("glClearColor inside glBegin", false);
+void sjp::gfx::clearColor(float red, float green, float blue, float alpha) {
+    audit::command("sjp::gfx::clearColor inside sjp::gfx::begin", false);
     audit::finite(red);
     audit::finite(green);
     audit::finite(blue);
     audit::finite(alpha);
 }
-void GLAPIENTRY glColor4f(GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha) {
-    audit::command("glColor4f inside glBegin", true);
+void sjp::gfx::color4f(float red, float green, float blue, float alpha) {
+    audit::command("sjp::gfx::color4f inside sjp::gfx::begin", true);
     audit::finite(red);
     audit::finite(green);
     audit::finite(blue);
@@ -143,65 +148,65 @@ void GLAPIENTRY glColor4f(GLfloat red, GLfloat green, GLfloat blue, GLfloat alph
     auto value = audit::current.color;
     audit::tail([value] { audit::current.color = value; });
 }
-void GLAPIENTRY glColor4fv(const GLfloat *v) {
-    audit::command("glColor4fv inside glBegin", true);
+void sjp::gfx::color4fv(const float *v) {
+    audit::command("sjp::gfx::color4fv inside sjp::gfx::begin", true);
     for (int i = 0; i < 4; ++i)
         audit::finite(v[i]);
     std::copy(v, v + 4, audit::current.color.begin());
     auto value = audit::current.color;
     audit::tail([value] { audit::current.color = value; });
 }
-void GLAPIENTRY glColorMaterial(GLenum face, GLenum mode) {
-    audit::command("glColorMaterial inside glBegin", false);
+void sjp::gfx::colorMaterial(sjp::gfx::Enum face, sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::colorMaterial inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glDeleteLists(GLuint list, GLsizei range) {
-    audit::command("glDeleteLists inside glBegin", false);
+void sjp::gfx::deleteLists(sjp::gfx::Id list, int range) {
+    audit::command("sjp::gfx::deleteLists inside sjp::gfx::begin", false);
     for (int i = 0; i < range; ++i)
         audit::require(audit::lists.erase(list + i) == 1, "Invalid display list deletion");
 }
-void GLAPIENTRY glDeleteTextures(GLsizei n, const GLuint *textures) {
-    audit::command("glDeleteTextures inside glBegin", false);
+void sjp::gfx::deleteTextures(int n, const sjp::gfx::Id *textures) {
+    audit::command("sjp::gfx::deleteTextures inside sjp::gfx::begin", false);
     for (int i = 0; i < n; ++i)
         if (textures[i])
             audit::require(audit::textures.erase(textures[i]) == 1, "Invalid texture deletion");
 }
-void GLAPIENTRY glDepthMask(GLboolean flag) {
-    audit::command("glDepthMask inside glBegin", false);
+void sjp::gfx::depthMask(bool flag) {
+    audit::command("sjp::gfx::depthMask inside sjp::gfx::begin", false);
     audit::depth = flag;
 }
-void GLAPIENTRY glDisable(GLenum cap) {
-    audit::command("glDisable inside glBegin", false);
+void sjp::gfx::disable(sjp::gfx::Enum cap) {
+    audit::command("sjp::gfx::disable inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glEnable(GLenum cap) {
-    audit::command("glEnable inside glBegin", false);
+void sjp::gfx::enable(sjp::gfx::Enum cap) {
+    audit::command("sjp::gfx::enable inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glEnd(void) {
-    audit::command("glEnd inside glBegin", true);
-    audit::require(audit::primitive, "Unmatched glEnd");
+void sjp::gfx::end(void) {
+    audit::command("sjp::gfx::end inside sjp::gfx::begin", true);
+    audit::require(audit::primitive, "Unmatched sjp::gfx::end");
     audit::primitive = false;
     audit::maximumDraw = std::max(audit::maximumDraw, audit::drawVertices);
 }
-void GLAPIENTRY glEndList(void) {
-    audit::command("glEndList inside glBegin", false);
-    audit::require(audit::compiling && !audit::primitive, "Unmatched glEndList");
+void sjp::gfx::endList(void) {
+    audit::command("sjp::gfx::endList inside sjp::gfx::begin", false);
+    audit::require(audit::compiling && !audit::primitive, "Unmatched sjp::gfx::endList");
     audit::maximumCachedVertices = std::max(audit::maximumCachedVertices, audit::cached());
     audit::compiling = 0;
 }
-void GLAPIENTRY glFogf(GLenum pname, GLfloat param) {
-    audit::command("glFogf inside glBegin", false);
+void sjp::gfx::fogf(sjp::gfx::Enum pname, float param) {
+    audit::command("sjp::gfx::fogf inside sjp::gfx::begin", false);
     audit::finite(param);
 }
-void GLAPIENTRY glFogfv(GLenum pname, const GLfloat *params) {
-    audit::command("glFogfv inside glBegin", false);
+void sjp::gfx::fogfv(sjp::gfx::Enum pname, const float *params) {
+    audit::command("sjp::gfx::fogfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
 }
-void GLAPIENTRY glFogi(GLenum pname, GLint param) {
-    audit::command("glFogi inside glBegin", false);
+void sjp::gfx::fogi(sjp::gfx::Enum pname, int param) {
+    audit::command("sjp::gfx::fogi inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glFrustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble near_val,
-                          GLdouble far_val) {
-    audit::command("glFrustum inside glBegin", false);
+void sjp::gfx::frustum(double left, double right, double bottom, double top, double near_val,
+                          double far_val) {
+    audit::command("sjp::gfx::frustum inside sjp::gfx::begin", false);
     audit::finite(left);
     audit::finite(right);
     audit::finite(bottom);
@@ -211,98 +216,98 @@ void GLAPIENTRY glFrustum(GLdouble left, GLdouble right, GLdouble bottom, GLdoub
     audit::require(left != right && bottom != top && near_val > 0 && far_val > near_val,
                    "Invalid perspective projection");
 }
-GLuint GLAPIENTRY glGenLists(GLsizei range) {
-    audit::command("glGenLists inside glBegin", false);
+sjp::gfx::Id sjp::gfx::genLists(int range) {
+    audit::command("sjp::gfx::genLists inside sjp::gfx::begin", false);
     audit::require(range > 0, "Invalid list range");
     auto id = audit::nextList;
     audit::nextList += range;
     return id;
 }
-void GLAPIENTRY glGenTextures(GLsizei n, GLuint *textures) {
-    audit::command("glGenTextures inside glBegin", false);
+void sjp::gfx::genTextures(int n, sjp::gfx::Id *textures) {
+    audit::command("sjp::gfx::genTextures inside sjp::gfx::begin", false);
     for (int i = 0; i < n; ++i) {
         textures[i] = audit::nextTexture++;
         audit::textures.insert(textures[i]);
     }
 }
-void GLAPIENTRY glGetFloatv(GLenum pname, GLfloat *params) {
-    audit::command("glGetFloatv inside glBegin", false);
-    if (pname == GL_CURRENT_COLOR)
+void sjp::gfx::getFloatv(sjp::gfx::Enum pname, float *params) {
+    audit::command("sjp::gfx::getFloatv inside sjp::gfx::begin", false);
+    if (pname == sjp::gfx::CURRENT_COLOR)
         std::copy(audit::current.color.begin(), audit::current.color.end(), params);
-    else if (pname == GL_CURRENT_NORMAL)
+    else if (pname == sjp::gfx::CURRENT_NORMAL)
         std::copy(audit::current.normal.begin(), audit::current.normal.end(), params);
-    else if (pname == GL_CURRENT_TEXTURE_COORDS)
+    else if (pname == sjp::gfx::CURRENT_TEXTURE_COORDS)
         std::copy(audit::current.uv.begin(), audit::current.uv.end(), params);
     else
-        throw std::runtime_error("Unsupported audit glGetFloatv");
+        throw std::runtime_error("Unsupported audit sjp::gfx::getFloatv");
 }
-void GLAPIENTRY glGetIntegerv(GLenum pname, GLint *params) {
-    audit::command("glGetIntegerv inside glBegin", false);
-    audit::require(pname == GL_UNPACK_ALIGNMENT, "Unsupported audit glGetIntegerv");
+void sjp::gfx::getIntegerv(sjp::gfx::Enum pname, int *params) {
+    audit::command("sjp::gfx::getIntegerv inside sjp::gfx::begin", false);
+    audit::require(pname == sjp::gfx::UNPACK_ALIGNMENT, "Unsupported audit sjp::gfx::getIntegerv");
     *params = 1;
 }
-const GLubyte *GLAPIENTRY glGetString(GLenum name) {
-    audit::command("glGetString inside glBegin", false);
-    return reinterpret_cast<const GLubyte *>("CPU command audit; no graphics context");
+const unsigned char *sjp::gfx::getString(sjp::gfx::Enum name) {
+    audit::command("sjp::gfx::getString inside sjp::gfx::begin", false);
+    return reinterpret_cast<const unsigned char *>("CPU command audit; no graphics context");
 }
-void GLAPIENTRY glHint(GLenum target, GLenum mode) {
-    audit::command("glHint inside glBegin", false);
+void sjp::gfx::hint(sjp::gfx::Enum target, sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::hint inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glLightModelfv(GLenum pname, const GLfloat *params) {
-    audit::command("glLightModelfv inside glBegin", false);
+void sjp::gfx::lightModelfv(sjp::gfx::Enum pname, const float *params) {
+    audit::command("sjp::gfx::lightModelfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
 }
-void GLAPIENTRY glLightfv(GLenum light, GLenum pname, const GLfloat *params) {
-    audit::command("glLightfv inside glBegin", false);
+void sjp::gfx::lightfv(sjp::gfx::Enum light, sjp::gfx::Enum pname, const float *params) {
+    audit::command("sjp::gfx::lightfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
 }
-void GLAPIENTRY glLineWidth(GLfloat width) {
-    audit::command("glLineWidth inside glBegin", false);
+void sjp::gfx::lineWidth(float width) {
+    audit::command("sjp::gfx::lineWidth inside sjp::gfx::begin", false);
     audit::finite(width);
 }
-void GLAPIENTRY glLoadIdentity(void) {
-    audit::command("glLoadIdentity inside glBegin", false);
+void sjp::gfx::loadIdentity(void) {
+    audit::command("sjp::gfx::loadIdentity inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glMaterialf(GLenum face, GLenum pname, GLfloat param) {
-    audit::command("glMaterialf inside glBegin", false);
+void sjp::gfx::materialf(sjp::gfx::Enum face, sjp::gfx::Enum pname, float param) {
+    audit::command("sjp::gfx::materialf inside sjp::gfx::begin", false);
     audit::finite(param);
 }
-void GLAPIENTRY glMaterialfv(GLenum face, GLenum pname, const GLfloat *params) {
-    audit::command("glMaterialfv inside glBegin", false);
+void sjp::gfx::materialfv(sjp::gfx::Enum face, sjp::gfx::Enum pname, const float *params) {
+    audit::command("sjp::gfx::materialfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
 }
-void GLAPIENTRY glMatrixMode(GLenum mode) {
-    audit::command("glMatrixMode inside glBegin", false);
+void sjp::gfx::matrixMode(sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::matrixMode inside sjp::gfx::begin", false);
     audit::require(audit::matrices.count(mode), "Invalid matrix mode");
     audit::matrix = mode;
 }
-void GLAPIENTRY glMultMatrixf(const GLfloat *m) {
-    audit::command("glMultMatrixf inside glBegin", false);
+void sjp::gfx::multMatrixf(const float *m) {
+    audit::command("sjp::gfx::multMatrixf inside sjp::gfx::begin", false);
     for (int i = 0; i < 16; ++i)
         audit::finite(m[i]);
 }
-void GLAPIENTRY glNewList(GLuint list, GLenum mode) {
-    audit::command("glNewList inside glBegin", false);
-    audit::require(!audit::compiling && list != 0 && mode == GL_COMPILE_AND_EXECUTE,
+void sjp::gfx::newList(sjp::gfx::Id list, sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::newList inside sjp::gfx::begin", false);
+    audit::require(!audit::compiling && list != 0 && mode == sjp::gfx::COMPILE_AND_EXECUTE,
                    "Invalid list compilation");
     audit::compiling = list;
     audit::lists[list] = {};
     audit::maximumLists = std::max(audit::maximumLists, audit::lists.size());
 }
-void GLAPIENTRY glNormal3d(GLdouble nx, GLdouble ny, GLdouble nz) {
-    audit::command("glNormal3d inside glBegin", true);
+void sjp::gfx::normal3d(double nx, double ny, double nz) {
+    audit::command("sjp::gfx::normal3d inside sjp::gfx::begin", true);
     audit::finite(nx);
     audit::finite(ny);
     audit::finite(nz);
-    audit::current.normal = {GLfloat(nx), GLfloat(ny), GLfloat(nz)};
+    audit::current.normal = {float(nx), float(ny), float(nz)};
     auto value = audit::current.normal;
     audit::tail([value] { audit::current.normal = value; });
 }
-void GLAPIENTRY glNormal3dv(const GLdouble *v) {
-    audit::command("glNormal3dv inside glBegin", true);
+void sjp::gfx::normal3dv(const double *v) {
+    audit::command("sjp::gfx::normal3dv inside sjp::gfx::begin", true);
     for (int i = 0; i < 3; ++i) {
         audit::finite(v[i]);
         audit::current.normal[i] = v[i];
@@ -310,9 +315,9 @@ void GLAPIENTRY glNormal3dv(const GLdouble *v) {
     auto value = audit::current.normal;
     audit::tail([value] { audit::current.normal = value; });
 }
-void GLAPIENTRY glOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top, GLdouble near_val,
-                        GLdouble far_val) {
-    audit::command("glOrtho inside glBegin", false);
+void sjp::gfx::ortho(double left, double right, double bottom, double top, double near_val,
+                        double far_val) {
+    audit::command("sjp::gfx::ortho inside sjp::gfx::begin", false);
     audit::finite(left);
     audit::finite(right);
     audit::finite(bottom);
@@ -321,126 +326,121 @@ void GLAPIENTRY glOrtho(GLdouble left, GLdouble right, GLdouble bottom, GLdouble
     audit::finite(far_val);
     audit::require(left != right && bottom != top && near_val != far_val, "Invalid orthographic projection");
 }
-void GLAPIENTRY glPixelStorei(GLenum pname, GLint param) {
-    audit::command("glPixelStorei inside glBegin", false);
+void sjp::gfx::pixelStorei(sjp::gfx::Enum pname, int param) {
+    audit::command("sjp::gfx::pixelStorei inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glPolygonOffset(GLfloat factor, GLfloat units) {
-    audit::command("glPolygonOffset inside glBegin", false);
+void sjp::gfx::polygonOffset(float factor, float units) {
+    audit::command("sjp::gfx::polygonOffset inside sjp::gfx::begin", false);
     audit::finite(factor);
     audit::finite(units);
 }
-void GLAPIENTRY glPopAttrib(void) {
-    audit::command("glPopAttrib inside glBegin", false);
+void sjp::gfx::popAttrib(void) {
+    audit::command("sjp::gfx::popAttrib inside sjp::gfx::begin", false);
     audit::require(!audit::attributes.empty(), "Attribute stack underflow");
     auto saved = audit::attributes.back();
     audit::attributes.pop_back();
-    if (saved.mask & GL_CURRENT_BIT)
+    if (saved.mask & sjp::gfx::CURRENT_BIT)
         audit::current = saved.value;
-    if (saved.mask & GL_DEPTH_BUFFER_BIT)
+    if (saved.mask & sjp::gfx::DEPTH_BUFFER_BIT)
         audit::depth = saved.depth;
 }
-void GLAPIENTRY glPopMatrix(void) {
-    audit::command("glPopMatrix inside glBegin", false);
+void sjp::gfx::popMatrix(void) {
+    audit::command("sjp::gfx::popMatrix inside sjp::gfx::begin", false);
     audit::require(--audit::matrices[audit::matrix] >= 1, "Matrix stack underflow");
 }
-void GLAPIENTRY glPushAttrib(GLbitfield mask) {
-    audit::command("glPushAttrib inside glBegin", false);
+void sjp::gfx::pushAttrib(sjp::gfx::Flags mask) {
+    audit::command("sjp::gfx::pushAttrib inside sjp::gfx::begin", false);
     audit::attributes.push_back({mask, audit::current, audit::depth});
     audit::require(audit::attributes.size() <= 16, "Attribute stack exceeds guaranteed capacity");
 }
-void GLAPIENTRY glPushMatrix(void) {
-    audit::command("glPushMatrix inside glBegin", false);
+void sjp::gfx::pushMatrix(void) {
+    audit::command("sjp::gfx::pushMatrix inside sjp::gfx::begin", false);
     ++audit::matrices[audit::matrix];
-    audit::require(audit::matrices[audit::matrix] <= (audit::matrix == GL_MODELVIEW ? 32 : 2),
+    audit::require(audit::matrices[audit::matrix] <= (audit::matrix == sjp::gfx::MODELVIEW ? 32 : 2),
                    "Matrix stack overflow");
 }
-void GLAPIENTRY glReadPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type,
-                             GLvoid *pixels) {
-    audit::command("glReadPixels inside glBegin", false);
-    throw std::runtime_error("Pixel readback is unavailable in CPU command test");
-}
-void GLAPIENTRY glScalef(GLfloat x, GLfloat y, GLfloat z) {
-    audit::command("glScalef inside glBegin", false);
+
+void sjp::gfx::scalef(float x, float y, float z) {
+    audit::command("sjp::gfx::scalef inside sjp::gfx::begin", false);
     audit::finite(x);
     audit::finite(y);
     audit::finite(z);
 }
-void GLAPIENTRY glShadeModel(GLenum mode) {
-    audit::command("glShadeModel inside glBegin", false);
+void sjp::gfx::shadeModel(sjp::gfx::Enum mode) {
+    audit::command("sjp::gfx::shadeModel inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glTexCoord2d(GLdouble s, GLdouble t) {
-    audit::command("glTexCoord2d inside glBegin", true);
+void sjp::gfx::texCoord2d(double s, double t) {
+    audit::command("sjp::gfx::texCoord2d inside sjp::gfx::begin", true);
     audit::finite(s);
     audit::finite(t);
-    audit::current.uv = {GLfloat(s), GLfloat(t), 0, 1};
+    audit::current.uv = {float(s), float(t), 0, 1};
     auto value = audit::current.uv;
     audit::tail([value] { audit::current.uv = value; });
 }
-void GLAPIENTRY glTexCoord2dv(const GLdouble *v) {
-    audit::command("glTexCoord2dv inside glBegin", true);
+void sjp::gfx::texCoord2dv(const double *v) {
+    audit::command("sjp::gfx::texCoord2dv inside sjp::gfx::begin", true);
     for (int i = 0; i < 2; ++i)
         audit::finite(v[i]);
-    audit::current.uv = {GLfloat(v[0]), GLfloat(v[1]), 0, 1};
+    audit::current.uv = {float(v[0]), float(v[1]), 0, 1};
     auto value = audit::current.uv;
     audit::tail([value] { audit::current.uv = value; });
 }
-void GLAPIENTRY glTexCoord2f(GLfloat s, GLfloat t) {
-    audit::command("glTexCoord2f inside glBegin", true);
+void sjp::gfx::texCoord2f(float s, float t) {
+    audit::command("sjp::gfx::texCoord2f inside sjp::gfx::begin", true);
     audit::finite(s);
     audit::finite(t);
     audit::current.uv = {s, t, 0, 1};
     auto value = audit::current.uv;
     audit::tail([value] { audit::current.uv = value; });
 }
-void GLAPIENTRY glTexEnvi(GLenum target, GLenum pname, GLint param) {
-    audit::command("glTexEnvi inside glBegin", false);
+void sjp::gfx::texEnvi(sjp::gfx::Enum target, sjp::gfx::Enum pname, int param) {
+    audit::command("sjp::gfx::texEnvi inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glTexImage2D(GLenum target, GLint level, GLint internalFormat, GLsizei width, GLsizei height,
-                             GLint border, GLenum format, GLenum type, const GLvoid *pixels) {
-    audit::command("glTexImage2D inside glBegin", false);
+void sjp::gfx::texImage2D(sjp::gfx::Enum target, int level, int internalFormat, int width, int height,
+                             int border, sjp::gfx::Enum format, sjp::gfx::Enum type, const void *pixels) {
+    audit::command("sjp::gfx::texImage2D inside sjp::gfx::begin", false);
     audit::require(width > 0 && height > 0 && pixels, "Invalid texture upload");
     audit::textureBytes += size_t(width) * height;
 }
-void GLAPIENTRY glTexParameteri(GLenum target, GLenum pname, GLint param) {
-    audit::command("glTexParameteri inside glBegin", false);
+void sjp::gfx::texParameteri(sjp::gfx::Enum target, sjp::gfx::Enum pname, int param) {
+    audit::command("sjp::gfx::texParameteri inside sjp::gfx::begin", false);
 }
-void GLAPIENTRY glTranslated(GLdouble x, GLdouble y, GLdouble z) {
-    audit::command("glTranslated inside glBegin", false);
+void sjp::gfx::translated(double x, double y, double z) {
+    audit::command("sjp::gfx::translated inside sjp::gfx::begin", false);
     audit::finite(x);
     audit::finite(y);
     audit::finite(z);
 }
-void GLAPIENTRY glTranslatef(GLfloat x, GLfloat y, GLfloat z) {
-    audit::command("glTranslatef inside glBegin", false);
+void sjp::gfx::translatef(float x, float y, float z) {
+    audit::command("sjp::gfx::translatef inside sjp::gfx::begin", false);
     audit::finite(x);
     audit::finite(y);
     audit::finite(z);
 }
-void GLAPIENTRY glVertex2f(GLfloat x, GLfloat y) {
+void sjp::gfx::vertex2f(float x, float y) {
     audit::position(x, y, 0);
-    audit::command("glVertex2f inside glBegin", true);
+    audit::command("sjp::gfx::vertex2f inside sjp::gfx::begin", true);
     audit::finite(x);
     audit::finite(y);
     audit::vertex();
 }
-void GLAPIENTRY glVertex3d(GLdouble x, GLdouble y, GLdouble z) {
+void sjp::gfx::vertex3d(double x, double y, double z) {
     audit::position(x, y, z);
-    audit::command("glVertex3d inside glBegin", true);
+    audit::command("sjp::gfx::vertex3d inside sjp::gfx::begin", true);
     audit::finite(x);
     audit::finite(y);
     audit::finite(z);
     audit::vertex();
 }
-void GLAPIENTRY glVertex3dv(const GLdouble *v) {
+void sjp::gfx::vertex3dv(const double *v) {
     audit::position(v[0], v[1], v[2]);
-    audit::command("glVertex3dv inside glBegin", true);
+    audit::command("sjp::gfx::vertex3dv inside sjp::gfx::begin", true);
     for (int i = 0; i < 3; ++i)
         audit::finite(v[i]);
     audit::vertex();
 }
-void GLAPIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
-    audit::command("glViewport inside glBegin", false);
-}
+void sjp::gfx::viewport(int x, int y, int width, int height) {
+    audit::command("sjp::gfx::viewport inside sjp::gfx::begin", false);
 }
 
 int main() {
@@ -515,7 +515,7 @@ int main() {
                 audit::current.normal = {.6f, .7f, .8f};
                 audit::current.uv = {.9f, .8f, 0, 1};
                 auto before = audit::current;
-                glCallList(id);
+                sjp::gfx::callList(id);
                 if (before.color != audit::current.color || before.normal != audit::current.normal ||
                     before.uv != audit::current.uv)
                     ++leaks;

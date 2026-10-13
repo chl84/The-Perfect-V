@@ -20,22 +20,22 @@ uint32_t venuePattern(const std::string &id) {
     return value;
 }
 void vertex(Vec3 p) {
-    glVertex3d(p.x, p.y, p.z);
+    sjp::gfx::vertex3d(p.x, p.y, p.z);
 }
 // Soft, untextured billboards: the centre carries the opacity, the shared
 // outside ring is transparent. Fixed small meshes remain sharp when close.
 void powder(Vec3 center, Vec3 right, Vec3 up, double radius, double opacity) {
     if (opacity <= .001)
         return;
-    glBegin(GL_TRIANGLE_FAN);
-    glColor4f(.91f, .97f, 1, float(opacity));
+    sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
+    sjp::gfx::color4f(.91f, .97f, 1, float(opacity));
     vertex(center);
-    glColor4f(.91f, .97f, 1, 0);
+    sjp::gfx::color4f(.91f, .97f, 1, 0);
     for (int corner = 0; corner <= 6; ++corner) {
         const double angle = corner * PI / 3;
         vertex(center + right * (std::cos(angle) * radius) + up * (std::sin(angle) * radius));
     }
-    glEnd();
+    sjp::gfx::end();
 }
 OriginalSkeleton effectSkeleton(const Hill &h, const Frame &f) {
     if (f.hasRenderSkeleton)
@@ -122,14 +122,14 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
     }
     lastEffectFrame = f;
 
-    glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT |
-                 GL_LINE_BIT | GL_POLYGON_BIT);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_TEXTURE_2D);
-    glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
+    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::TEXTURE_BIT |
+                 sjp::gfx::LINE_BIT | sjp::gfx::POLYGON_BIT);
+    sjp::gfx::disable(sjp::gfx::LIGHTING);
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
+    sjp::gfx::disable(sjp::gfx::CULL_FACE);
+    sjp::gfx::enable(sjp::gfx::BLEND);
+    sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::gfx::depthMask(sjp::gfx::FALSE);
     const Vec3 forward = (target - eye).normalized(), right = cross(forward, {0, 1, 0}).normalized(),
                up = cross(right, forward).normalized();
     for (const VisualParticle &particle : snowParticles) {
@@ -219,20 +219,20 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
         // These short, faint streaks stay outside the body silhouette.
         const Vec3 airflow = (wind * .35 - Vec3{f.vx, f.vy, 0}).normalized();
         const double strength = clamp(std::hypot(double(f.vx), double(f.vy)) / 45, 0.0, 1.0);
-        glLineWidth(1);
-        glBegin(GL_LINES);
+        sjp::gfx::lineWidth(1);
+        sjp::gfx::begin(sjp::gfx::LINES);
         for (int i = 0; i < 13; ++i) {
             const double seed = 1710 + i * 7;
             const double cycle = std::fmod(clock * (1.4 + pattern(seed) * .4) + pattern(seed + 1), 1.0);
             const double fade = std::sin(cycle * PI);
             const Vec3 position = origin + Vec3{1.6 - cycle * 4.3, .12 + pattern(seed + 2) * 1.55,
                                                 (i % 2 ? -1 : 1) * (.65 + pattern(seed + 3) * .65)};
-            glColor4f(.85f, .95f, 1, float(.11 * strength * fade));
+            sjp::gfx::color4f(.85f, .95f, 1, float(.11 * strength * fade));
             vertex(position);
-            glColor4f(.85f, .95f, 1, 0);
+            sjp::gfx::color4f(.85f, .95f, 1, 0);
             vertex(position + airflow * (.25 + pattern(seed + 4) * .45));
         }
-        glEnd();
+        sjp::gfx::end();
     }
 
     // Select weather once per jump, never per frame or camera. World-space
@@ -259,6 +259,6 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
                            .56 * nearFade * std::sin(cycle * PI));
                 }
     }
-    glPopAttrib();
+    sjp::gfx::popAttrib();
 }
 } // namespace sjp

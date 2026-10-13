@@ -11,7 +11,7 @@
 namespace sjp {
 namespace {
 void col(Color c) {
-    glColor4f(c.r, c.g, c.b, c.a);
+    sjp::gfx::color4f(c.r, c.g, c.b, c.a);
 }
 void roundedGradient(float x, float y, float w, float h, float radius, Color top, Color bottom) {
     radius = std::min(radius, std::min(w, h) / 2);
@@ -19,9 +19,9 @@ void roundedGradient(float x, float y, float w, float h, float radius, Color top
         float t = clamp((py - y) / h, 0.f, 1.f);
         col({top.r + (bottom.r - top.r) * t, top.g + (bottom.g - top.g) * t, top.b + (bottom.b - top.b) * t,
              top.a + (bottom.a - top.a) * t});
-        glVertex2f(px, py);
+        sjp::gfx::vertex2f(px, py);
     };
-    glBegin(GL_TRIANGLE_FAN);
+    sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
     point(x + w / 2, y + h / 2);
     for (int corner = 0; corner < 4; ++corner) {
         double a = -PI / 2 + corner * PI / 2;
@@ -33,54 +33,54 @@ void roundedGradient(float x, float y, float w, float h, float radius, Color top
         }
     }
     point(x + w - radius, y);
-    glEnd();
+    sjp::gfx::end();
 }
 } // namespace
 void Renderer::overlay() {
-    glDisable(GL_DEPTH_TEST);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_FOG);
-    glDisable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    glOrtho(0, width, height, 0, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
+    sjp::gfx::disable(sjp::gfx::LIGHTING);
+    sjp::gfx::disable(sjp::gfx::FOG);
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
+    sjp::gfx::enable(sjp::gfx::BLEND);
+    sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
+    sjp::gfx::loadIdentity();
+    sjp::gfx::ortho(0, width, height, 0, -1, 1);
+    sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
+    sjp::gfx::loadIdentity();
     uiScale = std::min(width / 1440.f, height / 900.f);
     offsetX = (width - 1440 * uiScale) / 2;
     offsetY = (height - 900 * uiScale) / 2;
-    glTranslatef(offsetX, offsetY, 0);
-    glScalef(uiScale, uiScale, 1);
+    sjp::gfx::translatef(offsetX, offsetY, 0);
+    sjp::gfx::scalef(uiScale, uiScale, 1);
 }
 void Renderer::rect(float x, float y, float w, float h, Color c, float radius) {
     if (w <= 0 || h <= 0)
         return;
     col(c);
     if (radius <= 0) {
-        glBegin(GL_QUADS);
-        glVertex2f(x, y);
-        glVertex2f(x + w, y);
-        glVertex2f(x + w, y + h);
-        glVertex2f(x, y + h);
-        glEnd();
+        sjp::gfx::begin(sjp::gfx::QUADS);
+        sjp::gfx::vertex2f(x, y);
+        sjp::gfx::vertex2f(x + w, y);
+        sjp::gfx::vertex2f(x + w, y + h);
+        sjp::gfx::vertex2f(x, y + h);
+        sjp::gfx::end();
         return;
     }
     radius = std::min(radius, std::min(w, h) / 2);
-    glBegin(GL_TRIANGLE_FAN);
-    glVertex2f(x + w / 2, y + h / 2);
+    sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
+    sjp::gfx::vertex2f(x + w / 2, y + h / 2);
     for (int corner = 0; corner < 4; corner++) {
         double a = -PI / 2 + corner * PI / 2;
         float cx = corner == 0 || corner == 1 ? x + w - radius : x + radius,
               cy = corner == 0 || corner == 3 ? y + radius : y + h - radius;
         for (int i = 0; i <= 8; i++) {
             double b = a + i * PI / 16;
-            glVertex2f(cx + std::cos(b) * radius, cy + std::sin(b) * radius);
+            sjp::gfx::vertex2f(cx + std::cos(b) * radius, cy + std::sin(b) * radius);
         }
     }
-    glVertex2f(x + w - radius, y);
-    glEnd();
+    sjp::gfx::vertex2f(x + w - radius, y);
+    sjp::gfx::end();
 }
 void Renderer::glassPanel(float x, float y, float w, float h, float radius, float opacity) {
     if (w <= 2 || h <= 2)
@@ -95,22 +95,22 @@ void Renderer::glassPanel(float x, float y, float w, float h, float radius, floa
     line(x + radius + 3, y + 1, x + w - radius - 3, y + 1, {.79f, .92f, .95f, .13f});
 }
 void Renderer::gradient(float x, float y, float w, float h, Color a, Color b) {
-    glBegin(GL_QUADS);
+    sjp::gfx::begin(sjp::gfx::QUADS);
     col(a);
-    glVertex2f(x, y);
-    glVertex2f(x, y + h);
+    sjp::gfx::vertex2f(x, y);
+    sjp::gfx::vertex2f(x, y + h);
     col(b);
-    glVertex2f(x + w, y + h);
-    glVertex2f(x + w, y);
-    glEnd();
+    sjp::gfx::vertex2f(x + w, y + h);
+    sjp::gfx::vertex2f(x + w, y);
+    sjp::gfx::end();
 }
 void Renderer::line(float x, float y, float xx, float yy, Color c, float width) {
     col(c);
-    glLineWidth(width * uiScale);
-    glBegin(GL_LINES);
-    glVertex2f(x, y);
-    glVertex2f(xx, yy);
-    glEnd();
+    sjp::gfx::lineWidth(width * uiScale);
+    sjp::gfx::begin(sjp::gfx::LINES);
+    sjp::gfx::vertex2f(x, y);
+    sjp::gfx::vertex2f(xx, yy);
+    sjp::gfx::end();
 }
 float Renderer::textWidth(const std::string &t, float size, bool b) const {
     const Font &f = b ? boldFont : regular;
@@ -122,29 +122,29 @@ float Renderer::textWidth(const std::string &t, float size, bool b) const {
 }
 void Renderer::text(const std::string &t, float x, float y, float size, Color c, bool bold) {
     Font &f = bold ? boldFont : regular;
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, f.tex);
+    sjp::gfx::enable(sjp::gfx::TEXTURE_2D);
+    sjp::gfx::bindTexture(sjp::gfx::TEXTURE_2D, f.tex);
     col(c);
     float scale = size / 64;
-    glBegin(GL_QUADS);
+    sjp::gfx::begin(sjp::gfx::QUADS);
     for (unsigned char ch : t) {
         if (ch >= 128)
             continue;
         const auto &g = f.glyphs[ch];
         float xx = x + g.bearingX * scale, yy = y + size - g.bearingY * scale, w = g.w * scale,
               h = g.h * scale;
-        glTexCoord2f(g.u, g.v);
-        glVertex2f(xx, yy);
-        glTexCoord2f(g.u + g.w / 1024, g.v);
-        glVertex2f(xx + w, yy);
-        glTexCoord2f(g.u + g.w / 1024, g.v + g.h / 1024);
-        glVertex2f(xx + w, yy + h);
-        glTexCoord2f(g.u, g.v + g.h / 1024);
-        glVertex2f(xx, yy + h);
+        sjp::gfx::texCoord2f(g.u, g.v);
+        sjp::gfx::vertex2f(xx, yy);
+        sjp::gfx::texCoord2f(g.u + g.w / 1024, g.v);
+        sjp::gfx::vertex2f(xx + w, yy);
+        sjp::gfx::texCoord2f(g.u + g.w / 1024, g.v + g.h / 1024);
+        sjp::gfx::vertex2f(xx + w, yy + h);
+        sjp::gfx::texCoord2f(g.u, g.v + g.h / 1024);
+        sjp::gfx::vertex2f(xx, yy + h);
         x += g.advance * scale;
     }
-    glEnd();
-    glDisable(GL_TEXTURE_2D);
+    sjp::gfx::end();
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
 }
 void Renderer::textRight(const std::string &t, float x, float y, float size, Color c, bool bold) {
     text(t, x - textWidth(t, size, bold), y, size, c, bold);
@@ -166,17 +166,9 @@ void Renderer::windArrow(float x, float y, double speed, double angle) {
     line(x + 17 * dx, y + 17 * dy, x + 9 * dx + 7 * dy, y + 9 * dy - 7 * dx, colors::teal, 2);
 }
 void Renderer::finish() {
-    if (synchronousRendering)
-        glFinish();
-    SDL_GL_SwapWindow(window);
+    sjp::gfx::present(synchronousRendering);
 }
 void Renderer::capture(const std::string &path) {
-    std::vector<unsigned char> p(width * height * 3);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, p.data());
-    std::ofstream out(path, std::ios::binary);
-    out << "P6\n" << width << " " << height << "\n255\n";
-    for (int y = height - 1; y >= 0; y--)
-        out.write(reinterpret_cast<const char *>(p.data() + y * width * 3), width * 3);
+    sjp::gfx::captureImage(path);
 }
 } // namespace sjp

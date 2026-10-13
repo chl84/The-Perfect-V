@@ -9,32 +9,15 @@
 
 #include "render_batch.h"
 // Only this translation unit batches static terrain compilation. The wrapper
-// forwards directly to OpenGL for the animated scenery pass.
-#define glBegin sjp::visual::begin
-#define glEnd sjp::visual::end
-#define glColor4f sjp::visual::color
-#define glNormal3d sjp::visual::normal
-#define glTexCoord2d sjp::visual::texCoord
-#define glVertex3d sjp::visual::vertex
-#define glEnable sjp::visual::enable
-#define glDisable sjp::visual::disable
-#define glPushAttrib sjp::visual::pushAttrib
-#define glPopAttrib sjp::visual::popAttrib
-#define glMaterialfv sjp::visual::materialfv
-#define glMaterialf sjp::visual::materialf
-#define glBindTexture sjp::visual::bindTexture
-#define glPolygonOffset sjp::visual::polygonOffset
-#define glDepthMask sjp::visual::depthMask
-#define glBlendFunc sjp::visual::blendFunc
-#define glTexEnvi sjp::visual::texEnvi
+// forwards to the Vulkan command recorder for animated scenery.
 
 namespace sjp {
 namespace {
 void col(Color c) {
-    glColor4f(c.r, c.g, c.b, c.a);
+    sjp::visual::color(c.r, c.g, c.b, c.a);
 }
 void vertex(Vec3 p) {
-    glVertex3d(p.x, p.y, p.z);
+    sjp::visual::vertex(p.x, p.y, p.z);
 }
 Color shade(Color c, double value) {
     return {float(c.r * value), float(c.g * value), float(c.b * value), c.a};
@@ -45,23 +28,23 @@ double hash(double n) {
 void quad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     col(color);
     const Vec3 n = cross(b - a, c - a).normalized();
-    glBegin(GL_QUADS);
-    glNormal3d(n.x, n.y, n.z);
+    sjp::visual::begin(sjp::gfx::QUADS);
+    sjp::visual::normal(n.x, n.y, n.z);
     vertex(a);
     vertex(b);
     vertex(c);
     vertex(d);
-    glEnd();
+    sjp::visual::end();
 }
 void triangle(Vec3 a, Vec3 b, Vec3 c, Color color) {
     col(color);
     const Vec3 n = cross(b - a, c - a).normalized();
-    glBegin(GL_TRIANGLES);
-    glNormal3d(n.x, n.y, n.z);
+    sjp::visual::begin(sjp::gfx::TRIANGLES);
+    sjp::visual::normal(n.x, n.y, n.z);
     vertex(a);
     vertex(b);
     vertex(c);
-    glEnd();
+    sjp::visual::end();
 }
 void box(Vec3 p, Vec3 size, Color c) {
     const Vec3 a = p - size * .5, b = p + size * .5;
@@ -86,15 +69,15 @@ void sphere(Vec3 p, double r, Color color) {
     col(color);
     for (int i = 0; i < 4; ++i) {
         const double a = -PI / 2 + i * PI / 4, b = a + PI / 4;
-        glBegin(GL_QUAD_STRIP);
+        sjp::visual::begin(sjp::gfx::QUAD_STRIP);
         for (int j = 0; j <= 8; ++j)
             for (double k : {a, b}) {
                 const double angle = j * 2 * PI / 8;
                 const Vec3 n{std::cos(k) * std::cos(angle), std::sin(k), std::cos(k) * std::sin(angle)};
-                glNormal3d(n.x, n.y, n.z);
+                sjp::visual::normal(n.x, n.y, n.z);
                 vertex(p + n * r);
             }
-        glEnd();
+        sjp::visual::end();
     }
 }
 // This is the existing decorative valley profile. The central corridor and
@@ -121,37 +104,37 @@ void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = fals
         preparedSnowWeight(h, c.x, c.z) == 0 && preparedSnowWeight(h, d.x, d.z) == 0)
         return;
     const Vec3 n = cross(b - a, c - a).normalized();
-    glBegin(GL_QUADS);
-    glNormal3d(n.x, n.y, n.z);
+    sjp::visual::begin(sjp::gfx::QUADS);
+    sjp::visual::normal(n.x, n.y, n.z);
     for (Vec3 p : {a, b, c, d}) {
         Color color = snowColor(h, p.x, p.z);
         if (groomed)
             color.a = float(preparedSnowWeight(h, p.x, p.z));
         col(color);
-        glTexCoord2d(p.x / 13.0, p.z / 13.0);
+        sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
         vertex(p);
     }
-    glEnd();
+    sjp::visual::end();
 }
 void texturedQuad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     const Vec3 n = cross(b - a, c - a).normalized();
     col(color);
-    glBegin(GL_QUADS);
-    glNormal3d(n.x, n.y, n.z);
+    sjp::visual::begin(sjp::gfx::QUADS);
+    sjp::visual::normal(n.x, n.y, n.z);
     for (Vec3 p : {a, b, c, d}) {
-        glTexCoord2d(p.x / 13.0, p.z / 13.0);
+        sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
         vertex(p);
     }
-    glEnd();
+    sjp::visual::end();
 }
-GLuint makeSnowTexture(bool groomed) {
-    GLuint texture = 0;
-    glGenTextures(1, &texture);
-    glPushAttrib(GL_TEXTURE_BIT);
-    GLint oldAlignment = 4;
-    glGetIntegerv(GL_UNPACK_ALIGNMENT, &oldAlignment);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glBindTexture(GL_TEXTURE_2D, texture);
+sjp::gfx::Id makeSnowTexture(bool groomed) {
+    sjp::gfx::Id texture = 0;
+    sjp::gfx::genTextures(1, &texture);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    int oldAlignment = 4;
+    sjp::gfx::getIntegerv(sjp::gfx::UNPACK_ALIGNMENT, &oldAlignment);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
     // Ordinary snow has grain; only the prepared track has machine-made ridges.
     // Averaged mip levels prevent either material from sparkling at a distance.
     int width = 128;
@@ -164,7 +147,7 @@ GLuint makeSnowTexture(bool groomed) {
             pixels[y * width + x] = uint8_t(clamp(int((.978 + ridges + grain) * 255), 0, 255));
         }
     for (int level = 0;; ++level) {
-        glTexImage2D(GL_TEXTURE_2D, level, GL_LUMINANCE, width, width, 0, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+        sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, level, sjp::gfx::LUMINANCE, width, width, 0, sjp::gfx::LUMINANCE, sjp::gfx::UNSIGNED_BYTE,
                      pixels.data());
         if (width == 1)
             break;
@@ -179,19 +162,19 @@ GLuint makeSnowTexture(bool groomed) {
         pixels.swap(next);
         width = nextWidth;
     }
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, oldAlignment);
-    glPopAttrib();
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MIN_FILTER, sjp::gfx::LINEAR_MIPMAP_LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAG_FILTER, sjp::gfx::LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::REPEAT);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, oldAlignment);
+    sjp::visual::popAttrib();
     return texture;
 }
 void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
     constexpr int sides = 16, rings = 4;
     for (int ring = 0; ring < rings; ++ring) {
         const double inner = ring / double(rings), outer = (ring + 1) / double(rings);
-        glBegin(GL_QUAD_STRIP);
+        sjp::visual::begin(sjp::gfx::QUAD_STRIP);
         for (int i = 0; i <= sides; ++i) {
             const double angle = i * 2 * PI / sides;
             for (double radius : {outer, inner}) {
@@ -200,7 +183,7 @@ void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
                 vertex({x, terrainY(h, x, z) + .018, z});
             }
         }
-        glEnd();
+        sjp::visual::end();
     }
 }
 void mountainRidge(double scale, int layer) {
@@ -673,13 +656,13 @@ void floodlight(const Hill &h, double x, double z, double size) {
     for (int lamp = 0; lamp < 6; ++lamp) {
         const double xx = x + (lamp % 3 - 1) * 1.02, yy = y + height + (lamp / 3 - .5) * .49;
         box({xx, yy, z}, {.82, .38, .67}, {.51f, .59f, .63f, 1});
-        const GLfloat emission[]{.28f, .27f, .22f, 1};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, emission);
+        const float emission[]{.28f, .27f, .22f, 1};
+        sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::EMISSION, emission);
         const double front = z + (z > 0 ? -.345 : .345);
         quad({xx - .35, yy - .125, front}, {xx + .35, yy - .125, front}, {xx + .35, yy + .125, front},
              {xx - .35, yy + .125, front}, {.94f, .91f, .78f, 1});
-        const GLfloat noEmission[]{0, 0, 0, 1};
-        glMaterialfv(GL_FRONT_AND_BACK, GL_EMISSION, noEmission);
+        const float noEmission[]{0, 0, 0, 1};
+        sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::EMISSION, noEmission);
     }
 }
 } // namespace
@@ -692,7 +675,7 @@ void Renderer::terrain(const Hill &h) {
             index = i;
     landscapeUse[index] = ++landscapeClock;
     if (landscapes[index]) {
-        glCallList(landscapes[index]);
+        sjp::gfx::callList(landscapes[index]);
         return;
     }
     if (!snowTexture)
@@ -709,19 +692,19 @@ void Renderer::terrain(const Hill &h) {
                 oldest = i;
         }
     if (count >= 2) {
-        glDeleteLists(landscapes[oldest], 1);
+        sjp::gfx::deleteLists(landscapes[oldest], 1);
         landscapes[oldest] = 0;
     }
-    landscapes[index] = glGenLists(1);
-    glNewList(landscapes[index], GL_COMPILE_AND_EXECUTE);
+    landscapes[index] = sjp::gfx::genLists(1);
+    sjp::gfx::newList(landscapes[index], sjp::gfx::COMPILE_AND_EXECUTE);
     visual::StaticBatch staticBatch;
-    glPushAttrib(GL_ENABLE_BIT | GL_LIGHTING_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT | GL_POLYGON_BIT);
-    const GLfloat matte[]{.025f, .035f, .045f, 1};
-    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, matte);
-    glMaterialf(GL_FRONT_AND_BACK, GL_SHININESS, 8);
-    glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, naturalSnowTexture);
-    glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::POLYGON_BIT);
+    const float matte[]{.025f, .035f, .045f, 1};
+    sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, matte);
+    sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SHININESS, 8);
+    sjp::visual::enable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, naturalSnowTexture);
+    sjp::visual::texEnvi(sjp::gfx::TEXTURE_ENV, sjp::gfx::TEXTURE_ENV_MODE, sjp::gfx::MODULATE);
     // Same bounds, cell dimensions, and vertex heights as the existing hill.
     // Grooming, grain, and broad snow color variation are material-only.
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s); x < std::max(420 * s, h.end() + 80 * s);
@@ -732,35 +715,35 @@ void Renderer::terrain(const Hill &h) {
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z});
     // Reuse the exact receiver triangles for a finite, softly blended prepared
     // strip. Polygon offset avoids coplanar flicker; this pass never writes depth.
-    glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT | GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_POLYGON_BIT);
-    glBindTexture(GL_TEXTURE_2D, snowTexture);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(-1, -1);
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::POLYGON_BIT);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, snowTexture);
+    sjp::visual::enable(sjp::gfx::BLEND);
+    sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::visual::depthMask(sjp::gfx::FALSE);
+    sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
+    sjp::visual::polygonOffset(-1, -1);
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s);
          x < std::min(std::max(420 * s, h.end() + 80 * s), h.outrunBottom() + 47); x += 3 * s)
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
             snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z}, true);
-    glPopAttrib();
-    glDisable(GL_TEXTURE_2D);
+    sjp::visual::popAttrib();
+    sjp::visual::disable(sjp::gfx::TEXTURE_2D);
     // Three broad alpine ridgelines sit well behind the forest. Their lower
     // silhouette opens the sky and lets atmospheric fog separate the layers.
     for (int layer = 2; layer >= 0; --layer)
         mountainRidge(s, layer);
     // All soft ground contacts share one state pass, instead of switching
     // depth/blend/lighting hundreds of times between individual trees.
-    glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT | GL_CURRENT_BIT | GL_POLYGON_BIT);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(-1, -1);
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT);
+    sjp::visual::disable(sjp::gfx::LIGHTING);
+    sjp::visual::disable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::enable(sjp::gfx::BLEND);
+    sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::visual::depthMask(sjp::gfx::FALSE);
+    sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
+    sjp::visual::polygonOffset(-1, -1);
     for (int i = 0; i < 420; ++i) {
         const Tree tree = treeAt(h, i);
         if (visibleTree(h, tree))
@@ -775,7 +758,7 @@ void Renderer::terrain(const Hill &h) {
         for (int mast = 0; mast < 5; ++mast)
             contactShadow(h, {(60 + mast * 29) * s, 0, side * (near + 10.5)}, 1.5, 1.5, .19f);
     }
-    glPopAttrib();
+    sjp::visual::popAttrib();
     for (int i = 0; i < 420; ++i) {
         const Tree tree = treeAt(h, i);
         if (!visibleTree(h, tree))
@@ -788,12 +771,12 @@ void Renderer::terrain(const Hill &h) {
     }
     // Existing snowy track and its exact h.inrun profile; details sit beside
     // or underneath it, and never alter the track's contour or width.
-    glBindTexture(GL_TEXTURE_2D, snowTexture);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, snowTexture);
     for (double x = h.inrunStart(); x < 0; x += 2 * s) {
         const double xx = std::min(0.0, x + 2 * s), y = h.inrun(x), yy = h.inrun(xx);
-        glEnable(GL_TEXTURE_2D);
+        sjp::visual::enable(sjp::gfx::TEXTURE_2D);
         texturedQuad({x, y, -2.3}, {x, y, 2.3}, {xx, yy, 2.3}, {xx, yy, -2.3}, {.92f, .96f, .97f, 1});
-        glDisable(GL_TEXTURE_2D);
+        sjp::visual::disable(sjp::gfx::TEXTURE_2D);
         quad({x, y - .62, 2.3}, {xx, yy - .62, 2.3}, {xx, yy, 2.3}, {x, y, 2.3}, {.33f, .29f, .25f, 1});
         quad({x, y - .62, -2.3}, {x, y, -2.3}, {xx, yy, -2.3}, {xx, yy - .62, -2.3}, {.33f, .29f, .25f, 1});
         for (double z : {-.22, .22})
@@ -911,13 +894,13 @@ void Renderer::terrain(const Hill &h) {
     }
     staticBatch.finish();
     // Finish writes current attributes, so restore the caller's state last.
-    glPopAttrib();
-    glEndList();
+    sjp::visual::popAttrib();
+    sjp::gfx::endList();
 }
 
 void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
-    glPushAttrib(GL_ENABLE_BIT | GL_LIGHTING_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
-    glDisable(GL_TEXTURE_2D);
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::TEXTURE_BIT);
+    sjp::visual::disable(sjp::gfx::TEXTURE_2D);
     const double strength = clamp(std::abs(double(frame.windSpeed)) / 8.0, 0.05, 1.0);
     const Vec3 wind = visual::windDirection(frame);
     // Only one small upper bough on every twenty-sixth tree is animated.
@@ -930,7 +913,7 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
             .016 * strength;
         treeBranch(tree, tree.tiers - 1, wind * bend);
     }
-    glDisable(GL_CULL_FACE);
+    sjp::visual::disable(sjp::gfx::CULL_FACE);
     for (int side : {-1, 1})
         for (int section = 0; section < 14; ++section)
             for (int row = 0; row < 3; ++row)
@@ -955,6 +938,6 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
                             flag(wrist, s, time, p.seed);
                     }
                 }
-    glPopAttrib();
+    sjp::visual::popAttrib();
 }
 } // namespace sjp

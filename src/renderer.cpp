@@ -12,21 +12,21 @@
 namespace sjp {
 namespace {
 void col(Color c) {
-    glColor4f(c.r, c.g, c.b, c.a);
+    sjp::gfx::color4f(c.r, c.g, c.b, c.a);
 }
 void vertex(Vec3 p) {
-    glVertex3d(p.x, p.y, p.z);
+    sjp::gfx::vertex3d(p.x, p.y, p.z);
 }
 void quad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     col(color);
     Vec3 n = cross(b - a, c - a).normalized();
-    glBegin(GL_QUADS);
-    glNormal3d(n.x, n.y, n.z);
+    sjp::gfx::begin(sjp::gfx::QUADS);
+    sjp::gfx::normal3d(n.x, n.y, n.z);
     vertex(a);
     vertex(b);
     vertex(c);
     vertex(d);
-    glEnd();
+    sjp::gfx::end();
 }
 void beam(Vec3 a, Vec3 b, double r, Color c) {
     Vec3 dir = (b - a).normalized(), right = cross(dir, {0, 0, 1}).normalized() * r,
@@ -40,15 +40,15 @@ void sphere(Vec3 p, double r, Color c) {
     col(c);
     for (int i = 0; i < 8; i++) {
         double a = -PI / 2 + i * PI / 8, b = a + PI / 8;
-        glBegin(GL_QUAD_STRIP);
+        sjp::gfx::begin(sjp::gfx::QUAD_STRIP);
         for (int j = 0; j <= 12; j++)
             for (double k : {a, b}) {
                 double t = j * 2 * PI / 12;
                 Vec3 n{std::cos(k) * std::cos(t), std::sin(k), std::cos(k) * std::sin(t)};
-                glNormal3d(n.x, n.y, n.z);
+                sjp::gfx::normal3d(n.x, n.y, n.z);
                 vertex(p + n * r);
             }
-        glEnd();
+        sjp::gfx::end();
     }
 }
 // A small open, tapered cloth tube. Its tail follows the same displayed angle
@@ -60,49 +60,49 @@ void windsock(Vec3 origin, const Frame &frame, double time) {
                            visual::windsockPoint(frame, time, section / double(sections))).normalized();
         const Vec3 up = cross(axis, {0, 0, 1}).normalized(), side = cross(up, axis).normalized();
         col(section % 2 ? Color{.94f, .93f, .87f, 1} : colors::orange);
-        glBegin(GL_QUAD_STRIP);
+        sjp::gfx::begin(sjp::gfx::QUAD_STRIP);
         for (int corner = 0; corner <= sides; ++corner) {
             const double angle = corner * 2 * PI / sides;
             const Vec3 normal = side * std::cos(angle) + up * std::sin(angle);
-            glNormal3d(normal.x, normal.y, normal.z);
+            sjp::gfx::normal3d(normal.x, normal.y, normal.z);
             for (int end : {section, section + 1}) {
                 const double fraction = end / double(sections);
                 const double radius = .23 - fraction * .16;
                 vertex(origin + visual::windsockPoint(frame, time, fraction) + normal * radius);
             }
         }
-        glEnd();
+        sjp::gfx::end();
     }
 }
 // A sky gradient supplies the atmospheric backdrop without moving the camera.
 void sky(int width, int height) {
-    glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_CURRENT_BIT);
-    glDisable(GL_DEPTH_TEST);
-    glDepthMask(GL_FALSE);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_FOG);
-    glDisable(GL_TEXTURE_2D);
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glOrtho(0, width, 0, height, -1, 1);
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    glBegin(GL_QUAD_STRIP);
+    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT);
+    sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
+    sjp::gfx::depthMask(sjp::gfx::FALSE);
+    sjp::gfx::disable(sjp::gfx::LIGHTING);
+    sjp::gfx::disable(sjp::gfx::FOG);
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
+    sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
+    sjp::gfx::pushMatrix();
+    sjp::gfx::loadIdentity();
+    sjp::gfx::ortho(0, width, 0, height, -1, 1);
+    sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
+    sjp::gfx::pushMatrix();
+    sjp::gfx::loadIdentity();
+    sjp::gfx::begin(sjp::gfx::QUAD_STRIP);
     for (int band = 0; band <= 24; ++band) {
         const float t = band / 24.f;
         const float smooth = t * t * (3 - 2 * t);
         col({.79f - smooth * .38f, .86f - smooth * .25f, .88f - smooth * .11f, 1});
-        glVertex2f(0, height * t);
-        glVertex2f(width, height * t);
+        sjp::gfx::vertex2f(0, height * t);
+        sjp::gfx::vertex2f(width, height * t);
     }
-    glEnd();
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-    glMatrixMode(GL_MODELVIEW);
-    glPopAttrib();
+    sjp::gfx::end();
+    sjp::gfx::popMatrix();
+    sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
+    sjp::gfx::popMatrix();
+    sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
+    sjp::gfx::popAttrib();
 }
 void jumperShadow(const Hill &h, const Frame &f) {
     const bool onInrun = f.x <= 0;
@@ -128,14 +128,14 @@ void jumperShadow(const Hill &h, const Frame &f) {
         const double lift = std::max(0.0, local.y);
         return Vec3{f.x + local.x + offsetX + lift * .12, 0, local.z + offsetZ - lift * .15};
     };
-    glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_CURRENT_BIT | GL_POLYGON_BIT | GL_COLOR_BUFFER_BIT);
-    glDisable(GL_LIGHTING);
-    glDisable(GL_TEXTURE_2D);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glDepthMask(GL_FALSE);
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(-1, -1);
+    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::COLOR_BUFFER_BIT);
+    sjp::gfx::disable(sjp::gfx::LIGHTING);
+    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
+    sjp::gfx::enable(sjp::gfx::BLEND);
+    sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    sjp::gfx::depthMask(sjp::gfx::FALSE);
+    sjp::gfx::enable(sjp::gfx::POLYGON_OFFSET_FILL);
+    sjp::gfx::polygonOffset(-1, -1);
     const auto shadowVertex = [&](Vec3 p, float alpha) {
         if (onInrun) {
             // The receiver is the actual ramp, bounded by its lip and rails.
@@ -143,26 +143,26 @@ void jumperShadow(const Hill &h, const Frame &f) {
             p.z = clamp(p.z, -2.25, 2.25);
         }
         col({.055f, .10f, .14f, alpha});
-        glVertex3d(p.x, surface(p.x) + .025, p.z);
+        sjp::gfx::vertex3d(p.x, surface(p.x) + .025, p.z);
     };
     const auto ellipse = [&](Vec3 center, double rx, double rz, float opacity) {
         constexpr int sides = 24;
-        glBegin(GL_TRIANGLE_FAN);
+        sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
         shadowVertex(center, opacity);
         for (int i = 0; i <= sides; ++i) {
             const double angle = i * 2 * PI / sides;
             shadowVertex(center + Vec3{std::cos(angle) * rx * .66, 0, std::sin(angle) * rz * .66},
                          opacity * .93f);
         }
-        glEnd();
-        glBegin(GL_TRIANGLE_STRIP);
+        sjp::gfx::end();
+        sjp::gfx::begin(sjp::gfx::TRIANGLE_STRIP);
         for (int i = 0; i <= sides; ++i) {
             const double angle = i * 2 * PI / sides;
             shadowVertex(center + Vec3{std::cos(angle) * rx * .66, 0, std::sin(angle) * rz * .66},
                          opacity * .93f);
             shadowVertex(center + Vec3{std::cos(angle) * rx, 0, std::sin(angle) * rz}, 0);
         }
-        glEnd();
+        sjp::gfx::end();
     };
     const auto segment = [&](OriginalJoint from, OriginalJoint to, double radius, float opacity) {
         const Vec3 a = project(from), b = project(to);
@@ -172,19 +172,19 @@ void jumperShadow(const Hill &h, const Frame &f) {
             return;
         }
         const Vec3 side{-dz / length, 0, dx / length};
-        glBegin(GL_QUADS);
+        sjp::gfx::begin(sjp::gfx::QUADS);
         shadowVertex(a - side * radius, opacity);
         shadowVertex(b - side * radius, opacity);
         shadowVertex(b + side * radius, opacity);
         shadowVertex(a + side * radius, opacity);
-        glEnd();
+        sjp::gfx::end();
         for (double sign : {-1.0, 1.0}) {
-            glBegin(GL_TRIANGLE_STRIP);
+            sjp::gfx::begin(sjp::gfx::TRIANGLE_STRIP);
             shadowVertex(a + side * (radius * sign), opacity);
             shadowVertex(a + side * ((radius + softness) * sign), 0);
             shadowVertex(b + side * (radius * sign), opacity);
             shadowVertex(b + side * ((radius + softness) * sign), 0);
-            glEnd();
+            sjp::gfx::end();
         }
         ellipse(a, radius + softness, radius + softness, opacity * .7f);
         ellipse(b, radius + softness, radius + softness, opacity * .7f);
@@ -214,14 +214,14 @@ void jumperShadow(const Hill &h, const Frame &f) {
         segment(rear[side], front[side], .036, visibility * .29f);
         segment(front[side], tips[side], .033, visibility * .26f);
     }
-    glPopAttrib();
+    sjp::gfx::popAttrib();
 }
 void lookAt(Vec3 eye, Vec3 center) {
     Vec3 f = (center - eye).normalized(), s = cross(f, {0, 1, 0}).normalized(), u = cross(s, f);
-    GLfloat m[] = {float(s.x), float(u.x), float(-f.x), 0, float(s.y), float(u.y), float(-f.y), 0,
+    float m[] = {float(s.x), float(u.x), float(-f.x), 0, float(s.y), float(u.y), float(-f.y), 0,
                    float(s.z), float(u.z), float(-f.z), 0, 0,          0,          0,           1};
-    glMultMatrixf(m);
-    glTranslated(-eye.x, -eye.y, -eye.z);
+    sjp::gfx::multMatrixf(m);
+    sjp::gfx::translated(-eye.x, -eye.y, -eye.z);
 }
 } // namespace
 Renderer::Font Renderer::loadFont(const std::string &path) {
@@ -257,56 +257,65 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
         x += w + 2;
         row = std::max(row, h);
     }
-    glGenTextures(1, &f.tex);
-    glBindTexture(GL_TEXTURE_2D, f.tex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, atlas, atlas, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    sjp::gfx::genTextures(1, &f.tex);
+    sjp::gfx::bindTexture(sjp::gfx::TEXTURE_2D, f.tex);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
+    sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, 0, sjp::gfx::ALPHA, atlas, atlas, 0, sjp::gfx::ALPHA, sjp::gfx::UNSIGNED_BYTE, pixels.data());
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MIN_FILTER, sjp::gfx::LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAG_FILTER, sjp::gfx::LINEAR);
     FT_Done_Face(face);
     FT_Done_FreeType(library);
     return f;
 }
-Renderer::Renderer(SDL_Window *w, const std::string &assets) : window(w) {
-    regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
-    boldFont = loadFont(assets + "/fonts/Interim-Bold.ttf");
-    const auto *d = glGetString(GL_RENDERER);
-    device = d ? reinterpret_cast<const char *>(d) : "Unknown OpenGL renderer";
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_NORMALIZE);
-    glShadeModel(GL_SMOOTH);
-    glHint(GL_FOG_HINT, GL_NICEST);
-    glEnable(GL_COLOR_MATERIAL);
-    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool vsync, bool validation)
+    : window(w) {
+    sjp::gfx::initialize(window, noMsaa, vsync, validation);
+    try {
+        regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
+        boldFont = loadFont(assets + "/fonts/Interim-Bold.ttf");
+        const auto *d = sjp::gfx::getString(sjp::gfx::RENDERER);
+        device = d ? reinterpret_cast<const char *>(d) : "Unknown Vulkan device";
+        sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
+        sjp::gfx::enable(sjp::gfx::NORMALIZE);
+        sjp::gfx::shadeModel(sjp::gfx::SMOOTH);
+        sjp::gfx::hint(sjp::gfx::FOG_HINT, sjp::gfx::NICEST);
+        sjp::gfx::enable(sjp::gfx::COLOR_MATERIAL);
+        sjp::gfx::colorMaterial(sjp::gfx::FRONT_AND_BACK, sjp::gfx::AMBIENT_AND_DIFFUSE);
+        sjp::gfx::enable(sjp::gfx::BLEND);
+        sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
+    } catch (...) {
+        sjp::gfx::shutdown();
+        throw;
+    }
 }
 Renderer::~Renderer() {
     for (auto l : landscapes)
         if (l)
-            glDeleteLists(l, 1);
-    glDeleteTextures(1, &regular.tex);
-    glDeleteTextures(1, &boldFont.tex);
+            sjp::gfx::deleteLists(l, 1);
+    sjp::gfx::deleteTextures(1, &regular.tex);
+    sjp::gfx::deleteTextures(1, &boldFont.tex);
     if (snowTexture)
-        glDeleteTextures(1, &snowTexture);
+        sjp::gfx::deleteTextures(1, &snowTexture);
     if (naturalSnowTexture)
-        glDeleteTextures(1, &naturalSnowTexture);
+        sjp::gfx::deleteTextures(1, &naturalSnowTexture);
+    sjp::gfx::shutdown();
 }
 void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, bool panorama, bool ghost,
                      const Frame *gf) {
-    SDL_GL_GetDrawableSize(window, &width, &height);
+    SDL_GetWindowSizeInPixels(window, &width, &height);
     width = std::max(1, width);
     height = std::max(1, height);
-    glViewport(0, 0, width, height);
-    glClearColor(.79f, .86f, .88f, 1);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
+    sjp::gfx::beginFrame(width, height);
+    sjp::gfx::viewport(0, 0, width, height);
+    sjp::gfx::clearColor(.79f, .86f, .88f, 1);
+    sjp::gfx::clear(sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::DEPTH_BUFFER_BIT);
+    sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
+    sjp::gfx::loadIdentity();
     double near = .25, aspect = double(width) / height;
     double top = near * std::tan(48 * PI / 360);
-    glFrustum(-top * aspect, top * aspect, -top, top, near, 2400 * h.scale());
-    glMatrixMode(GL_MODELVIEW);
-    glLoadIdentity();
+    sjp::gfx::frustum(-top * aspect, top * aspect, -top, top, near, 2400 * h.scale());
+    sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
+    sjp::gfx::loadIdentity();
     sky(width, height);
     double s = h.scale();
     Vec3 wantEye, wantTarget;
@@ -332,26 +341,26 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
         target = target + (wantTarget - target) * .16;
     }
     lookAt(eye, target);
-    glEnable(GL_DEPTH_TEST);
-    glEnable(GL_LIGHTING);
-    glEnable(GL_LIGHT0);
-    glEnable(GL_COLOR_MATERIAL);
-    GLfloat ambient[] = {.28f, .34f, .40f, 1}, diffuse[] = {.78f, .73f, .64f, 1},
+    sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
+    sjp::gfx::enable(sjp::gfx::LIGHTING);
+    sjp::gfx::enable(sjp::gfx::LIGHT0);
+    sjp::gfx::enable(sjp::gfx::COLOR_MATERIAL);
+    float ambient[] = {.28f, .34f, .40f, 1}, diffuse[] = {.78f, .73f, .64f, 1},
             position[] = {-120, 240, 150, 0}, sunAmbient[] = {.025f, .028f, .032f, 1};
-    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
-    glLightfv(GL_LIGHT0, GL_AMBIENT, sunAmbient);
-    glLightfv(GL_LIGHT0, GL_DIFFUSE, diffuse);
-    glLightfv(GL_LIGHT0, GL_POSITION, position);
-    GLfloat fill[] = {.13f, .19f, .24f, 1}, fillPosition[] = {90, 110, -160, 0};
-    glEnable(GL_LIGHT1);
-    glLightfv(GL_LIGHT1, GL_DIFFUSE, fill);
-    glLightfv(GL_LIGHT1, GL_POSITION, fillPosition);
-    glEnable(GL_FOG);
-    GLfloat fog[] = {.79f, .86f, .88f, 1};
-    glFogfv(GL_FOG_COLOR, fog);
-    glFogi(GL_FOG_MODE, GL_LINEAR);
-    glFogf(GL_FOG_START, 170 * s);
-    glFogf(GL_FOG_END, 1050 * s);
+    sjp::gfx::lightModelfv(sjp::gfx::LIGHT_MODEL_AMBIENT, ambient);
+    sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::AMBIENT, sunAmbient);
+    sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::DIFFUSE, diffuse);
+    sjp::gfx::lightfv(sjp::gfx::LIGHT0, sjp::gfx::POSITION, position);
+    float fill[] = {.13f, .19f, .24f, 1}, fillPosition[] = {90, 110, -160, 0};
+    sjp::gfx::enable(sjp::gfx::LIGHT1);
+    sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::DIFFUSE, fill);
+    sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::POSITION, fillPosition);
+    sjp::gfx::enable(sjp::gfx::FOG);
+    float fog[] = {.79f, .86f, .88f, 1};
+    sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, fog);
+    sjp::gfx::fogi(sjp::gfx::FOG_MODE, sjp::gfx::LINEAR);
+    sjp::gfx::fogf(sjp::gfx::FOG_START, 170 * s);
+    sjp::gfx::fogf(sjp::gfx::FOG_END, 1050 * s);
     terrain(h);
     scenery(h, f, time);
     // The start signal and the moving windsock.
@@ -367,12 +376,12 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     jumperShadow(h, display);
     athlete(h, display, false);
     if (ghost && gf) {
-        glDepthMask(GL_FALSE);
+        sjp::gfx::depthMask(sjp::gfx::FALSE);
         athlete(h, displayedAthleteFrame(h, *gf), true);
-        glDepthMask(GL_TRUE);
+        sjp::gfx::depthMask(sjp::gfx::TRUE);
     }
     effects(h, display, time, !panorama);
-    glDisable(GL_FOG);
-    glDisable(GL_LIGHTING);
+    sjp::gfx::disable(sjp::gfx::FOG);
+    sjp::gfx::disable(sjp::gfx::LIGHTING);
 }
 } // namespace sjp

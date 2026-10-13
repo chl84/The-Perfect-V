@@ -1,5 +1,5 @@
 #pragma once
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <atomic>
 
 namespace sjp {
@@ -17,12 +17,13 @@ class Audio {
     }
 
   private:
-    SDL_AudioDeviceID device = 0;
+    SDL_AudioStream *stream = nullptr;
     std::atomic<float> volume{0};
     std::atomic<bool> enabled{true};
     std::atomic<int> tone{0}, remaining{0};
     double phase = 0;
     uint32_t noise = 0xdeadbeef;
-    static void callback(void *, Uint8 *, int);
+    static void callback(void *, SDL_AudioStream *, int, int);
+    void generate(float *, int);
 };
 } // namespace sjp
