@@ -104,7 +104,8 @@ enum class Action {
     ReplayBrowsePage,
     ReplayFile,
     ReplayParent,
-    ReplayExport
+    ReplayExport,
+    ReplayExportNative
 };
 struct Button {
     float x, y, w, h;
@@ -617,6 +618,28 @@ class App {
         beginReplay();
         return true;
     }
+    void exportNativeReplay() {
+        if (!hasReplay) {
+            message = "No replay to export.";
+            return;
+        }
+        Replay exported = lastReplay;
+        exported.hasEnvironment = true;
+        exported.environment = replayEnvironment;
+        const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch()).count();
+        const std::string stem = dataDir + "/replay-" + hills()[exported.hill].id + "-" +
+                                 std::to_string(timestamp);
+        std::string path = stem + ".sjr";
+        std::error_code error;
+        for (unsigned suffix = 1; std::filesystem::exists(path, error); ++suffix)
+            path = stem + "-" + std::to_string(suffix) + ".sjr";
+        if (error || !saveReplay(path, exported)) {
+            message = "Replay could not be saved. Check the save directory.";
+            return;
+        }
+        message = "Saved replay: " + path;
+    }
     void beginReplay() {
         if (!hasReplay)
             return;
@@ -854,6 +877,9 @@ class App {
                               ? "Saved original replay: " + path
                               : error;
             }
+            break;
+        case Action::ReplayExportNative:
+            exportNativeReplay();
             break;
         case Action::Replay:
             beginReplay();
@@ -1672,6 +1698,7 @@ class App {
         r.text(environment::description(replayEnvironment), 58, canExportOriginal ? 148 : 119, 11,
                colors::muted);
         smallButton("<  Back", 1268, 39, 126, Action::Back);
+        smallButton("Export .SJR", 952, 39, 142, Action::ReplayExportNative);
         smallButton("Export .RPL", 1110, 39, 142, Action::ReplayExport);
         r.glassPanel(180, 752, 1080, 102, 14, .9f);
         smallButton(replayPlaying && replayTime < replayDuration() ? "Pause" : "Play", 202, 775, 74,
@@ -1966,6 +1993,26 @@ class App {
         }
         beginReplay();
         replayTime = replayDuration() * .6;
+        std::string previousExport;
+        for (int copy = 0; copy < 2; ++copy) {
+            clickButton(Action::ReplayExportNative);
+            const std::string prefix = "Saved replay: ";
+            if (message.compare(0, prefix.size(), prefix) != 0)
+                throw std::runtime_error("Native replay export failed: " + message);
+            const auto exportedPath = message.substr(prefix.size());
+            Replay exported;
+            if (exportedPath == previousExport || !loadReplay(exportedPath, exported) ||
+                !exported.hasEnvironment || !(exported.environment == replayEnvironment) ||
+                exported.hill != lastReplay.hill || exported.frames.size() != lastReplay.frames.size() ||
+                exported.originalRpl != lastReplay.originalRpl)
+                throw std::runtime_error("Native replay export lost atmosphere, input recording or uniqueness");
+            for (size_t i = 0; i < exported.frames.size(); ++i)
+                if (exported.frames[i].windSpeed != lastReplay.frames[i].windSpeed ||
+                    exported.frames[i].windAngle != lastReplay.frames[i].windAngle)
+                    throw std::runtime_error("Native replay export changed recorded wind");
+            previousExport = exportedPath;
+        }
+        message.clear();
         render();
         if (!captureDir.empty())
             renderer->capture(captureDir + "/replay.ppm");

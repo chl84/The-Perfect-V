@@ -142,10 +142,17 @@ struct Current {
     std::array<float, 4> uv{0, 0, 0, 1};
 };
 Current current;
+std::array<float, 4> currentEmission{};
+bool signalMaterial = false, captureSignal = false;
+size_t signalVertices = 0;
+sjp::Vec3 signalCenter;
+std::array<float, 4> signalEmission{};
 struct Saved {
     sjp::gfx::Flags mask;
     Current value;
     bool depth;
+    std::array<float, 4> emission;
+    bool signal;
 };
 std::vector<Saved> attributes;
 std::map<sjp::gfx::Enum, int> matrices{{sjp::gfx::MODELVIEW, 1}, {sjp::gfx::PROJECTION, 1}, {sjp::gfx::TEXTURE, 1}};
@@ -182,6 +189,12 @@ bool captureCamera = false;
 sjp::Vec3 cameraEye;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 void position(double x, double y, double z) {
+    if (captureSignal && !compiling && signalMaterial) {
+        require(std::abs((sjp::Vec3{x, y, z} - signalCenter).length() - .22) < 1e-8,
+                "Start-signal emission leaks onto its post or other geometry");
+        ++signalVertices;
+        signalEmission = currentEmission;
+    }
     if (captureBoards && compiling)
         for (size_t face = 0; face < boardFaces.size(); ++face) {
             const std::array<float, 4> color = face == 0 ? std::array<float, 4>{.10f, .28f, .33f, 1}
@@ -469,6 +482,10 @@ void sjp::gfx::materialfv(sjp::gfx::Enum face, sjp::gfx::Enum pname, const float
     audit::command("sjp::gfx::materialfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
         audit::finite(params[i]);
+    if (pname == sjp::gfx::EMISSION) {
+        std::copy_n(params, 4, audit::currentEmission.begin());
+        audit::signalMaterial = params[3] == 0;
+    }
 }
 void sjp::gfx::matrixMode(sjp::gfx::Enum mode) {
     audit::command("sjp::gfx::matrixMode inside sjp::gfx::begin", false);
@@ -534,6 +551,10 @@ void sjp::gfx::popAttrib(void) {
         audit::current = saved.value;
     if (saved.mask & sjp::gfx::DEPTH_BUFFER_BIT)
         audit::depth = saved.depth;
+    if (saved.mask & sjp::gfx::LIGHTING_BIT) {
+        audit::currentEmission = saved.emission;
+        audit::signalMaterial = saved.signal;
+    }
 }
 void sjp::gfx::popMatrix(void) {
     audit::command("sjp::gfx::popMatrix inside sjp::gfx::begin", false);
@@ -541,7 +562,8 @@ void sjp::gfx::popMatrix(void) {
 }
 void sjp::gfx::pushAttrib(sjp::gfx::Flags mask) {
     audit::command("sjp::gfx::pushAttrib inside sjp::gfx::begin", false);
-    audit::attributes.push_back({mask, audit::current, audit::depth});
+    audit::attributes.push_back({mask, audit::current, audit::depth, audit::currentEmission,
+                                 audit::signalMaterial});
     audit::require(audit::attributes.size() <= 16, "Attribute stack exceeds guaranteed capacity");
 }
 void sjp::gfx::pushMatrix(void) {
@@ -890,6 +912,37 @@ int main() {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
             const auto before = sim.frame();
+            const double x = sim.hill().start() + 2;
+            audit::signalCenter = {x, sim.hill().inrun(x) + 2.7, -3};
+            audit::captureSignal = true;
+            const auto signalAt = [&](sjp::Phase phase, float elapsed, double wallTime) {
+                auto frame = before;
+                frame.phase = int32_t(phase);
+                frame.elapsed = elapsed;
+                audit::signalVertices = 0;
+                r.begin(sim.hill(), frame, wallTime, 0, false);
+                r.finish();
+                audit::balanced();
+                audit::require(audit::signalVertices == 8 * 13 * 2 && !audit::signalMaterial,
+                               "Signal lens lost its material or failed to restore it");
+                return audit::signalEmission;
+            };
+            for (int time = 0; time < 4; ++time)
+                for (int weather = 0; weather < 4; ++weather) {
+                    r.setEnvironment({sjp::environment::TimeOfDay(time), sjp::environment::Weather(weather), 0});
+                    audit::require(signalAt(sjp::Phase::Ready, 0, 0) ==
+                                       std::array<float, 4>{.035f, .47f, .07f, 0},
+                                   "Green signal emission changes with time or weather");
+                    const auto off = signalAt(sjp::Phase::Ready, 6, 6);
+                    audit::require(off == std::array<float, 4>{0, 0, 0, 0} &&
+                                       signalAt(sjp::Phase::Ready, 6, 100) == off,
+                                   "Blink's off phase glows or changes while paused");
+                    audit::require(signalAt(sjp::Phase::Inrun, 6, 6) ==
+                                       std::array<float, 4>{.48f, .016f, .008f, 0},
+                                   "Signal does not use red emission after the start");
+                }
+            audit::captureSignal = false;
+            r.setEnvironment({});
             r.begin(sim.hill(), before, 0, 0, false);
             r.finish();
             const auto cached = audit::nextList;

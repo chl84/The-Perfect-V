@@ -191,6 +191,12 @@ Existing replay files and version 1/2 cup saves remain readable, defaulting thei
 missing cosmetic metadata to day and sun. Original .RPL exports retain their
 original bytes and cannot carry this modern atmosphere metadata.
 
+The replay screen offers `Export .SJR` beside `Export .RPL`. Native export saves
+an independent, uniquely named file in the game's save directory and displays
+its full path. It preserves the displayed time/weather, recorded wind samples
+and any attached original input recording. The automatically saved latest
+replay can therefore be archived before another jump replaces it.
+
 Four compact lighting presets set sun/moon direction, sky gradient, ambient and
 directional light, fog color and visibility. Overcast, snow and fog reduce direct
 light and soften the single silhouette shadow. Shadow projection uses the light
@@ -208,6 +214,13 @@ background primitives when in view; clouds suppress them. All lighting and fog
 share the existing rendering pass, without shadow maps, volumetric
 clouds or new textures. Time and weather do not alter terrain, camera rails or
 collision geometry, and changes reuse the cached terrain meshes.
+
+The start signal uses green/red tinted glass with fixed electrical emission
+and a small specular reflection. Its warning blink sets emission to zero in the
+off phase, using the frame clock so pausing freezes it. Signal emission is
+independent of time-of-day lamp strength; normal depth occlusion and fog still
+apply. The material is scoped to the lens, with no added local light, texture or
+rendering pass.
 
 The windsock, flakes and moving boughs still use the same smoothed x/y wind angle
 as the HUD arrow. Snowfall uses the existing compact world-space volume: at most

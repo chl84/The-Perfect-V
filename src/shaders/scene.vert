@@ -101,9 +101,9 @@ void main() {
                       pow(max(dot(n, halfVector), 0.0), state.parameters.x)) : 0.0;
         vec3 lit = color.rgb * (state.ambient.rgb + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1 +
                                arenaDiffuse(eye.xyz, n));
-        // Lamp glass is the scene's emissive material. Its glow follows the
-        // live arena strength, including when the fixture mesh is cached.
-        lit += state.emission.rgb * (1.0 + 2.0 * state.arenaParameters.w) +
+        // Emission W selects arena tracking. Independently powered indicators
+        // keep constant emission; vertex color still supplies surface alpha.
+        lit += state.emission.rgb * (1.0 + 2.0 * state.arenaParameters.w * state.emission.w) +
                state.materialSpecular.rgb * state.specularLight0.rgb * shine;
         vertexColor.rgb = clamp(lit, 0.0, 1.0);
     }

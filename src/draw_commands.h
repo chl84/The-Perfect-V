@@ -40,6 +40,8 @@ inline constexpr Enum DEPTH_BUFFER_BIT = 0x00000100;
 inline constexpr Enum DEPTH_TEST = 0x0B71;
 inline constexpr Enum DIFFUSE = 0x1201;
 inline constexpr Enum EMISSION = 0x1600;
+// EMISSION's fourth component selects arena intensity tracking: 0 for an
+// independently powered indicator, 1 for arena lamp glass. It is not opacity.
 inline constexpr Enum ENABLE_BIT = 0x00002000;
 inline constexpr Enum FALSE = 0;
 inline constexpr Enum FOG = 0x0B60;
