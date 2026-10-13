@@ -940,8 +940,10 @@ void Renderer::terrain(const Hill &h) {
     sjp::visual::polygonOffset(-1, -1);
     for (int i = 0; i < 420; ++i) {
         const Tree tree = treeAt(h, i);
-        if (visibleTree(h, tree))
+        if (visibleTree(h, tree)) {
             contactShadow(h, tree.base, tree.height * .61, tree.height * .48, .20f);
+            visual::flush();
+        }
     }
     for (int side : {-1, 1}) {
         const double near = std::max(25 * s, 8.0), front = side * (near - 1.0);
@@ -962,6 +964,9 @@ void Renderer::terrain(const Hill &h) {
         for (int tier = 0; tier < tree.tiers; ++tier)
             if (!(tree.animated && tier == tree.tiers - 1))
                 treeBranch(tree, tier);
+        // Preserve tree order while giving each tree its own bounded cached
+        // ranges; a distant neighbor cannot keep an off-camera tree visible.
+        visual::flush();
     }
     // Existing snowy track and its exact h.inrun profile; details sit beside
     // or underneath it, and never alter the track's contour or width.
@@ -1156,6 +1161,11 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
         const Tree tree = treeAt(h, i);
         if (!visibleTree(h, tree))
             continue;
+        const float radius = float(tree.height);
+        if (!gfx::boundsVisible({float(tree.base.x) - radius, float(tree.base.y), float(tree.base.z) - radius},
+                                {float(tree.base.x) + radius, float(tree.base.y) + radius * 1.5f,
+                                 float(tree.base.z) + radius}))
+            continue;
         const double bend =
             (std::sin(time * 1.35 + tree.seed) + .35 * std::sin(time * 2.9 + tree.seed * .7)) * tree.height *
             .016 * strength;
@@ -1173,6 +1183,13 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
                 for (int person = 0; person < 4; ++person) {
                     const Spectator p = spectatorAt(stands, side, section, row, person);
                     if (!p.present || !p.animated)
+                        continue;
+                    const float radius = float(p.size * 2.5);
+                    if (!gfx::boundsVisible({float(p.feet.x) - radius, float(p.feet.y) - radius,
+                                             float(p.feet.z) - radius},
+                                            {float(p.feet.x) + radius,
+                                             float(p.feet.y + p.size * (1.6 * p.verticalScale + 1.5)),
+                                             float(p.feet.z) + radius}))
                         continue;
                     const double s = p.size;
                     for (int hand : {-1, 1}) {

@@ -29,6 +29,8 @@ bool PipelineState::operator<(const PipelineState &o) const {
 Mesh::~Mesh() {
     if (buffer)
         SDL_ReleaseGPUBuffer(device, buffer);
+    if (indexBuffer)
+        SDL_ReleaseGPUBuffer(device, indexBuffer);
 }
 Image::~Image() {
     if (sampler)
@@ -393,24 +395,36 @@ struct VulkanBackend::Impl {
                     std::vector<std::unique_ptr<Transfer>> &transfers) {
         if (!mesh || mesh->buffer)
             return;
-        const uint32_t size = bytes(mesh->vertices.size() * sizeof(Vertex));
+        const uint32_t vertexSize = bytes(mesh->vertices.size() * sizeof(Vertex));
+        const uint32_t indexSize = bytes(mesh->indices.size() * sizeof(uint32_t));
+        const uint32_t size = bytes(size_t(vertexSize) + indexSize);
         SDL_GPUBufferCreateInfo info{};
         info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        info.size = size;
+        info.size = vertexSize;
         mesh->device = device;
         mesh->buffer = SDL_CreateGPUBuffer(device, &info);
         if (!mesh->buffer)
             fail("cached vertex buffer allocation");
+        info.usage = SDL_GPU_BUFFERUSAGE_INDEX;
+        info.size = indexSize;
+        mesh->indexBuffer = SDL_CreateGPUBuffer(device, &info);
+        if (!mesh->indexBuffer)
+            fail("cached index buffer allocation");
         auto transfer = std::make_unique<Transfer>(device, size, SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD);
         auto *mapped = SDL_MapGPUTransferBuffer(device, transfer->buffer, false);
         if (!mapped)
             fail("cached vertex transfer mapping");
-        std::memcpy(mapped, mesh->vertices.data(), size);
+        std::memcpy(mapped, mesh->vertices.data(), vertexSize);
+        std::memcpy(static_cast<unsigned char *>(mapped) + vertexSize, mesh->indices.data(), indexSize);
         SDL_UnmapGPUTransferBuffer(device, transfer->buffer);
         SDL_GPUTransferBufferLocation source{transfer->buffer, 0};
-        SDL_GPUBufferRegion destination{mesh->buffer, 0, size};
+        SDL_GPUBufferRegion destination{mesh->buffer, 0, vertexSize};
+        SDL_UploadToGPUBuffer(copy, &source, &destination, false);
+        source.offset = vertexSize;
+        destination = {mesh->indexBuffer, 0, indexSize};
         SDL_UploadToGPUBuffer(copy, &source, &destination, false);
         std::vector<Vertex>().swap(mesh->vertices);
+        std::vector<uint32_t>().swap(mesh->indices);
         transfers.push_back(std::move(transfer));
     }
     void draw(SDL_GPUCommandBuffer *command, const std::array<float, 4> &background,
@@ -468,6 +482,7 @@ struct VulkanBackend::Impl {
         SDL_SetGPUViewport(pass, &viewport);
         SDL_GPUGraphicsPipeline *lastPipeline = nullptr;
         SDL_GPUBuffer *lastBuffer = nullptr;
+        SDL_GPUBuffer *lastIndexBuffer = nullptr;
         Image *lastImage = nullptr;
         for (const auto &packet : packets) {
             auto *selected = pipelines.at(packet.pipeline);
@@ -488,7 +503,15 @@ struct VulkanBackend::Impl {
                 lastImage = image.get();
             }
             SDL_PushGPUVertexUniformData(command, 0, &packet.uniforms, sizeof(Uniforms));
-            SDL_DrawGPUPrimitives(pass, packet.count, 1, packet.first, 0);
+            if (packet.mesh) {
+                if (packet.mesh->indexBuffer != lastIndexBuffer) {
+                    SDL_GPUBufferBinding binding{packet.mesh->indexBuffer, 0};
+                    SDL_BindGPUIndexBuffer(pass, &binding, SDL_GPU_INDEXELEMENTSIZE_32BIT);
+                    lastIndexBuffer = packet.mesh->indexBuffer;
+                }
+                SDL_DrawGPUIndexedPrimitives(pass, packet.count, 1, packet.first, 0, 0);
+            } else
+                SDL_DrawGPUPrimitives(pass, packet.count, 1, packet.first, 0);
         }
         SDL_EndGPURenderPass(pass);
         rendered = true;

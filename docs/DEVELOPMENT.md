@@ -13,7 +13,7 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers nine standalone suites:
+Without external fixtures, CTest registers ten standalone suites:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
@@ -24,6 +24,7 @@ Without external fixtures, CTest registers nine standalone suites:
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
 - `storage-migration`: stable hill identifiers and compatibility with older saves.
 - `crowd-audio`: approach/flight envelopes on all hills, distant and nearby falls, replay seeking/speed, one-shot reactions, smooth fades, valid sample mixing and the sound toggle through a dummy SDL audio device.
+- `mesh-geometry`: exact attribute sharing, preserved triangle order, bounded ranges, camera transforms and conservative near/side/far clipping without initializing a GPU.
 
 `BUILD_TESTING=OFF` builds only the game and its simulation library.
 
@@ -162,6 +163,34 @@ to an evicted venue rebuilds its unchanged geometry. Static batching finishes be
 the outer attribute restoration so cached scenery preserves the caller's current
 color, normal and texture coordinates. Drawable dimensions are clamped to at least
 one pixel to avoid invalid projections and UI scaling when a backend reports zero.
+
+Static meshes share vertices only when all 64 attribute bytes are identical.
+Their original triangle stream becomes a 32-bit index buffer with unchanged
+triangle, material and transparency ordering; no coordinates are rounded.
+Vertex/index upload occurs once, and both temporary CPU streams are released.
+
+Ordered ranges of at most 128 triangles retain conservative local-space bounds.
+The current projection/model-view frustum rejects only ranges wholly outside
+one clip plane; surviving adjacent ranges merge into the existing draw packets.
+Wide lines remain unconditionally visible because the shader expands them in
+screen space. Trees and their contact shadows retain individual batch boundaries.
+Animated tree boughs and audience arms/flags use generous object bounds before
+geometry generation. None of these operations modifies terrain, track, camera
+paths, object placement, physics or MSAA quality.
+
+The explicitly invoked render probe reports cached/submitted/culled geometry
+and draw calls. `--no-culling` supplies an unculled reference using the same
+indexed meshes; it is a diagnostic option, not a gameplay setting.
+
+On 2026-10-14, 224 before/after captures at 1920×1080 with 4× MSAA were pixel
+identical across all 32 hills, three cameras, panorama and day/snow/night scenes.
+All ten standalone suites and the installed full-game Vulkan smoke test passed.
+Short sequential Iris Xe benchmarks (300 measured frames after 40 warmup frames,
+hidden window with explicit GPU completion) reduced daytime flight medians from
+14.20 to 13.22 ms on K50, 11.39 to 10.33 ms on K120, and 9.07 to 7.55 ms on K250.
+Cached vertex/index buffer storage fell approximately 45%, while these camera-1
+flight views omitted 54–75% of static triangles. These are raw rendering timings;
+desktop/VSync presentation and sustained thermal behavior are not included.
 
 The CPU command test covers all 32 venues, three cameras, panorama, ghosts, HUD,
 falls and autopilot trajectories. These checks do not establish GPU driver stability

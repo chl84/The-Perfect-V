@@ -17,7 +17,7 @@ namespace {
 struct Options {
     std::string cup, replay, assets, expectedRenderer, expectedCompiler;
     int seconds = 0, samples = 4, fps = 60;
-    bool synchronize = false;
+    bool synchronize = false, culling = true;
 };
 Options options(int argc, char **argv) {
     Options o;
@@ -46,6 +46,8 @@ Options options(int argc, char **argv) {
             o.fps = std::stoi(value());
         else if (a == "--sync")
             o.synchronize = true;
+        else if (a == "--no-culling")
+            o.culling = false;
         else
             throw std::runtime_error("Unknown argument: " + a);
     }
@@ -106,6 +108,7 @@ int run(const Options &o) {
     Context context(o.samples);
     sjp::Renderer renderer(context.window, o.assets, o.samples == 0);
     renderer.setSynchronousRendering(o.synchronize);
+    sjp::gfx::setFrustumCulling(o.culling);
     if (renderer.device.find(o.expectedRenderer) == std::string::npos ||
         (!o.expectedCompiler.empty() && renderer.device.find(o.expectedCompiler) == std::string::npos))
         throw std::runtime_error("Unexpected renderer/compiler: " + renderer.device);
@@ -114,7 +117,7 @@ int run(const Options &o) {
     if (samples != o.samples)
         throw std::runtime_error("Requested MSAA was not obtained");
     std::cout << "renderer=" << renderer.device << " samples=" << samples << " sync=" << o.synchronize
-              << " cap_fps=" << o.fps << " seconds=" << o.seconds << '\n';
+              << " cap_fps=" << o.fps << " seconds=" << o.seconds << " culling=" << o.culling << '\n';
     using Clock = std::chrono::steady_clock;
     auto next = Clock::now();
     size_t draws = 0;
@@ -163,8 +166,12 @@ int run(const Options &o) {
         if (elapsed - lastLog >= 2) {
             struct rusage usage{};
             getrusage(RUSAGE_SELF, &usage);
+            const auto stats = sjp::gfx::frameStats();
             std::cout << "elapsed=" << elapsed << " draws=" << draws << " hill=" << hi << " phase=" << f.phase
-                      << " camera=" << camera << " max_rss_kib=" << usage.ru_maxrss << '\n';
+                      << " camera=" << camera << " max_rss_kib=" << usage.ru_maxrss
+                      << " cached_vertices=" << stats.cachedVertices << " cached_indices=" << stats.cachedIndices
+                      << " submitted_indices=" << stats.submittedIndices << " culled_indices=" << stats.culledIndices
+                      << " dynamic_vertices=" << stats.dynamicVertices << " draw_calls=" << stats.drawCalls << '\n';
             lastLog = elapsed;
         }
     }

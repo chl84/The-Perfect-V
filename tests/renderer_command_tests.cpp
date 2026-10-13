@@ -461,6 +461,15 @@ void sjp::gfx::callList(sjp::gfx::Id list) {
     for (auto &op : audit::lists.at(list).tail)
         op();
 }
+bool sjp::gfx::boundsVisible(const std::array<float, 3> &low, const std::array<float, 3> &high) {
+    for (size_t axis = 0; axis < 3; ++axis) {
+        audit::finite(low[axis]);
+        audit::finite(high[axis]);
+        audit::require(low[axis] <= high[axis], "Invalid scenery bounds");
+    }
+    // Audit every generated vertex independently of GPU visibility.
+    return true;
+}
 void sjp::gfx::clear(sjp::gfx::Flags mask) {
     audit::command("sjp::gfx::clear inside sjp::gfx::begin", false);
 }

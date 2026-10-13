@@ -34,12 +34,33 @@ struct PipelineState {
     bool operator==(const PipelineState &other) const;
     bool operator<(const PipelineState &other) const;
 };
+struct Bounds {
+    std::array<float, 3> low{}, high{};
+    bool screenExpanded = false;
+};
+struct MeshRange {
+    uint32_t first = 0, count = 0;
+    Bounds bounds;
+};
+struct Frustum {
+    std::array<std::array<double, 4>, 6> planes{};
+    Frustum(const Matrix &projection, const Matrix &modelView);
+    bool intersects(const Bounds &) const;
+};
 struct Mesh {
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<MeshRange> ranges;
+    uint32_t vertexCount = 0, indexCount = 0;
+    bool indexed = false;
     SDL_GPUDevice *device = nullptr;
     SDL_GPUBuffer *buffer = nullptr;
+    SDL_GPUBuffer *indexBuffer = nullptr;
     ~Mesh();
 };
+// Preserve triangle order and exact attributes; do not round or weld positions.
+void appendMeshRanges(Mesh &, uint32_t first, uint32_t count);
+void indexMesh(Mesh &);
 struct MipLevel {
     int width = 0, height = 0;
     std::vector<unsigned char> pixels;

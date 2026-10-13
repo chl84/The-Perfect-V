@@ -106,6 +106,14 @@ void beginFrame(int width, int height);
 void present(bool synchronous);
 void captureImage(const std::string &path);
 int sampleCount();
+struct FrameStats {
+    uint64_t cachedVertices = 0, cachedIndices = 0, submittedIndices = 0, culledIndices = 0;
+    uint64_t dynamicVertices = 0, drawCalls = 0;
+};
+FrameStats frameStats();
+// Explicit graphics diagnostics compare the same indexed scene unculled.
+void setFrustumCulling(bool enabled);
+bool boundsVisible(const std::array<float, 3> &low, const std::array<float, 3> &high);
 
 void begin(Enum mode);
 void end();

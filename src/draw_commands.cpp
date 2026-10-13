@@ -90,6 +90,8 @@ struct Context {
     bool inPrimitive = false;
     Id nextImage = 1, nextMesh = 1;
     int width = 1, height = 1, unpackAlignment = 4, packAlignment = 4;
+    bool frustumCulling = true;
+    uint64_t culledIndices = 0;
     std::array<float, 4> background{};
 
     Context(SDL_Window *window, bool noMsaa, bool vsync, bool validation)
@@ -134,7 +136,7 @@ struct Context {
         u.inrunColor = state.inrunColor;
         return u;
     }
-    void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
+    void packet(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
         if (!count)
             return;
         Packet packet;
@@ -159,6 +161,33 @@ struct Context {
             }
         }
         packets.push_back(std::move(packet));
+    }
+    void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
+        if (!mesh || !mesh->indexed || !frustumCulling || !count) {
+            packet(mesh, first, count);
+            return;
+        }
+        const Frustum view(projection, modelView);
+        auto range =
+            std::lower_bound(mesh->ranges.begin(), mesh->ranges.end(), first,
+                             [](const MeshRange &r, uint32_t at) { return r.first + r.count <= at; });
+        const uint32_t end = first + count;
+        uint32_t runFirst = first, runCount = 0;
+        for (; range != mesh->ranges.end() && range->first < end; ++range) {
+            const uint32_t a = std::max(first, range->first), b = std::min(end, range->first + range->count);
+            if (view.intersects(range->bounds)) {
+                if (!runCount)
+                    runFirst = a;
+                runCount += b - a;
+            } else {
+                if (runCount)
+                    packet(mesh, runFirst, runCount);
+                runCount = 0;
+                culledIndices += b - a;
+            }
+        }
+        if (runCount)
+            packet(mesh, runFirst, runCount);
     }
 };
 thread_local std::unique_ptr<Context> context;
@@ -212,7 +241,9 @@ void setCapability(State &s, Enum cap, bool enabled) {
         throw std::runtime_error("Unsupported scene capability");
     }
 }
-std::array<float, 4> array4(const float *v) { return {v[0], v[1], v[2], v[3]}; }
+std::array<float, 4> array4(const float *v) {
+    return {v[0], v[1], v[2], v[3]};
+}
 float finite(double value) {
     if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<float>::max())
         throw std::runtime_error("Non-finite scene coordinate");
@@ -232,7 +263,9 @@ void initialize(SDL_Window *window, bool noMsaa, bool vsync, bool validation) {
         throw std::runtime_error("A drawing context already exists on this thread");
     context = std::make_unique<Context>(window, noMsaa, vsync, validation);
 }
-void shutdown() noexcept { context.reset(); }
+void shutdown() noexcept {
+    context.reset();
+}
 void beginFrame(int width, int height) {
     auto &c = ctx();
     if (c.inPrimitive || c.compiling || !c.attributes.empty() || !c.modelViewStack.empty() ||
@@ -241,6 +274,7 @@ void beginFrame(int width, int height) {
     c.backend.beginFrame();
     c.packets.clear();
     c.dynamic.clear();
+    c.culledIndices = 0;
     c.width = std::max(1, width);
     c.height = std::max(1, height);
 }
@@ -254,8 +288,34 @@ void captureImage(const std::string &path) {
     auto &c = ctx();
     c.backend.render(c.width, c.height, c.background, c.packets, c.dynamic, false, true, &path);
 }
-int sampleCount() { return ctx().backend.samples(); }
-void finish() { ctx().backend.wait(); }
+int sampleCount() {
+    return ctx().backend.samples();
+}
+void setFrustumCulling(bool enabled) {
+    ctx().frustumCulling = enabled;
+}
+bool boundsVisible(const std::array<float, 3> &low, const std::array<float, 3> &high) {
+    const auto &c = ctx();
+    return !c.frustumCulling || Frustum(c.projection, c.modelView).intersects({low, high, false});
+}
+FrameStats frameStats() {
+    const auto &c = ctx();
+    FrameStats stats;
+    stats.culledIndices = c.culledIndices;
+    stats.dynamicVertices = c.dynamic.size();
+    stats.drawCalls = c.packets.size();
+    for (const auto &entry : c.meshes) {
+        stats.cachedVertices += entry.second->mesh->vertexCount;
+        stats.cachedIndices += entry.second->mesh->indexCount;
+    }
+    for (const auto &packet : c.packets)
+        if (packet.mesh)
+            stats.submittedIndices += packet.count;
+    return stats;
+}
+void finish() {
+    ctx().backend.wait();
+}
 
 void begin(Enum mode) {
     auto &c = ctx();
@@ -325,6 +385,8 @@ void end() {
         throw std::runtime_error("Unsupported scene primitive topology");
     }
     const uint32_t emitted = uint32_t(target.size()) - first;
+    if (mesh)
+        appendMeshRanges(*mesh, first, emitted);
     const Vertex current = c.current;
     apply([mesh, first, emitted, current](Context &c) {
         c.current = current;
@@ -334,18 +396,26 @@ void end() {
 void color4f(float r, float g, float b, float a) {
     changeCurrent([=](Vertex &v) { v.color = {r, g, b, a}; });
 }
-void color4fv(const float *v) { color4f(v[0], v[1], v[2], v[3]); }
+void color4fv(const float *v) {
+    color4f(v[0], v[1], v[2], v[3]);
+}
 void normal3d(double x, double y, double z) {
     const std::array<float, 3> n{finite(x), finite(y), finite(z)};
     changeCurrent([=](Vertex &v) { v.normal = n; });
 }
-void normal3dv(const double *v) { normal3d(v[0], v[1], v[2]); }
+void normal3dv(const double *v) {
+    normal3d(v[0], v[1], v[2]);
+}
 void texCoord2d(double x, double y) {
     const std::array<float, 2> uv{finite(x), finite(y)};
     changeCurrent([=](Vertex &v) { v.uv = uv; });
 }
-void texCoord2f(float x, float y) { texCoord2d(x, y); }
-void texCoord2dv(const double *v) { texCoord2d(v[0], v[1]); }
+void texCoord2f(float x, float y) {
+    texCoord2d(x, y);
+}
+void texCoord2dv(const double *v) {
+    texCoord2d(v[0], v[1]);
+}
 void vertex3d(double x, double y, double z) {
     auto &c = ctx();
     if (!c.inPrimitive)
@@ -354,8 +424,12 @@ void vertex3d(double x, double y, double z) {
     v.position = {finite(x), finite(y), finite(z)};
     c.primitive.push_back(v);
 }
-void vertex3dv(const double *v) { vertex3d(v[0], v[1], v[2]); }
-void vertex2f(float x, float y) { vertex3d(x, y, 0); }
+void vertex3dv(const double *v) {
+    vertex3d(v[0], v[1], v[2]);
+}
+void vertex2f(float x, float y) {
+    vertex3d(x, y, 0);
+}
 void enable(Enum cap) {
     apply([=](Context &c) { setCapability(c.state, cap, true); });
 }
@@ -461,7 +535,9 @@ void translated(double x, double y, double z) {
     m[14] = finite(z);
     multMatrixf(m.data());
 }
-void translatef(float x, float y, float z) { translated(x, y, z); }
+void translatef(float x, float y, float z) {
+    translated(x, y, z);
+}
 void scalef(float x, float y, float z) {
     Matrix m{};
     m[0] = x;
@@ -505,11 +581,11 @@ void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
         // translated/scaled local athlete geometry as well as cached terrain.
         s.arenaAxis = transform(normalMatrix(c.modelView), {1, 0, 0, 0});
         const auto origin = transform(c.modelView, {0, 0, 0, 1});
-        s.arenaAxis[3] = -(s.arenaAxis[0] * origin[0] + s.arenaAxis[1] * origin[1] +
-                           s.arenaAxis[2] * origin[2]);
+        s.arenaAxis[3] =
+            -(s.arenaAxis[0] * origin[0] + s.arenaAxis[1] * origin[1] + s.arenaAxis[2] * origin[2]);
         s.worldZAxis = transform(normalMatrix(c.modelView), {0, 0, 1, 0});
-        s.worldZAxis[3] = -(s.worldZAxis[0] * origin[0] + s.worldZAxis[1] * origin[1] +
-                            s.worldZAxis[2] * origin[2]);
+        s.worldZAxis[3] =
+            -(s.worldZAxis[0] * origin[0] + s.worldZAxis[1] * origin[1] + s.worldZAxis[2] * origin[2]);
         s.arenaParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), strength};
         s.arenaColor = {1, .95f, .84f, 0};
         for (size_t i = 0; i < lights.size(); ++i) {
@@ -528,7 +604,8 @@ void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
                  int columns, float strength, float attenuationDistance) {
     apply([=](Context &c) {
         auto &s = c.state;
-        s.inrunParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), float(columns)};
+        s.inrunParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance),
+                             float(columns)};
         s.inrunColor = {1, .94f, .84f, strength};
         for (size_t i = 0; i < lights.size(); ++i) {
             auto position = lights[i].positionRange, direction = lights[i].directionCone;
@@ -615,7 +692,9 @@ void lineWidth(float value) {
     apply([=](Context &c) { c.state.lineWidth = value; });
 }
 void viewport(int, int, int, int) {}
-void clearColor(float r, float g, float b, float a) { ctx().background = {r, g, b, a}; }
+void clearColor(float r, float g, float b, float a) {
+    ctx().background = {r, g, b, a};
+}
 void clear(Flags) {}
 void hint(Enum, Enum) {}
 void shadeModel(Enum mode) {
@@ -743,6 +822,7 @@ void endList() {
     auto &c = ctx();
     if (!c.compiling || c.inPrimitive)
         throw std::runtime_error("Invalid cached mesh end");
+    indexMesh(*c.compiling->mesh);
     c.compiling.reset();
 }
 void callList(Id id) {
