@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "original_skeleton.h"
+#include "visual_weather.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -918,7 +919,7 @@ void Renderer::scenery(const Hill &h, const Frame &frame, double time) {
     glPushAttrib(GL_ENABLE_BIT | GL_LIGHTING_BIT | GL_CURRENT_BIT | GL_TEXTURE_BIT);
     glDisable(GL_TEXTURE_2D);
     const double strength = clamp(std::abs(double(frame.windSpeed)) / 8.0, 0.05, 1.0);
-    const Vec3 wind{std::cos(frame.windAngle), 0, std::sin(frame.windAngle)};
+    const Vec3 wind = visual::windDirection(frame);
     // Only one small upper bough on every twenty-sixth tree is animated.
     for (int i = 0; i < 420; i += 26) {
         const Tree tree = treeAt(h, i);

@@ -14,6 +14,14 @@ target_link_libraries(the-perfect-v PRIVATE ski_physics PkgConfig::SDL2 OpenGL::
 target_compile_options(the-perfect-v PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_definitions(the-perfect-v PRIVATE SJP_ASSET_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 include(CTest)
+option(TPV_BUILD_RENDER_PROBE "Build explicitly invoked graphics diagnostics" OFF)
+if(TPV_BUILD_RENDER_PROBE)
+  add_executable(render-probe tools/render_probe.cpp src/storage.cpp
+    src/renderer.cpp src/renderer_environment.cpp src/renderer_athlete.cpp
+    src/renderer_effects.cpp src/renderer_ui.cpp)
+  target_link_libraries(render-probe PRIVATE ski_physics PkgConfig::SDL2 OpenGL::GL Freetype::Freetype)
+  target_compile_options(render-probe PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 # Reference recordings are local development data and are not distributed.
 # Keep the complete existing suite available when those fixtures are present.
 set(SJP_REFERENCE_TESTS_DEFAULT OFF)

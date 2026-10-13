@@ -29,6 +29,18 @@ a graphical desktop; no browser, network connection or DOS emulator is needed.
 Use **How to jump** in the game for a short guide. England K50 and Austria K70
 are small practice hills.
 
+For AMD graphics hangs, try the compatibility launch mode:
+
+```sh
+./play.sh --graphics-compat
+```
+
+It selects LLVM shaders on AMD and waits for each rendered frame to complete.
+It keeps the usual antialiasing and may reduce rendering throughput. Normal play
+is capped at 60 frames per second even if VSync is unavailable. `--sync-rendering`
+and `--no-msaa` are separate options for diagnosing synchronization and antialiasing.
+Startup output reports the actual renderer, MSAA, VSync and synchronization mode.
+
 ## Controls
 
 | Action | Mouse | Keyboard |

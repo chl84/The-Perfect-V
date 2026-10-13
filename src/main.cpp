@@ -4,6 +4,7 @@
 #include "physics.h"
 #include "renderer.h"
 #include "storage.h"
+#include "visual_weather.h"
 #include <GL/gl.h>
 #include <SDL.h>
 #include <algorithm>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 using namespace sjp;
 namespace {
@@ -144,6 +146,9 @@ class App {
     OriginalWind sessionWeather;
     std::array<float, 2> sessionAuxiliary{};
     int weatherHill = -1;
+    bool synchronousRendering = false, noMsaa = false, llvmShaders = false;
+    bool smokeMouseCapture = false;
+    size_t mouseCaptureTransitions = 0;
 
   public:
     App(int argc, char **argv) {
@@ -151,8 +156,16 @@ class App {
             std::string a = argv[i];
             if (a == "--smoke-test")
                 smoke = true;
+            else if (a == "--smoke-mouse-capture")
+                smoke = smokeMouseCapture = true;
             else if (a == "--hidden")
                 hidden = true;
+            else if (a == "--graphics-compat")
+                synchronousRendering = llvmShaders = true;
+            else if (a == "--sync-rendering")
+                synchronousRendering = true;
+            else if (a == "--no-msaa")
+                noMsaa = true;
             else if (a == "--capture-dir" && i + 1 < argc)
                 captureDir = argv[++i];
             else if (a == "--data-dir" && i + 1 < argc)
@@ -164,26 +177,39 @@ class App {
                              "validation\n  --hidden         hidden window (use with --smoke-test)\n  "
                              "--capture-dir P  write menu, flight and result images (PPM)\n  --data-dir P    "
                              " use a separate records and replay directory\n  --replay FILE     open an "
-                             "original .RPL or native .sjr replay\n";
+                             "original .RPL or native .sjr replay\n"
+                             "  --smoke-mouse-capture  fullscreen test of mouse capture and cup clicks\n"
+                             "  --graphics-compat  use LLVM on AMD and finish each rendered frame\n"
+                             "  --sync-rendering   finish each frame before presenting it\n"
+                             "  --no-msaa          disable multisample antialiasing\n";
                 running = false;
                 return;
             } else
                 throw std::runtime_error("Unknown argument: " + a);
         }
+        if (smokeMouseCapture && hidden)
+            throw std::runtime_error("Mouse capture testing requires a visible window");
         // Keep original mouse counts independent of DPI/render size and the
         // desktop acceleration curve. Sensitivity is applied once by physics.
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_MODE_WARP, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SCALING, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
+        if (llvmShaders) {
+            const char *existing = SDL_getenv("AMD_DEBUG");
+            const std::string flags = std::string(existing && *existing ? existing : "") +
+                                      (existing && *existing ? ",usellvm" : "usellvm");
+            if (SDL_setenv("AMD_DEBUG", flags.c_str(), 1))
+                throw std::runtime_error("Could not select AMD LLVM shaders");
+        }
         if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS))
             throw std::runtime_error(SDL_GetError());
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, noMsaa ? 0 : 1);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, noMsaa ? 0 : 4);
         window = SDL_CreateWindow("The Perfect V", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1440, 900,
                                   SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI |
                                       (hidden ? SDL_WINDOW_HIDDEN : SDL_WINDOW_SHOWN));
@@ -199,7 +225,7 @@ class App {
         context = SDL_GL_CreateContext(window);
         if (!context)
             throw std::runtime_error(std::string("OpenGL context failed: ") + SDL_GetError());
-        SDL_GL_SetSwapInterval(smoke ? 0 : 1);
+        const int swapResult = SDL_GL_SetSwapInterval(smoke ? 0 : 1);
         SDL_SetWindowMinimumSize(window, 960, 600);
         std::string assets;
         char *base = SDL_GetBasePath();
@@ -216,6 +242,7 @@ class App {
         if (assets.empty())
             throw std::runtime_error("Game fonts are missing. Keep the assets directory with the game.");
         renderer = std::make_unique<Renderer>(window, assets);
+        renderer->setSynchronousRendering(synchronousRendering);
         audio = std::make_unique<Audio>();
         if (dataDir.empty()) {
             // Retain the legacy namespace so the rename keeps existing saves.
@@ -256,7 +283,12 @@ class App {
                 decodeOriginalReplay(lastReplay.originalRpl, originalReplayData, &replayExportError);
         if (!replayArgument.empty())
             openReplayFile(replayArgument);
-        std::cout << "The Perfect V | " << renderer->device << "\nSaves: " << dataDir << '\n';
+        GLint actualSamples = 0;
+        glGetIntegerv(GL_SAMPLES, &actualSamples);
+        std::cout << "The Perfect V | " << renderer->device << "\nSaves: " << dataDir
+                  << "\nGraphics: MSAA=" << actualSamples << ", VSync=" << SDL_GL_GetSwapInterval()
+                  << ", VSync setup=" << swapResult << ", synchronous=" << synchronousRendering
+                  << ", frame cap=" << (smoke ? 0 : 60) << '\n' << std::flush;
     }
     ~App() {
         if (renderer) {
@@ -274,10 +306,29 @@ class App {
     int run() {
         if (!running)
             return 0;
-        if (smoke)
+        if (smoke) {
+            if (smokeMouseCapture) {
+                // Keep the real desktop pointer within the test window during
+                // pause/unpause. Otherwise focus-follows-mouse can correctly
+                // pause the automated control test when capture is released.
+                if (SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0)
+                    throw std::runtime_error(std::string("Test fullscreen failed: ") + SDL_GetError());
+                fullscreen = true;
+                SDL_RaiseWindow(window);
+                const Uint32 focusDeadline = SDL_GetTicks() + 10000;
+                do {
+                    SDL_Delay(20);
+                    events();
+                } while (!(SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
+                         SDL_GetTicks() < focusDeadline);
+                if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
+                    throw std::runtime_error("Mouse capture test requires window focus");
+            }
             return smokeTest();
+        }
         uint64_t previous = SDL_GetPerformanceCounter();
         while (running) {
+            const auto frameStarted = std::chrono::steady_clock::now();
             uint64_t now = SDL_GetPerformanceCounter();
             double dt = std::min(.08, double(now - previous) / SDL_GetPerformanceFrequency());
             previous = now;
@@ -318,7 +369,8 @@ class App {
                        records.sound);
             render();
             renderer->finish();
-            SDL_Delay(1);
+            // Bound submission rate even when VSync is unavailable or ignored.
+            std::this_thread::sleep_until(frameStarted + std::chrono::nanoseconds(1000000000 / 60));
         }
         return 0;
     }
@@ -326,9 +378,19 @@ class App {
   private:
     double chosenWind() { return windMode == 1 ? 0 : windMode == 2 ? 3 : -2.5; }
     void captureMouse() {
-        bool capture = screen == Screen::Playing && !smoke;
-        SDL_SetRelativeMouseMode(capture ? SDL_TRUE : SDL_FALSE);
-        SDL_ShowCursor(capture ? SDL_DISABLE : SDL_ENABLE);
+        const SDL_bool capture = screen == Screen::Playing && (!smoke || smokeMouseCapture)
+                                     ? SDL_TRUE
+                                     : SDL_FALSE;
+        // Relative mode already hides the cursor. Only change it when needed:
+        // repeated hide/show requests also reach the desktop's cursor path.
+        if (SDL_GetRelativeMouseMode() != capture) {
+            if (SDL_SetRelativeMouseMode(capture) != 0) {
+                if (smokeMouseCapture)
+                    throw std::runtime_error(std::string("Mouse capture failed: ") + SDL_GetError());
+                std::cerr << "Mouse capture failed: " << SDL_GetError() << '\n';
+            } else
+                ++mouseCaptureTransitions;
+        }
         mouseLeft = mouseRight = false;
         mouseDy = 0;
     }
@@ -367,7 +429,7 @@ class App {
         captureMouse();
         buttons.clear();
     }
-    void newJump() {
+    void newJump(Screen destination = Screen::Playing) {
         if (weatherHill != selectedHill)
             initializeWeather();
         sim.resetWithWeather(selectedHill, sessionWeather,
@@ -381,8 +443,9 @@ class App {
         pending = {};
         accumulator = 0;
         newRecord = false;
+        renderer->setJumpWeather(sim.initialRandomSeed());
         renderer->resetCamera();
-        changeScreen(Screen::Playing);
+        changeScreen(destination);
         if (records.sound)
             audio->cue(1);
     }
@@ -431,8 +494,9 @@ class App {
         if (!cup.hasPreparedJump())
             cup.prepareJump(originalClockSeed());
         checkpointCup();
-        newJump();
-        changeScreen(Screen::JumpReady);
+        // Preparing a cup jump must leave the pointer available for Start.
+        // Capture begins only when the player starts the turn.
+        newJump(Screen::JumpReady);
     }
     void completeJump() {
         completedName = jumperName();
@@ -553,6 +617,8 @@ class App {
         replayTime = 0;
         replaySpeed = 1;
         replayPlaying = true;
+        renderer->setJumpWeather(canExportOriginal ? originalReplayData.seed
+                                                  : visual::replayWeatherSeed(lastReplay));
         renderer->resetCamera();
         changeScreen(Screen::Replay);
     }
@@ -858,8 +924,11 @@ class App {
             if (e.type == SDL_QUIT)
                 running = false;
             if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_FOCUS_LOST &&
-                screen == Screen::Playing)
+                screen == Screen::Playing) {
+                if (smokeMouseCapture)
+                    std::cout << "Mouse capture test: window lost focus during play\n" << std::flush;
                 changeScreen(Screen::Paused);
+            }
             if (e.type == SDL_MOUSEMOTION) {
                 if (screen == Screen::Playing && sim.phase == Phase::Flight)
                     mouseDy =
@@ -1663,6 +1732,68 @@ class App {
         }
     }
     int smokeTest() {
+        size_t cupButtonClicks = 0;
+        auto requireCapture = [&](bool expected) {
+            if (smokeMouseCapture && bool(SDL_GetRelativeMouseMode()) != expected)
+                throw std::runtime_error("Unexpected relative mouse mode on cup screen");
+        };
+        auto clickButton = [&](Action requested) {
+            render();
+            renderer->finish();
+            const auto button = std::find_if(buttons.begin(), buttons.end(),
+                                             [&](const Button &b) { return b.action == requested; });
+            if (button == buttons.end())
+                throw std::runtime_error("Smoke test button is missing");
+            int ww, hh;
+            SDL_GetWindowSize(window, &ww, &hh);
+            const int x = int(((button->x + button->w / 2) * renderer->uiScale + renderer->offsetX) *
+                              ww / renderer->width);
+            const int y = int(((button->y + button->h / 2) * renderer->uiScale + renderer->offsetY) *
+                              hh / renderer->height);
+            SDL_Event e{};
+            e.type = SDL_MOUSEMOTION;
+            e.motion.windowID = SDL_GetWindowID(window);
+            e.motion.x = x;
+            e.motion.y = y;
+            if (SDL_PushEvent(&e) != 1)
+                throw std::runtime_error("Could not queue smoke test pointer motion");
+            e = {};
+            e.type = SDL_MOUSEBUTTONDOWN;
+            e.button.windowID = SDL_GetWindowID(window);
+            e.button.button = SDL_BUTTON_LEFT;
+            e.button.x = x;
+            e.button.y = y;
+            if (SDL_PushEvent(&e) != 1)
+                throw std::runtime_error("Could not queue smoke test button press");
+            e.type = SDL_MOUSEBUTTONUP;
+            if (SDL_PushEvent(&e) != 1)
+                throw std::runtime_error("Could not queue smoke test button release");
+            events();
+        };
+        auto cupNext = [&] {
+            requireCapture(false);
+            const auto before = mouseCaptureTransitions;
+            if (smokeMouseCapture) {
+                clickButton(Action::Next);
+                ++cupButtonClicks;
+            } else
+                action(Action::Next);
+            requireCapture(false);
+            if (mouseCaptureTransitions != before)
+                throw std::runtime_error("Next unnecessarily changed relative mouse mode");
+        };
+        auto startTurn = [&] {
+            requireCapture(false);
+            const auto before = mouseCaptureTransitions;
+            if (smokeMouseCapture)
+                clickButton(Action::StartTurn);
+            else
+                action(Action::StartTurn);
+            requireCapture(true);
+            if (screen != Screen::Playing ||
+                (smokeMouseCapture && mouseCaptureTransitions != before + 1))
+                throw std::runtime_error("Starting a cup turn did not capture the pointer once");
+        };
         worldSetup = defaultCupSetup();
         teamSetup = defaultTeamCupSetup();
         // Control test uses a reproducible wind override. The cup below uses
@@ -1673,16 +1804,20 @@ class App {
             renderer->capture(captureDir + "/menu.ppm");
         renderer->finish();
         // Exercise the actual menu hit testing, keyboard start, pause and mouse takeoff.
-        SDL_Event event{};
-        event.type = SDL_MOUSEMOTION;
-        event.motion.x = 200;
-        event.motion.y = 512;
-        SDL_PushEvent(&event);
-        event = {};
-        event.type = SDL_MOUSEBUTTONDOWN;
-        event.button.button = SDL_BUTTON_LEFT;
-        SDL_PushEvent(&event);
-        events();
+        if (smokeMouseCapture)
+            clickButton(Action::Practice);
+        else {
+            SDL_Event event{};
+            event.type = SDL_MOUSEMOTION;
+            event.motion.x = 200;
+            event.motion.y = 512;
+            SDL_PushEvent(&event);
+            event = {};
+            event.type = SDL_MOUSEBUTTONDOWN;
+            event.button.button = SDL_BUTTON_LEFT;
+            SDL_PushEvent(&event);
+            events();
+        }
         if (screen != Screen::Playing)
             throw std::runtime_error("Practice button input failed");
         auto key = [&](SDL_Keycode code) {
@@ -1772,8 +1907,12 @@ class App {
         std::cout << "Smoke test: distance=" << sim.result.distance << " m, score=" << sim.result.total
                   << ", landed=" << !sim.crashed << ", frames=" << sim.frames.size() << '\n';
         if (screen != Screen::Result || !flightCaptured || !mouseTakeoff || !mouseLanding || sim.crashed ||
-            sim.result.distance < 40)
+            sim.result.distance < 40) {
+            std::cerr << "Control test failed: screen=" << int(screen) << ", phase=" << int(sim.phase)
+                      << ", flight=" << flightCaptured << ", takeoff=" << mouseTakeoff
+                      << ", landing=" << mouseLanding << '\n';
             return 1;
+        }
         beginReplay();
         replayTime = replayDuration() * .6;
         render();
@@ -1879,13 +2018,17 @@ class App {
         }
         worldSetup = defaultCupSetup();
         setupPage = 0;
+        const auto beforeCup = mouseCaptureTransitions;
         beginCup();
+        requireCapture(false);
+        if (mouseCaptureTransitions != beforeCup)
+            throw std::runtime_error("Preparing the cup unnecessarily captured the pointer");
         int cupFalls = 0;
         for (int event = 0; event < hillCount(); event++) {
             for (int jump = 0; jump < 2; jump++) {
                 if (screen != Screen::JumpReady)
                     throw std::runtime_error("Cup hotseat readiness missing");
-                action(Action::StartTurn);
+                startTurn();
                 for (int n = 0; n < 6000 && screen == Screen::Playing; n++) {
                     sim.step(1. / 120, autopilot(sim));
                     if (sim.phase == Phase::Finished)
@@ -1908,18 +2051,21 @@ class App {
                 }
                 if (sim.crashed)
                     cupFalls++;
-                action(Action::Next);
+                cupNext();
             }
             render();
             if (!captureDir.empty() && (event == 0 || event + 1 == hillCount()))
                 renderer->capture(captureDir + (event == 0 ? "/cup-event.ppm" : "/cup-final.ppm"));
             renderer->finish();
             if (event + 1 < hillCount())
-                action(Action::Next);
+                cupNext();
+            if (smokeMouseCapture && (event + 1) % 8 == 0)
+                std::cout << "Mouse capture cup: " << event + 1 << '/' << hillCount()
+                          << " hills checked\n" << std::flush;
         }
         if (screen != Screen::Standings || !finalCupEvent())
             throw std::runtime_error("The complete cup did not reach final standings");
-        action(Action::Next);
+        cupNext();
         if (screen != Screen::Menu)
             throw std::runtime_error("Finishing the cup did not return to the main menu");
         // Exercise configuration, checkpoint reload, human handoff and Team Cup frontend.
@@ -1954,13 +2100,17 @@ class App {
                     throw std::runtime_error("Hotseat cup checkpoint failed");
                 if (teamJumps == 0) {
                     action(Action::Back);
+                    const auto beforeResume = mouseCaptureTransitions;
                     action(Action::CupResume);
+                    requireCapture(false);
+                    if (mouseCaptureTransitions != beforeResume)
+                        throw std::runtime_error("Resuming the cup unnecessarily captured the pointer");
                     render();
                     if (!captureDir.empty())
                         renderer->capture(captureDir + "/hotseat.ppm");
                     renderer->finish();
                 }
-                action(Action::StartTurn);
+                startTurn();
                 for (int n = 0; n < 15000 && screen == Screen::Playing; ++n) {
                     sim.step(ORIGINAL_TICK, autopilot(sim));
                     if (sim.phase == Phase::Finished || sim.phase == Phase::Disqualified)
@@ -1969,13 +2119,13 @@ class App {
                 if (screen != Screen::Result)
                     throw std::runtime_error("Team Cup jump failed");
                 ++teamJumps;
-                action(Action::Next);
+                cupNext();
             } else if (screen == Screen::Standings) {
                 render();
                 if (!captureDir.empty())
                     renderer->capture(captureDir + "/team-standings.ppm");
                 renderer->finish();
-                action(Action::Next);
+                cupNext();
             } else
                 throw std::runtime_error("Unexpected Team Cup screen");
         }
@@ -1995,7 +2145,7 @@ class App {
         int visibleJumps = 0;
         while (!cup.complete()) {
             if (screen == Screen::JumpReady) {
-                action(Action::StartTurn);
+                startTurn();
                 for (int n = 0; n < 20000 && screen == Screen::Playing; ++n) {
                     sim.step(ORIGINAL_TICK, autopilot(sim));
                     if (sim.phase == Phase::Finished || sim.phase == Phase::Disqualified)
@@ -2013,9 +2163,9 @@ class App {
                     action(Action::Back);
                     action(Action::CupResume);
                 } else
-                    action(Action::Next);
+                    cupNext();
             } else if (screen == Screen::Standings)
-                action(Action::Next);
+                cupNext();
             else
                 throw std::runtime_error("Unexpected visible cup screen");
         }
@@ -2048,6 +2198,9 @@ class App {
         GLenum error = glGetError();
         std::cout << "Smoke test: all " << hillCount() << " venues, screens, replay and " << hillCount() * 2
                   << "-jump cup passed (" << cupFalls << " falls). OpenGL error=" << error << '\n';
+        if (smokeMouseCapture)
+            std::cout << "Mouse capture test: " << mouseCaptureTransitions << " transitions, "
+                      << cupButtonClicks << " Next button clicks; no capture on cup preparation\n";
         return error == GL_NO_ERROR ? 0 : 1;
     }
 };

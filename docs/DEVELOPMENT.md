@@ -96,6 +96,41 @@ The CPU command test covers all 32 venues, three cameras, panorama, ghosts, HUD,
 falls and autopilot trajectories. These checks do not establish GPU driver stability
 or prove that a previously observed AMD graphics timeout is resolved.
 
+Normal play has an independent 60 FPS submission limit. `--graphics-compat`
+selects AMD's LLVM shader path before SDL initializes video and calls `glFinish`
+before each swap. `--sync-rendering` enables just that synchronization;
+`--no-msaa` disables multisample antialiasing independently. These options do not
+change simulation, hill geometry, saved data or replay formats. Shader flags are
+set only in the game process. Actual graphics settings are printed and flushed at
+startup. The smoke test is not frame limited.
+
+An optional diagnostic executable exercises all 32 venues and the affected
+replay through the real OpenGL driver. It is never registered as an automatic
+test and only reads the supplied save files:
+
+```sh
+cmake -S . -B build-diagnostics -DTPV_BUILD_RENDER_PROBE=ON
+cmake --build build-diagnostics --target render-probe --parallel 4
+AMD_DEBUG=usellvm SDL_VIDEODRIVER=offscreen \
+  python3 tools/watch_gpu_test.py --output captures/llvm-test --timeout 330 -- \
+  build-diagnostics/render-probe --assets assets --cup /path/to/cup.sjc \
+  --replay /path/to/latest-dsj2.sjr --expect-renderer radeonsi \
+  --expect-compiler LLVM --samples 4 --seconds 300
+```
+
+The output directory must be new. The wrapper persists kernel events and GPU
+metrics, bounds test duration, stops the test on a recorded GPU fault and attempts
+to save any new device coredump. A driver hang may still affect the desktop before
+the wrapper can stop it. `--sync` and `--samples 0` on the probe isolate the two
+other rendering variants. For software control tests, set `LIBGL_ALWAYS_SOFTWARE=1 GALLIUM_DRIVER=llvmpipe`
+and pass `--expect-renderer llvmpipe` to the probe instead of the hardware
+renderer/compiler expectations.
+
+The physics suite also replays the exact World Cup AI state that reached the
+takeoff lip at `x=0`. The following positive step must launch the athlete; missing
+that crossing previously left the CPU indefinitely in the inrun and caused the
+frontend's simulation limit to abort the cup.
+
 ## Minimal jump HUD
 
 Venue, K point, wind, speed and distance sit in compact panels at the screen edges.
@@ -112,3 +147,17 @@ save namespace intentionally remains unchanged so existing records, settings,
 competitions and replay files stay available. The executable prints the actual
 save directory at startup; `--data-dir PATH` overrides it. Native `.SJR` replay
 and `.SJC` competition formats also retain their identifiers for compatibility.
+
+## Cosmetic wind and snowfall
+
+The windsock uses the same smoothed x/y wind angle as the HUD arrow, with light
+cloth sag and flutter. Snow and moving boughs use that direction as well. These
+vectors are drawing inputs and are never fed back into the simulation.
+
+Light snowfall is selected once per jump with approximately 15 percent probability,
+using a cosmetic hash of the existing jump seed without advancing gameplay RNG.
+A selected jump keeps snowfall throughout; at most 100 atmospheric flakes are
+rendered, with weak wind drift and a mostly downward fall. Their animation uses
+the frame/replay clock, so pause freezes flakes and seeking is repeatable. Menus
+do not display jump snowfall. Original replays reuse their seed; native recordings
+without original metadata use a stable visual hash of their recorded frames.

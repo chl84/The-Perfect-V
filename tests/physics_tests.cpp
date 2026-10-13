@@ -188,6 +188,43 @@ int main() {
             require(cpu.phase == Phase::Finished && cpu.jumped && std::isfinite(cpu.result.total),
                     "Original AI completes a scored jump and outrun on every hill");
         }
+        // Regression from a saved World Cup checkpoint: single-precision
+        // integration lands exactly on the lip, then crosses it next tick.
+        // The old strict-negative crossing missed the launch and left the CPU
+        // in Inrun indefinitely, ultimately aborting the whole cup frontend.
+        OriginalWind lipWeather;
+        lipWeather.x = -.12789125740528107f;
+        lipWeather.y = -.081578224897384644f;
+        lipWeather.variationStep = .1265455037355423f;
+        lipWeather.speed = .15169437229633331f;
+        lipWeather.angle = 3.7093946933746338f;
+        lipWeather.displayAngle = -2.2250008583068848f;
+        lipWeather.angularStep = -.15000000596046448f;
+        lipWeather.angularCap = .20000000298023224f;
+        lipWeather.frameCounter = 1311;
+        OriginalAiSkills lipSkills;
+        lipSkills.level = 2;
+        lipSkills.values = {-.028366954997181892f, .29698070883750916f,
+                            -.55901616811752319f, .8394431471824646f};
+        Simulation lipCpu;
+        lipCpu.resetWithWeather(2, lipWeather, 439484952u);
+        lipCpu.pose.auxiliary = {.056951209902763367f, .0059966873377561569f};
+        lipCpu.configureAi(lipSkills, true, true);
+        bool reachedLipExactly = false, crossedFromLip = false;
+        for (int tick = 0; tick < 7000 && lipCpu.phase != Phase::Finished; ++tick) {
+            const double beforeX = lipCpu.x;
+            const Phase beforePhase = lipCpu.phase;
+            lipCpu.step(ORIGINAL_TICK, {});
+            reachedLipExactly |= beforePhase == Phase::Inrun && beforeX < 0 && lipCpu.x == 0;
+            if (beforePhase == Phase::Inrun && beforeX == 0 && lipCpu.x > 0) {
+                crossedFromLip = true;
+                require(lipCpu.phase == Phase::Flight,
+                        "A CPU crossing from the exact lip must leave the inrun");
+            }
+        }
+        require(reachedLipExactly && crossedFromLip && lipCpu.phase == Phase::Finished &&
+                    lipCpu.result.distance > 0 && std::isfinite(lipCpu.result.total),
+                "The exact-lip World Cup jump must complete with a scored result");
         Simulation timeout(2, 2);
         for (int i = 0; i < 1900; i++)
             timeout.step(1. / 120, {});

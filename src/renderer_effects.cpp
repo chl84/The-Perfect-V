@@ -1,5 +1,6 @@
 #include "original_skeleton.h"
 #include "renderer.h"
+#include "visual_weather.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -50,7 +51,14 @@ OriginalSkeleton effectSkeleton(const Hill &h, const Frame &f) {
 }
 } // namespace
 
-void Renderer::effects(const Hill &h, const Frame &f, double time) {
+void Renderer::setJumpWeather(uint32_t seed) {
+    snowfallSeed = visual::weatherHash(seed);
+    snowfall = visual::snowForJump(seed);
+    snowParticles.clear();
+    effectsInitialized = false;
+}
+
+void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) {
     const Phase phase = Phase(f.phase), previousPhase = Phase(lastEffectFrame.phase);
     // Event particles use the frame/replay clock: pause freezes powder, and
     // seeking/restarting cannot carry a previous jump's burst into this one.
@@ -66,7 +74,7 @@ void Renderer::effects(const Hill &h, const Frame &f, double time) {
         effectsInitialized = true;
     }
     const double windSpeed = clamp(double(f.windSpeed), 0.0, 18.0);
-    const Vec3 wind{std::cos(f.windAngle) * windSpeed, std::sin(f.windAngle) * windSpeed, 0};
+    const Vec3 wind = visual::windDirection(f) * windSpeed;
     const OriginalSkeleton skeleton = effectSkeleton(h, f);
     const Vec3 origin{f.x, f.y, 0};
     const auto snowSurface = [&](double x) { return x <= 0 ? h.inrun(x) : h.ground(x); };
@@ -227,34 +235,29 @@ void Renderer::effects(const Hill &h, const Frame &f, double time) {
         glEnd();
     }
 
-    // Occasional light flurries are scenery only. A stable venue pattern and
-    // a smoothly fading 70-second weather window avoid persistent snowfall.
-    const uint32_t venue = venuePattern(h.id);
-    if ((venue % 5) == 1 || (venue % 5) == 3) {
-        const double window = std::fmod(std::max(0.0, time) + venue % 71, 70.0);
-        const double amount = clamp(window / 6, 0.0, 1.0) * clamp((42 - window) / 6, 0.0, 1.0);
-        if (amount > .001) {
-            // World cells move continuously with scene time. Selecting nearby
-            // cells instead of attaching flakes to the skier avoids camera snow.
-            const int cellX = int(std::floor(target.x / 18)), cellZ = int(std::floor(target.z / 18));
-            for (int xCell = cellX - 2; xCell <= cellX + 2; ++xCell)
-                for (int zCell = cellZ - 2; zCell <= cellZ + 2; ++zCell)
-                    for (int i = 0; i < 4; ++i) {
-                        const double seed = double(venue % 997) + xCell * 197 + zCell * 71 + i * 23;
-                        const double cycle =
-                            std::fmod(time * (.043 + pattern(seed) * .02) + pattern(seed + 1), 1.0);
-                        const double driftClock = cycle / (.043 + pattern(seed) * .02);
-                        const double x = xCell * 18 + pattern(seed + 2) * 18 + wind.x * driftClock * .08,
-                                     z = zCell * 18 + pattern(seed + 3) * 18;
-                        const double surface = snowSurface(x);
-                        const double y = surface + 4 + (1 - cycle) * 27 + wind.y * driftClock * .04;
-                        const Vec3 position{x, y, z};
-                        const double distance = (position - eye).length();
-                        const double nearFade = clamp((distance - 3) / 5, 0.0, 1.0);
-                        powder(position, right, up, .028 + pattern(seed + 4) * .045,
-                               amount * .47 * nearFade * std::sin(cycle * PI));
-                    }
-        }
+    // Select weather once per jump, never per frame or camera. World-space
+    // cells keep the light snowfall independent of the athlete and physics.
+    // The replay clock freezes flakes on pause and makes seeking repeatable.
+    if (snowfall && showWeather) {
+        const uint32_t venue = venuePattern(h.id) ^ snowfallSeed;
+        const int cellX = int(std::floor(target.x / 18)), cellZ = int(std::floor(target.z / 18));
+        for (int xCell = cellX - 2; xCell <= cellX + 2; ++xCell)
+            for (int zCell = cellZ - 2; zCell <= cellZ + 2; ++zCell)
+                for (int i = 0; i < 4; ++i) {
+                    const double seed = double(venue % 997) + xCell * 197 + zCell * 71 + i * 23;
+                    const double rate = .043 + pattern(seed) * .02;
+                    const double cycle = std::fmod(std::max(0.0, clock) * rate + pattern(seed + 1), 1.0);
+                    const double driftClock = cycle / rate;
+                    const double baseX = xCell * 18 + pattern(seed + 2) * 18;
+                    const Vec3 drift = visual::snowDrift(wind, driftClock);
+                    const double x = baseX + drift.x, z = zCell * 18 + pattern(seed + 3) * 18;
+                    const double y = snowSurface(baseX) + 4 + (1 - cycle) * 27 + drift.y;
+                    const Vec3 position{x, y, z};
+                    const double distance = (position - eye).length();
+                    const double nearFade = clamp((distance - 3) / 5, 0.0, 1.0);
+                    powder(position, right, up, .05 + pattern(seed + 4) * .035,
+                           .56 * nearFade * std::sin(cycle * PI));
+                }
     }
     glPopAttrib();
 }

@@ -4,6 +4,7 @@
 // and current-attribute writes after a display list's outer restoration. It does
 // not emulate rasterization, lighting, or the driver's complete display list.
 #include "renderer.h"
+#include "visual_weather.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,7 +33,7 @@ struct Saved {
 };
 std::vector<Saved> attributes;
 std::map<GLenum, int> matrices{{GL_MODELVIEW, 1}, {GL_PROJECTION, 1}, {GL_TEXTURE, 1}};
-GLenum matrix = GL_MODELVIEW;
+GLenum matrix = GL_MODELVIEW, primitiveMode = GL_TRIANGLES;
 bool primitive = false, depth = true;
 GLuint compiling = 0, nextList = 1, nextTexture = 1;
 struct List {
@@ -53,18 +54,24 @@ void command(const char *name, bool allowed = false) {
         ++lists.at(compiling).commands;
     require(!primitive || allowed, name);
 }
-uint64_t positionHash = 1469598103934665603ULL;
+uint64_t positionHash = 1469598103934665603ULL, particlePositionHash = 1469598103934665603ULL;
+size_t particleVertices = 0;
+size_t completedFrames = 0;
 void position(double x, double y, double z) {
     for (double v : {x, y, z}) {
         uint64_t b;
         std::memcpy(&b, &v, sizeof(b));
         positionHash = (positionHash ^ b) * 1099511628211ULL;
+        if (!compiling && primitiveMode == GL_TRIANGLE_FAN)
+            particlePositionHash = (particlePositionHash ^ b) * 1099511628211ULL;
     }
 }
 void vertex() {
     require(primitive, "Vertex outside glBegin/glEnd");
     ++vertices;
     ++drawVertices;
+    if (!compiling && primitiveMode == GL_TRIANGLE_FAN)
+        ++particleVertices;
     if (compiling)
         ++lists.at(compiling).vertices;
 }
@@ -90,10 +97,17 @@ void SDL_GL_GetDrawableSize(SDL_Window *, int *w, int *h) {
     *h = audit::drawableHeight;
 }
 void SDL_GL_SwapWindow(SDL_Window *) {}
+void GLAPIENTRY glFinish(void) {
+    audit::command("glFinish inside glBegin", false);
+    audit::require(!audit::compiling && audit::attributes.empty(),
+                   "Frame completed before display list/attribute restoration");
+    ++audit::completedFrames;
+}
 void GLAPIENTRY glBegin(GLenum mode) {
     audit::command("glBegin inside glBegin", false);
     audit::require(!audit::primitive, "Nested glBegin");
     audit::primitive = true;
+    audit::primitiveMode = mode;
     audit::drawVertices = 0;
 }
 void GLAPIENTRY glBindTexture(GLenum target, GLuint texture) {
@@ -431,6 +445,29 @@ void GLAPIENTRY glViewport(GLint x, GLint y, GLsizei width, GLsizei height) {
 
 int main() {
     try {
+        size_t snowy = 0;
+        constexpr size_t weatherSamples = 100000;
+        for (uint32_t i = 0; i < weatherSamples; ++i) {
+            const uint32_t seed = sjp::originalWindSeedFromDosTime(
+                uint8_t(i / 360000), uint8_t(i / 6000 % 60), uint8_t(i / 100 % 60), uint8_t(i % 100));
+            snowy += sjp::visual::snowForJump(seed);
+        }
+        audit::require(snowy > 14500 && snowy < 15500, "Snowfall probability differs from 15 percent");
+        for (double angle : {0.0, sjp::PI / 4, sjp::PI / 2, sjp::PI, -sjp::PI / 2, -sjp::PI / 4}) {
+            sjp::Frame f;
+            f.windAngle = float(angle);
+            f.windSpeed = 3;
+            const auto wind = sjp::visual::windDirection(f);
+            const auto tail = sjp::visual::windsockPoint(f, 2, 1);
+            audit::require(sjp::dot(tail.normalized(), wind) > .98,
+                           "Windsock disagrees with displayed wind direction");
+            const auto drift = sjp::visual::snowDrift(wind * f.windSpeed, 10);
+            audit::require(sjp::dot(drift, wind) >= 0 && drift.z == 0, "Snow drifts against displayed wind");
+            f.windSpeed = 0;
+            const auto calm = sjp::visual::windsockPoint(f, 2, 1);
+            audit::require(calm.x == 0 && calm.y < 0 && calm.z == 0, "Calm windsock does not hang down");
+        }
+        std::cout << "weather_samples=" << weatherSamples << " snowy_jumps=" << snowy << '\n';
         size_t frames = 0, leaks = 0;
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
@@ -438,6 +475,7 @@ int main() {
                 sjp::Simulation s(hi, 0);
                 s.resetOriginal(hi, 12345, 98765);
                 s.setWind(0, 0);
+                r.setJumpWeather(12345 + uint32_t(hi));
                 std::vector<sjp::Frame> samples{s.frame()};
                 for (int t = 0; t < 14000 && s.phase != sjp::Phase::Finished; ++t) {
                     sjp::Input in;
@@ -530,9 +568,64 @@ int main() {
             audit::require(audit::nextList == third + 2 && !audit::lists.count(first) &&
                                audit::lists.count(third),
                            "Evicted venue was not rebuilt correctly");
+            const auto beforeCompletion = audit::completedFrames;
+            r.setSynchronousRendering(true);
+            visit(0);
+            visit(1);
+            audit::require(audit::completedFrames == beforeCompletion + 2,
+                           "Synchronous frames left graphics work pending");
+            r.setSynchronousRendering(false);
+            visit(2);
+            audit::require(audit::completedFrames == beforeCompletion + 2,
+                           "Normal rendering unexpectedly forced completion");
         }
         audit::require(audit::lists.empty() && audit::textures.empty(),
                        "Repeated renderer lifetime leaked resources");
+        {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(2, 0);
+            uint32_t wet = 0, dry = 0;
+            while (!sjp::visual::snowForJump(wet))
+                ++wet;
+            while (sjp::visual::snowForJump(dry))
+                ++dry;
+            const auto input = sim.frame();
+            const auto hashAt = [&](uint32_t seed, float windAngle, float elapsed, double wallTime) {
+                r.setJumpWeather(seed);
+                auto f = input;
+                f.windSpeed = 3;
+                f.windAngle = windAngle;
+                f.elapsed = elapsed;
+                r.resetCamera();
+                r.begin(sim.hill(), f, wallTime, 0, false); // Ensure the terrain is cached.
+                r.resetCamera();
+                const auto vertices = audit::particleVertices;
+                audit::particlePositionHash = 1469598103934665603ULL;
+                r.begin(sim.hill(), f, wallTime, 0, false);
+                audit::balanced();
+                // Fan meshes contain snow and the unchanged jumper shadow;
+                // skip trees, flags and crowd animation driven by wall time.
+                return std::pair<size_t, uint64_t>{audit::particleVertices - vertices,
+                                                   audit::particlePositionHash};
+            };
+            const auto noSnow = hashAt(dry, 0, 0, 0);
+            const auto snow = hashAt(wet, 0, 0, 0);
+            audit::require(snow.first > noSnow.first && snow.first - noSnow.first <= 800,
+                           "Light snowfall missing or particle budget exceeded");
+            audit::require(hashAt(wet, 0, 0, 90) == snow, "Paused snowfall changes with wall clock");
+            audit::require(hashAt(wet, float(sjp::PI), 0, 0).second != snow.second,
+                           "Snowfall ignores wind direction");
+            for (float seconds : {1.f, 30.f, 80.f, 150.f}) {
+                const auto snowyFrame = hashAt(wet, 0, seconds, seconds);
+                const auto clearFrame = hashAt(dry, 0, seconds, seconds);
+                audit::require(snowyFrame.first > clearFrame.first, "Snowfall stops during a selected jump");
+            }
+            const auto after = sim.frame();
+            audit::require(input.x == after.x && input.y == after.y && input.pose == after.pose &&
+                               input.windAngle == after.windAngle && input.windSpeed == after.windSpeed &&
+                               sim.originalCounter == 1,
+                           "Visual weather mutated the simulation");
+        }
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");
         audit::require(audit::maximumLists <= 2, "Terrain cache retains more than two venues");
         std::cout << "PASS: finite commands, balanced stacks, bounded cache, live current attributes, "

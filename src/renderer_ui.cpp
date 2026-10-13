@@ -166,6 +166,8 @@ void Renderer::windArrow(float x, float y, double speed, double angle) {
     line(x + 17 * dx, y + 17 * dy, x + 9 * dx + 7 * dy, y + 9 * dy - 7 * dx, colors::teal, 2);
 }
 void Renderer::finish() {
+    if (synchronousRendering)
+        glFinish();
     SDL_GL_SwapWindow(window);
 }
 void Renderer::capture(const std::string &path) {

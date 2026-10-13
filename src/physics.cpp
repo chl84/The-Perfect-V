@@ -595,7 +595,10 @@ void Simulation::tick(const Input &in) {
         vy = -next.vyDown;
         // Source2d7e9 preserves height at the board crossing even after a
         // failed jump. A fallen skier can leave the board during the outrun.
-        bool crossedBoard = beforeX < 0 && x > 0;
+        // A float32 integration step can land exactly at x=0. Include that
+        // position when the following step leaves the board; otherwise a CPU
+        // can remain in Inrun all the way through the landing slope.
+        bool crossedBoard = beforeX <= 0 && x > 0;
         y = crossedBoard ? beforeY : x <= 0 ? hill().inrun(x) : hill().ground(x);
         double surface = x <= 0 ? hill().inrun(x) : hill().ground(x);
         bool aboveSurface = y > surface;

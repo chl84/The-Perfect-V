@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "original_skeleton.h"
+#include "visual_weather.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -47,6 +48,29 @@ void sphere(Vec3 p, double r, Color c) {
                 glNormal3d(n.x, n.y, n.z);
                 vertex(p + n * r);
             }
+        glEnd();
+    }
+}
+// A small open, tapered cloth tube. Its tail follows the same displayed angle
+// as the HUD arrow; only gentle sag and flutter change the drawn geometry.
+void windsock(Vec3 origin, const Frame &frame, double time) {
+    constexpr int sections = 6, sides = 8;
+    for (int section = 0; section < sections; ++section) {
+        const Vec3 axis = (visual::windsockPoint(frame, time, (section + 1) / double(sections)) -
+                           visual::windsockPoint(frame, time, section / double(sections))).normalized();
+        const Vec3 up = cross(axis, {0, 0, 1}).normalized(), side = cross(up, axis).normalized();
+        col(section % 2 ? Color{.94f, .93f, .87f, 1} : colors::orange);
+        glBegin(GL_QUAD_STRIP);
+        for (int corner = 0; corner <= sides; ++corner) {
+            const double angle = corner * 2 * PI / sides;
+            const Vec3 normal = side * std::cos(angle) + up * std::sin(angle);
+            glNormal3d(normal.x, normal.y, normal.z);
+            for (int end : {section, section + 1}) {
+                const double fraction = end / double(sections);
+                const double radius = .23 - fraction * .16;
+                vertex(origin + visual::windsockPoint(frame, time, fraction) + normal * radius);
+            }
+        }
         glEnd();
     }
 }
@@ -338,8 +362,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sphere({gx, gy + 2.7, -3}, .22, ready ? blink ? colors::ink : colors::teal : colors::orange);
     double wx = 10 * s, wy = h.ground(wx) + 10;
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
-    Vec3 end{wx - 2.2, wy - .3 - std::sin(time * 3) * .12, -23 * s};
-    beam({wx, wy, -23 * s}, end, .23, colors::orange);
+    windsock({wx, wy, -23 * s}, f, f.elapsed);
     const Frame display = displayedAthleteFrame(h, f);
     jumperShadow(h, display);
     athlete(h, display, false);
@@ -348,7 +371,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
         athlete(h, displayedAthleteFrame(h, *gf), true);
         glDepthMask(GL_TRUE);
     }
-    effects(h, display, time);
+    effects(h, display, time, !panorama);
     glDisable(GL_FOG);
     glDisable(GL_LIGHTING);
 }

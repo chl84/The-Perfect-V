@@ -38,6 +38,8 @@ class Renderer {
     void finish();
     void capture(const std::string &path);
     void resetCamera() { cameraInit = false; }
+    void setJumpWeather(uint32_t seed);
+    void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
     int width = 1440, height = 900;
     float uiScale = 1, offsetX = 0, offsetY = 0;
     std::string device;
@@ -63,7 +65,9 @@ class Renderer {
     void terrain(const Hill &);
     void scenery(const Hill &, const Frame &, double time);
     void athlete(const Hill &, const Frame &, bool ghost);
-    void effects(const Hill &, const Frame &, double time);
+    void effects(const Hill &, const Frame &, double time, bool showWeather);
+    bool snowfall = false;
+    uint32_t snowfallSeed = 0;
     struct VisualParticle {
         Vec3 origin, velocity;
         double born = 0, lifetime = 1, size = .04;
@@ -72,5 +76,6 @@ class Renderer {
     Frame lastEffectFrame{};
     std::string effectHill;
     bool effectsInitialized = false;
+    bool synchronousRendering = false;
 };
 } // namespace sjp
