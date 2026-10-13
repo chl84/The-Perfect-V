@@ -165,8 +165,11 @@ vectors are drawing inputs and are never fed back into the simulation.
 
 Light snowfall is selected once per jump with approximately 15 percent probability,
 using a cosmetic hash of the existing jump seed without advancing gameplay RNG.
-A selected jump keeps snowfall throughout; at most 100 atmospheric flakes are
-rendered, with weak wind drift and a mostly downward fall. Their animation uses
-the frame/replay clock, so pause freezes flakes and seeking is repeatable. Menus
+A selected jump keeps snowfall throughout. A compact world-space volume considers
+at most 225 atmospheric flakes and draws only those inside the camera view.
+Sizes and fall speeds vary, with weak wind drift and a mostly downward fall;
+small screen footprints keep them readable without large foreground dots. Soft
+volume and lifetime fades prevent popping, and no extra textures are used. Their
+animation uses the frame/replay clock, so pause freezes flakes and seeking is repeatable. Menus
 do not display jump snowfall. Original replays reuse their seed; native recordings
 without original metadata use a stable visual hash of their recorded frames.

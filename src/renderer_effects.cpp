@@ -240,24 +240,50 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
     // The replay clock freezes flakes on pause and makes seeking repeatable.
     if (snowfall && showWeather) {
         const uint32_t venue = venuePattern(h.id) ^ snowfallSeed;
-        const int cellX = int(std::floor(target.x / 18)), cellZ = int(std::floor(target.z / 18));
+        constexpr double cellSize = 8;
+        // A compact 3D volume covers the view at the gate, in flight and in
+        // every camera. Its world-space cells never move with the athlete.
+        // At most 5 * 5 * 3 * 3 = 225 flakes are considered; only visible ones
+        // reach the existing billboard batch. No textures or emitted state.
+        const Vec3 center = (eye + target) * .5;
+        const int cellX = int(std::floor(center.x / cellSize)),
+                  cellY = int(std::floor(center.y / cellSize)),
+                  cellZ = int(std::floor(center.z / cellSize));
+        const double halfFov = std::tan(48 * PI / 360), aspect = double(width) / height;
         for (int xCell = cellX - 2; xCell <= cellX + 2; ++xCell)
             for (int zCell = cellZ - 2; zCell <= cellZ + 2; ++zCell)
-                for (int i = 0; i < 4; ++i) {
-                    const double seed = double(venue % 997) + xCell * 197 + zCell * 71 + i * 23;
-                    const double rate = .043 + pattern(seed) * .02;
-                    const double cycle = std::fmod(std::max(0.0, clock) * rate + pattern(seed + 1), 1.0);
-                    const double driftClock = cycle / rate;
-                    const double baseX = xCell * 18 + pattern(seed + 2) * 18;
-                    const Vec3 drift = visual::snowDrift(wind, driftClock);
-                    const double x = baseX + drift.x, z = zCell * 18 + pattern(seed + 3) * 18;
-                    const double y = snowSurface(baseX) + 4 + (1 - cycle) * 27 + drift.y;
-                    const Vec3 position{x, y, z};
-                    const double distance = (position - eye).length();
-                    const double nearFade = clamp((distance - 3) / 5, 0.0, 1.0);
-                    powder(position, right, up, .05 + pattern(seed + 4) * .035,
-                           .56 * nearFade * std::sin(cycle * PI));
-                }
+                for (int yCell = cellY - 1; yCell <= cellY + 1; ++yCell)
+                    for (int i = 0; i < 3; ++i) {
+                        const double seed = double(venue % 997) + xCell * 197 + zCell * 71 + yCell * 311 + i * 23;
+                        const double rate = .13 + pattern(seed) * .075;
+                        const double cycle = std::fmod(std::max(0.0, clock) * rate + pattern(seed + 1), 1.0);
+                        const Vec3 drift = visual::snowDrift(wind, cycle / rate);
+                        const Vec3 position{xCell * cellSize + pattern(seed + 2) * cellSize + drift.x +
+                                                .18 * std::sin(clock * .8 + seed),
+                                            yCell * cellSize + (1 - cycle) * cellSize + drift.y,
+                                            zCell * cellSize + pattern(seed + 3) * cellSize +
+                                                .15 * std::sin(clock * .65 + seed * 1.7)};
+                        if (position.y < snowSurface(position.x) + .04)
+                            continue;
+                        const Vec3 relative = position - eye;
+                        const double depth = dot(relative, forward);
+                        if (depth <= 1 || std::abs(dot(relative, right)) > depth * halfFov * aspect + .2 ||
+                            std::abs(dot(relative, up)) > depth * halfFov + .2)
+                            continue;
+                        // Fade at continuous volume boundaries, so crossing a
+                        // cell boundary or changing camera cannot pop flakes in.
+                        const double edgeFade = clamp((16 - std::abs(position.x - center.x)) / 5, 0.0, 1.0) *
+                                                clamp((16 - std::abs(position.z - center.z)) / 5, 0.0, 1.0) *
+                                                clamp((8 - std::abs(position.y - center.y)) / 3, 0.0, 1.0);
+                        const double lifeFade = clamp(cycle / .12, 0.0, 1.0) * clamp((1 - cycle) / .12, 0.0, 1.0);
+                        const double nearFade = clamp((depth - 1) / 1.5, 0.0, 1.0);
+                        // Keep distant flakes readable and cap nearby ones at
+                        // a small screen footprint, avoiding giant white dots.
+                        const double radius = std::min(depth * .0035, std::max(.055 + pattern(seed + 4) * .075,
+                                                                            depth * .0013));
+                        powder(position, right, up, radius,
+                               (.8 + pattern(seed + 5) * .15) * edgeFade * lifeFade * nearFade);
+                    }
     }
     sjp::gfx::popAttrib();
 }

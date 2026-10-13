@@ -675,18 +675,20 @@ int main() {
             while (sjp::visual::snowForJump(dry))
                 ++dry;
             const auto input = sim.frame();
-            const auto hashAt = [&](uint32_t seed, float windAngle, float elapsed, double wallTime) {
+            const auto hashAt = [&](uint32_t seed, float windAngle, float elapsed, double wallTime,
+                                    int camera = 0, float height = 0) {
                 r.setJumpWeather(seed);
                 auto f = input;
                 f.windSpeed = 3;
                 f.windAngle = windAngle;
                 f.elapsed = elapsed;
+                f.y += height;
                 r.resetCamera();
-                r.begin(sim.hill(), f, wallTime, 0, false); // Ensure the terrain is cached.
+                r.begin(sim.hill(), f, wallTime, camera, false); // Ensure the terrain is cached.
                 r.resetCamera();
                 const auto vertices = audit::particleVertices;
                 audit::particlePositionHash = 1469598103934665603ULL;
-                r.begin(sim.hill(), f, wallTime, 0, false);
+                r.begin(sim.hill(), f, wallTime, camera, false);
                 audit::balanced();
                 // Fan meshes contain snow and the unchanged jumper shadow;
                 // skip trees, flags and crowd animation driven by wall time.
@@ -695,7 +697,7 @@ int main() {
             };
             const auto noSnow = hashAt(dry, 0, 0, 0);
             const auto snow = hashAt(wet, 0, 0, 0);
-            audit::require(snow.first > noSnow.first && snow.first - noSnow.first <= 800,
+            audit::require(snow.first > noSnow.first && snow.first - noSnow.first <= 1800,
                            "Light snowfall missing or particle budget exceeded");
             audit::require(hashAt(wet, 0, 0, 90) == snow, "Paused snowfall changes with wall clock");
             audit::require(hashAt(wet, float(sjp::PI), 0, 0).second != snow.second,
@@ -705,6 +707,15 @@ int main() {
                 const auto clearFrame = hashAt(dry, 0, seconds, seconds);
                 audit::require(snowyFrame.first > clearFrame.first, "Snowfall stops during a selected jump");
             }
+            for (int camera = 0; camera < 3; ++camera)
+                for (float height : {0.f, 12.f}) {
+                    const auto wetView = hashAt(wet, 0, 35, 35, camera, height);
+                    const auto dryView = hashAt(dry, 0, 35, 35, camera, height);
+                    audit::require(wetView.first > dryView.first && wetView.first - dryView.first <= 1800,
+                                   "Snow must remain visible and bounded in every camera and above the hill");
+                    audit::require(hashAt(wet, 0, 35, 90, camera, height) == wetView,
+                                   "Paused snowfall changes in another camera or above the hill");
+                }
             const auto after = sim.frame();
             audit::require(input.x == after.x && input.y == after.y && input.pose == after.pose &&
                                input.windAngle == after.windAngle && input.windSpeed == after.windSpeed &&
