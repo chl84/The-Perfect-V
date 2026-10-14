@@ -86,6 +86,8 @@ class Renderer {
     void terrain(const Hill &);
     void hillRecordMarker(const Hill &);
     void inrunStructure(const Hill &, const visual::InrunLayout &);
+    void startSignalHousing(const Hill &);
+    void startSignalLenses(const Hill &, const Frame &);
     void scenery(const Hill &, const Frame &, double time);
     void athlete(const Hill &, const Frame &, bool ghost);
     void effects(const Hill &, const Frame &, double time, bool showWeather);

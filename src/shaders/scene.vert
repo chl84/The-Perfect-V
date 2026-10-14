@@ -32,6 +32,10 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 inrunDirectionCone[10];
     vec4 inrunParameters; // first X, inverse spacing, inverse attenuation distance squared, columns
     vec4 inrunColor;      // color, intensity
+    vec4 signalPositionRange;
+    vec4 signalDirectionCone;
+    vec4 signalColor;      // color, intensity
+    vec4 signalParameters; // world X, inverse attenuation distance squared, reserved
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -102,8 +106,23 @@ vec3 inrunDiffuse(vec3 eye, vec3 n, float worldX) {
     return state.inrunColor.rgb * (state.inrunColor.w * intensity);
 }
 
+vec3 signalDiffuse(vec3 eye, vec3 n, float worldX) {
+    float dx = worldX - state.signalParameters.x;
+    if (state.signalColor.w == 0.0 || dx * dx * state.signalPositionRange.w >= 1.0)
+        return vec3(0.0);
+    vec3 delta = state.signalPositionRange.xyz - eye;
+    float d2 = dot(delta, delta), range = 1.0 - d2 * state.signalPositionRange.w;
+    if (range <= 0.0 || d2 < 0.0001)
+        return vec3(0.0);
+    vec3 l = delta * inversesqrt(d2);
+    float beam = smoothstep(state.signalDirectionCone.w, 0.90, dot(-l, state.signalDirectionCone.xyz));
+    float intensity = state.signalColor.w * beam * range * range * max(dot(n, l), 0.0) /
+                      (1.0 + d2 * state.signalParameters.y);
+    return state.signalColor.rgb * intensity;
+}
+
 vec3 localDiffuse(vec3 eye, vec3 n) {
-    if (state.arenaParameters.w == 0.0 && state.inrunColor.w == 0.0)
+    if (state.arenaParameters.w == 0.0 && state.inrunColor.w == 0.0 && state.signalColor.w == 0.0)
         return vec3(0.0);
     float worldX = dot(state.arenaAxis, vec4(eye, 1.0));
     // Inrun sources end at x=-2.5 with a 14 m range; arena sources begin
@@ -113,7 +132,7 @@ vec3 localDiffuse(vec3 eye, vec3 n) {
         // terrain/forest vertices therefore skip both light evaluations.
         if (abs(dot(state.worldZAxis, vec4(eye, 1.0))) > 17.3)
             return vec3(0.0);
-        return inrunDiffuse(eye, n, worldX);
+        return inrunDiffuse(eye, n, worldX) + signalDiffuse(eye, n, worldX);
     }
     return arenaDiffuse(eye, n, worldX);
 }

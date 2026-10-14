@@ -78,6 +78,67 @@ void skiEndContact() {
     frame.crashed = 0;
     require(check(hill, frame).y == frame.y, "Ski allowance affects non-falling jumps");
 }
+void inrunFalls() {
+    size_t contactSamples = 0;
+    using J = sjp::OriginalJoint;
+    for (int hill = 0; hill < int(sjp::HILL_COUNT); ++hill) {
+        sjp::Simulation sim(hill, 0), control(hill, 0);
+        sim.resetOriginal(hill, 12345, 98765);
+        control.resetOriginal(hill, 12345, 98765);
+        const sjp::visual::CameraSurface snow(sim.hill());
+        bool inrunFall = false;
+        auto previous = sim.frame();
+        for (int tick = 0; tick < 14000 && sim.phase != sjp::Phase::Finished; ++tick) {
+            sjp::Input input;
+            input.start = sim.phase == sjp::Phase::Ready;
+            input.takeoff = sim.originalStage == 3 && sim.x > -std::max(1.0, sim.vx) * 3;
+            sim.step(sjp::ORIGINAL_TICK, input);
+            control.step(sjp::ORIGINAL_TICK, input);
+            const auto frame = sim.frame(), untouched = control.frame();
+            unchangedFields(frame, untouched);
+            require(frame.y == untouched.y && sim.originalStage == control.originalStage &&
+                        sim.result.total == control.result.total &&
+                        sim.frames.size() == control.frames.size(),
+                    "Inrun presentation changed physics, RNG, scoring or replay trajectory");
+            if (frame.crashed && frame.x < 0)
+                inrunFall = true;
+            if (frame.crashed && (frame.x < 5 || tick % 47 == 0)) {
+                for (const auto &sample : {frame, sjp::interpolateFrame(previous, frame, .5)}) {
+                    const auto displayed = check(sim.hill(), sample);
+                    const auto skeleton = sample.hasRenderSkeleton
+                                              ? sjp::OriginalSkeleton{sample.renderSkeleton}
+                                              : sjp::originalSkeleton(sample.pose, sample.leadingLeg);
+                    for (J joint : {J::Head, J::ShoulderCenter, J::HipCenter, J::Knee1, J::Knee2, J::Elbow1,
+                                    J::Elbow2, J::Hand1, J::Hand2}) {
+                        const auto point = skeleton[joint] + sjp::Vec3{sample.x, displayed.y, 0};
+                        if (point.x >= sim.hill().inrunStart() && point.x <= 0 && std::abs(point.z) < 2.3) {
+                            require(point.y >= snow.height(point.x, point.z) - .0001,
+                                    "Fallen body/head remains below the inrun snow");
+                            ++contactSamples;
+                        }
+                    }
+                    auto airborne = sample;
+                    airborne.y += 100;
+                    require(check(sim.hill(), airborne).y == airborne.y, "Airborne inrun fall was moved");
+                }
+            }
+            previous = frame;
+        }
+        require(inrunFall && sim.phase == sjp::Phase::Finished, "Missing complete original inrun fall");
+        // The same pose follows a continuous outgoing tangent on either side
+        // of x=0. Contact uses any parts still over the actual takeoff deck.
+        auto before = sim.frame(), after = before;
+        before.x = -.0001f;
+        before.y = float(sim.hill().inrun(before.x));
+        after.x = .0001f;
+        after.y = float(sim.hill().inrun(0) + sim.hill().inrunSlope(0) * after.x);
+        require(std::abs(check(sim.hill(), before).y - check(sim.hill(), after).y) < .005,
+                "Visual fall pops at the inrun-to-flight boundary");
+    }
+    require(contactSamples > 1000, "Inrun body/head contact was not exercised on all hills");
+    std::cout << "Original inrun falls on all 32 hills: " << contactSamples
+              << " body/head contact samples; unchanged physics/wind/RNG, continuous board crossing\n";
+}
 } // namespace
 // The CPU contact calculation must work without a window or graphics context.
 namespace sjp::gfx {
@@ -99,6 +160,7 @@ void translated(double, double, double) { ++drawCalls; }
 int main() {
     try {
         skiEndContact();
+        inrunFalls();
         size_t samples = 0;
         double maximumLift = 0;
         for (int hill = 0; hill < int(sjp::HILL_COUNT); ++hill) {

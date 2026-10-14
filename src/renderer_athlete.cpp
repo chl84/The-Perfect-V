@@ -12,15 +12,17 @@ struct FallContact {
     const Hill &hill;
     Vec3 origin;
     double start, step, firstX, lift = 0;
+    double rampStep, rampFirstX = 0;
     bool skiSurface = false;
     Vec3 skiAnkle, skiDirection;
     std::vector<double> heights;
+    std::vector<double> rampHeights;
     sjp::gfx::Enum mode = sjp::gfx::QUADS;
     size_t count = 0;
     std::array<Vec3, 4> face{};
     FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton)
         : hill(h), origin{f.x, f.y, 0}, start(std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale())),
-          step(3 * h.scale()) {
+          step(3 * h.scale()), rampStep(2 * h.scale()) {
         double low = skeleton.points[0].x, high = low;
         for (auto p : skeleton.points) {
             low = std::min(low, p.x);
@@ -31,8 +33,15 @@ struct FallContact {
         heights.reserve(count);
         for (size_t i = 0; i < count; ++i)
             heights.push_back(h.ground(firstX + i * step));
+        if (f.x + low - .6 <= 0 && f.x + high + .6 >= h.inrunStart()) {
+            rampFirstX = h.inrunStart() + std::floor((f.x + low - .6 - h.inrunStart()) / rampStep) * rampStep;
+            const size_t rampCount = size_t(std::ceil((f.x + high + .6 - rampFirstX) / rampStep)) + 2;
+            rampHeights.reserve(rampCount);
+            for (size_t i = 0; i < rampCount; ++i)
+                rampHeights.push_back(h.inrun(std::min(0.0, rampFirstX + i * rampStep)));
+        }
     }
-    double surface(double x, double z) const {
+    double terrainSurface(double x, double z) const {
         const long i = long(std::floor((x - firstX) / step));
         const double x0 = firstX + i * step, u = (x - x0) / step;
         auto height = [&](long index) {
@@ -52,6 +61,22 @@ struct FallContact {
                      dd = node(x0 + step, z0, b);
         return v >= u ? aa * (1 - v) + bb * (v - u) + cc * u : aa * (1 - u) + cc * v + dd * (u - v);
     }
+    double surface(double x, double z) const {
+        double y = terrainSurface(x, z);
+        if (rampHeights.empty() || x < hill.inrunStart() || x > 0 || std::abs(z) > 2.3)
+            return y;
+        // Read the track's existing 2*scale snow quads, including the shorter
+        // final quad at the board. Never extend or move the track itself.
+        const long i = long(std::floor((x - rampFirstX) / rampStep));
+        const double a = rampFirstX + i * rampStep, b = std::min(0.0, a + rampStep);
+        auto height = [&](long index) {
+            return index >= 0 && size_t(index) < rampHeights.size()
+                       ? rampHeights[size_t(index)]
+                       : hill.inrun(std::min(0.0, rampFirstX + index * rampStep));
+        };
+        const double t = b > a ? (x - a) / (b - a) : 0;
+        return std::max(y, height(i) * (1 - t) + height(i + 1) * t);
+    }
     void measure(Vec3 local) {
         const Vec3 p = local + origin;
         // Only the distant ski ends may press into snow during a fall. Keep
@@ -67,14 +92,41 @@ struct FallContact {
     void edge(Vec3 a, Vec3 b) {
         // A triangle edge can cross a terrain-grid bend between its endpoints.
         // Sample those crossings as well, retaining the original height grid.
-        if (std::abs(b.x - a.x) < 1e-10)
-            return;
-        const double low = std::min(a.x, b.x) + origin.x;
-        const double high = std::max(a.x, b.x) + origin.x;
-        for (double x = firstX + std::ceil((low - firstX) / step) * step; x < high; x += step) {
-            const double t = (x - origin.x - a.x) / (b.x - a.x);
-            measure(a + (b - a) * t);
+        const Vec3 delta = b - a;
+        if (std::abs(delta.x) >= 1e-10) {
+            const double low = std::min(a.x, b.x) + origin.x;
+            const double high = std::max(a.x, b.x) + origin.x;
+            for (double x = firstX + std::ceil((low - firstX) / step) * step; x < high; x += step) {
+                const double t = (x - origin.x - a.x) / delta.x;
+                measure(a + delta * t);
+            }
+            if (!rampHeights.empty()) {
+                auto trackCrossing = [&](double x) {
+                    if (x <= low || x >= high || x < hill.inrunStart() || x > 0)
+                        return;
+                    const double t = (x - origin.x - a.x) / delta.x;
+                    auto point = a + delta * t;
+                    point.x = x - origin.x;
+                    measure(point);
+                };
+                for (double x = rampFirstX + std::ceil((low - rampFirstX) / rampStep) * rampStep; x < high;
+                     x += rampStep)
+                    trackCrossing(x);
+                trackCrossing(hill.inrunStart());
+                trackCrossing(0);
+            }
         }
+        // A limb/ski can cross a track side even with no travel-axis extent.
+        if (!rampHeights.empty() && std::abs(delta.z) >= 1e-10)
+            for (double z : {-2.3, 2.3}) {
+                const double t = (z - a.z) / delta.z;
+                if (t > 0 && t < 1) {
+                    auto point = a + delta * t;
+                    point.z = z;
+                    if (point.x + origin.x >= hill.inrunStart() && point.x + origin.x <= 0)
+                        measure(point);
+                }
+            }
     }
     void begin(sjp::gfx::Enum primitive) {
         mode = primitive;
@@ -354,12 +406,12 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
 
 Frame displayedAthleteFrame(const Hill &h, const Frame &f) {
     Frame display = f;
-    if (!f.crashed || f.x <= 0 || (Phase(f.phase) != Phase::Outrun && Phase(f.phase) != Phase::Finished))
+    if (!f.crashed || (Phase(f.phase) != Phase::Outrun && Phase(f.phase) != Phase::Finished))
         return display;
     auto pose = f.pose;
     if (pose[18] == 0 && pose[20] == 0) {
         OriginalPose fallback;
-        fallback.reset(std::atan(h.slope(f.x)));
+        fallback.reset(std::atan(f.x <= 0 ? h.inrunSlope(f.x) : h.slope(f.x)));
         std::copy(fallback.angles.begin(), fallback.angles.end(), pose.begin());
         std::copy(fallback.offsets.begin(), fallback.offsets.end(), pose.begin() + 18);
     }

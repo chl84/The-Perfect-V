@@ -1,5 +1,6 @@
 #include "renderer.h"
 #include "render_batch.h"
+#include "visual_start_signal.h"
 #include <algorithm>
 
 namespace sjp {
@@ -210,6 +211,111 @@ void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) 
     visual::materialfv(gfx::FRONT_AND_BACK, gfx::EMISSION, emission);
     for (int light = 0; light < layout.lightColumns; ++light)
         lightGlass(layout.lights[size_t(light)]);
+    visual::popAttrib();
+}
+void Renderer::startSignalHousing(const Hill &h) {
+    const visual::StartSignal signal(h, Frame{});
+    const Vec3 up{0, 1, 0};
+    constexpr Color shell{.055f, .062f, .069f, 1}, rim{.035f, .041f, .047f, 1},
+        inside{.018f, .022f, .027f, 1};
+    visual::pushAttrib(gfx::LIGHTING_BIT | gfx::CURRENT_BIT | gfx::TEXTURE_BIT | gfx::ENABLE_BIT);
+    visual::disable(gfx::TEXTURE_2D);
+    const float noEmission[]{0, 0, 0, 1}, specular[]{.035f, .035f, .035f, 1};
+    visual::materialfv(gfx::FRONT_AND_BACK, gfx::EMISSION, noEmission);
+    visual::materialfv(gfx::FRONT_AND_BACK, gfx::SPECULAR, specular);
+    visual::materialf(gfx::FRONT_AND_BACK, gfx::SHININESS, 8);
+    beam(signal.base, signal.base + up * 3.08, .045, {.17f, .21f, .23f, 1});
+    auto local = [&](double x, double y, double depth) {
+        return signal.center + signal.right * x + up * y + signal.front * depth;
+    };
+    const std::array<std::array<double, 2>, 8> corners{{{-.17, -.50},
+                                                        {.17, -.50},
+                                                        {.21, -.46},
+                                                        {.21, .46},
+                                                        {.17, .50},
+                                                        {-.17, .50},
+                                                        {-.21, .46},
+                                                        {-.21, -.46}}};
+    for (int face : {-1, 1}) {
+        visual::color(shell.r, shell.g, shell.b, 1);
+        visual::begin(gfx::TRIANGLE_FAN);
+        visual::normal(signal.front.x * face, 0, signal.front.z * face);
+        vertex(local(0, 0, face * .085));
+        for (int i = 0; i <= 8; ++i) {
+            const auto &p = corners[size_t(face > 0 ? i % 8 : (8 - i) % 8)];
+            vertex(local(p[0], p[1], face * .085));
+        }
+        visual::end();
+    }
+    for (size_t i = 0; i < corners.size(); ++i) {
+        const auto &a = corners[i], &b = corners[(i + 1) % corners.size()];
+        quad(local(a[0], a[1], .085), local(a[0], a[1], -.085), local(b[0], b[1], -.085),
+             local(b[0], b[1], .085), shell);
+    }
+    for (double y : {-.34, .34})
+        box(local(0, y, -.105), {.25, .065, .12}, {.12f, .15f, .17f, 1});
+    for (int lens = 0; lens < 2; ++lens) {
+        const Vec3 center = signal.lens(lens);
+        auto circle = [&](double angle, double radius, double depth) {
+            return center + (signal.right * std::cos(angle) + up * std::sin(angle)) * radius +
+                   signal.front * depth;
+        };
+        for (int i = 0; i < 20; ++i) {
+            const double a = i * 2 * PI / 20, b = (i + 1) * 2 * PI / 20;
+            quad(circle(a, .162, .012), circle(a, .184, .012), circle(b, .184, .012), circle(b, .162, .012),
+                 rim);
+            quad(circle(a, .184, -.03), circle(b, .184, -.03), circle(b, .184, .012), circle(a, .184, .012),
+                 rim);
+        }
+        // Open-bottom visor: dark inner wall and a thin front lip. The
+        // glass stays recessed so the signal is brightest when viewed ahead.
+        for (int i = 0; i < 14; ++i) {
+            const double a = (-.13 + 1.26 * i / 14) * PI, b = (-.13 + 1.26 * (i + 1) / 14) * PI;
+            quad(circle(a, .186, 0), circle(b, .186, 0), circle(b, .186, .18), circle(a, .186, .18), rim);
+            quad(circle(b, .176, 0), circle(a, .176, 0), circle(a, .176, .18), circle(b, .176, .18), inside);
+            quad(circle(a, .176, .18), circle(a, .186, .18), circle(b, .186, .18), circle(b, .176, .18), rim);
+        }
+        for (int side : {-1, 1})
+            for (int row : {-1, 1})
+                box(center + signal.right * (side * .179) + up * (row * .179), {.015, .015, .015},
+                    {.25f, .28f, .30f, 1});
+    }
+    visual::popAttrib();
+}
+void Renderer::startSignalLenses(const Hill &h, const Frame &frame) {
+    const visual::StartSignal signal(h, frame);
+    visual::pushAttrib(gfx::LIGHTING_BIT | gfx::CURRENT_BIT);
+    const float specular[]{.08f, .08f, .08f, 1};
+    visual::materialfv(gfx::FRONT_AND_BACK, gfx::SPECULAR, specular);
+    visual::materialf(gfx::FRONT_AND_BACK, gfx::SHININESS, 24);
+    const Vec3 up{0, 1, 0};
+    for (int lens = 0; lens < 2; ++lens) {
+        const auto emission = signal.emission(lens);
+        visual::materialfv(gfx::FRONT_AND_BACK, gfx::EMISSION, emission.data());
+        const Color glass =
+            lens == 0 ? (signal.lit(lens) ? Color{.30f, .025f, .015f, 1} : Color{.085f, .012f, .008f, 1})
+                      : (signal.lit(lens) ? Color{.045f, .26f, .075f, 1} : Color{.012f, .065f, .025f, 1});
+        visual::color(glass.r, glass.g, glass.b, 1);
+        auto point = [&](double fraction, double angle) {
+            const Vec3 radial = signal.right * std::cos(angle) + up * std::sin(angle);
+            const Vec3 normal = (signal.front + radial * (2 * .028 * fraction / signal.radius)).normalized();
+            visual::normal(normal.x, normal.y, normal.z);
+            vertex(signal.lens(lens) + radial * (fraction * signal.radius) +
+                   signal.front * (.028 * (1 - fraction * fraction)));
+        };
+        visual::begin(gfx::TRIANGLE_FAN);
+        point(0, 0);
+        for (int i = 0; i <= 20; ++i)
+            point(.45, i * 2 * PI / 20);
+        visual::end();
+        for (const auto ring : {std::array<double, 2>{.45, .80}, std::array<double, 2>{.80, 1}}) {
+            visual::begin(gfx::QUAD_STRIP);
+            for (int i = 0; i <= 20; ++i)
+                for (double radius : ring)
+                    point(radius, i * 2 * PI / 20);
+            visual::end();
+        }
+    }
     visual::popAttrib();
 }
 } // namespace sjp

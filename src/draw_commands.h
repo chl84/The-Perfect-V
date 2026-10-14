@@ -24,6 +24,7 @@ void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX,
                  float strength, float attenuationDistance);
 void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
                  int columns, float strength, float attenuationDistance);
+void signalLight(const SpotLight &, const std::array<float, 4> &color, float attenuationDistance);
 
 inline constexpr Enum ALPHA = 0x1906;
 inline constexpr Enum AMBIENT = 0x1200;

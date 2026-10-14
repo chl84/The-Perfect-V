@@ -25,9 +25,10 @@ struct alignas(16) Uniforms {
     std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{}, worldZAxis{};
     std::array<std::array<float, 4>, 10> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
+    std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
     bool operator==(const Uniforms &other) const;
 };
-static_assert(sizeof(Uniforms) == 1120);
+static_assert(sizeof(Uniforms) == 1184);
 struct PipelineState {
     bool depthTest = false, depthWrite = true, blend = false, cull = false, offset = false;
     float offsetFactor = 0, offsetUnits = 0;

@@ -60,6 +60,7 @@ struct State {
     std::array<float, 4> arenaAxis{}, arenaParameters{}, arenaColor{}, worldZAxis{};
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
+    std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
 struct SavedState {
@@ -134,6 +135,10 @@ struct Context {
         u.inrunDirectionCone = state.inrunDirectionCone;
         u.inrunParameters = state.inrunParameters;
         u.inrunColor = state.inrunColor;
+        u.signalPositionRange = state.signalPositionRange;
+        u.signalDirectionCone = state.signalDirectionCone;
+        u.signalColor = state.signalColor;
+        u.signalParameters = state.signalParameters;
         return u;
     }
     void packet(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
@@ -475,6 +480,10 @@ void popAttrib() {
             s.inrunDirectionCone = old.inrunDirectionCone;
             s.inrunParameters = old.inrunParameters;
             s.inrunColor = old.inrunColor;
+            s.signalPositionRange = old.signalPositionRange;
+            s.signalDirectionCone = old.signalDirectionCone;
+            s.signalColor = old.signalColor;
+            s.signalParameters = old.signalParameters;
             s.specular = old.specular;
             s.emission = old.emission;
             s.shininess = old.shininess;
@@ -616,6 +625,20 @@ void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
             s.inrunPositionRange[i][3] = lights[i].positionRange[3];
             s.inrunDirectionCone[i][3] = lights[i].directionCone[3];
         }
+    });
+}
+void signalLight(const SpotLight &light, const std::array<float, 4> &color, float attenuationDistance) {
+    apply([=](Context &c) {
+        auto &s = c.state;
+        auto position = light.positionRange, direction = light.directionCone;
+        position[3] = 1;
+        direction[3] = 0;
+        s.signalPositionRange = transform(c.modelView, position);
+        s.signalDirectionCone = transform(c.modelView, direction);
+        s.signalPositionRange[3] = light.positionRange[3];
+        s.signalDirectionCone[3] = light.directionCone[3];
+        s.signalColor = color;
+        s.signalParameters = {light.positionRange[0], 1 / (attenuationDistance * attenuationDistance), 0, 0};
     });
 }
 void lightfv(Enum light, Enum property, const float *v) {

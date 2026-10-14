@@ -6,6 +6,7 @@
 #include "renderer.h"
 #include "visual_weather.h"
 #include "visual_shadow.h"
+#include "visual_start_signal.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -70,6 +71,40 @@ void singleShadow() {
     single.build(sjp::visual::shadowSilhouette(source), .025);
     overlap.build(sjp::visual::shadowSilhouette(changed), .025);
     require(single.coverage != overlap.coverage, "Shadow does not follow the displayed joints");
+}
+void startSignalLighting() {
+    using namespace sjp;
+    for (const auto &hill : hills()) {
+        Frame frame;
+        frame.phase = int(Phase::Ready);
+        const visual::StartSignal green(hill, frame);
+        const auto source = green.light().positionRange;
+        const Vec3 origin{source[0], source[1], source[2]};
+        require(green.lens(0).y > green.lens(1).y && green.base.z == -3 && green.base.x == hill.start() + 2 &&
+                    green.base.x + green.range < 12,
+                "Start signal is reversed, moved into the track or outside its light field");
+        const auto near = green.sample(origin + green.front, green.front * -1);
+        const auto distant = green.sample(origin + green.front * 4, green.front * -1);
+        require(near.y > .3 && near.y < .55 && distant.y > 0 && distant.y < near.y && near.y > near.x * 8 &&
+                    near.y > near.z * 5,
+                "Green signal light is missing, excessive, white or ignores distance");
+        require(green.sample(origin - green.front, green.front).length() == 0 &&
+                    green.sample(origin + green.front * 7, green.front * -1).length() == 0 &&
+                    green.sample(origin + green.front, green.front).length() == 0,
+                "Signal illuminates behind its housing, beyond range or through a surface");
+        frame.phase = int(Phase::Inrun);
+        const visual::StartSignal red(hill, frame);
+        const auto redSource = red.light().positionRange;
+        const Vec3 redOrigin{redSource[0], redSource[1], redSource[2]};
+        const auto redLight = red.sample(redOrigin + red.front, red.front * -1);
+        require(redLight.x > .3 && redLight.x > redLight.y * 20 && !red.lit(1) && red.lit(0),
+                "Red signal light does not come from the upper lens");
+        frame.phase = int(Phase::Ready);
+        frame.elapsed = 6;
+        const visual::StartSignal off(hill, frame);
+        require(off.lightColor()[3] == 0 && off.sample(origin + green.front, green.front * -1).length() == 0,
+                "Blinking signal emits real light during its off phase");
+    }
 }
 void floodlightsAndLandingShadow() {
     using namespace sjp;
@@ -243,8 +278,12 @@ void protectedSnow(int hill) {
         throw std::runtime_error("Protected terrain/track changed on " + sjp::hills()[size_t(hill)].name);
 }
 size_t signalVertices = 0;
-sjp::Vec3 signalCenter;
-std::array<float, 4> signalEmission{};
+std::array<sjp::Vec3, 2> signalCenters;
+sjp::Vec3 signalFront;
+std::array<size_t, 2> signalLensVertices{};
+std::array<std::array<float, 4>, 2> signalEmissions{};
+sjp::gfx::SpotLight startLight;
+std::array<float, 4> startLightColor{};
 struct Saved {
     sjp::gfx::Flags mask;
     Current value;
@@ -307,10 +346,15 @@ void position(double x, double y, double z) {
         }
     }
     if (captureSignal && !compiling && signalMaterial) {
-        require(std::abs((sjp::Vec3{x, y, z} - signalCenter).length() - .22) < 1e-8,
+        const sjp::Vec3 p{x, y, z};
+        const int lens = (p - signalCenters[0]).length() < (p - signalCenters[1]).length() ? 0 : 1;
+        const auto local = p - signalCenters[size_t(lens)];
+        const double depth = dot(local, signalFront), radial2 = dot(local, local) - depth * depth;
+        require(depth >= -1e-8 && depth <= .0280001 && radial2 <= .160001 * .160001,
                 "Start-signal emission leaks onto its post or other geometry");
         ++signalVertices;
-        signalEmission = currentEmission;
+        ++signalLensVertices[size_t(lens)];
+        signalEmissions[size_t(lens)] = currentEmission;
     }
     if (captureBoards && compiling && current.color == std::array<float, 4>{.40f, .32f, .26f, 1} &&
         current.normal[1] > .999999f)
@@ -641,6 +685,17 @@ void sjp::gfx::inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &light
     audit::inrunStrength = strength;
     audit::inrunColumns = columns;
 }
+void sjp::gfx::signalLight(const SpotLight &light, const std::array<float, 4> &color,
+                           float attenuationDistance) {
+    audit::command("signalLight inside a primitive", false);
+    for (const auto &values : {light.positionRange, light.directionCone, color})
+        for (float value : values)
+            audit::finite(value);
+    audit::require(light.positionRange[3] > 0 && attenuationDistance > 0 && color[3] >= 0 && color[3] <= 1,
+                   "Invalid signal light range or intensity");
+    audit::startLight = light;
+    audit::startLightColor = color;
+}
 void sjp::gfx::lightfv(sjp::gfx::Enum light, sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::lightfv inside sjp::gfx::begin", false);
     for (int i = 0; i < 4; ++i)
@@ -847,6 +902,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 
 int main() {
     try {
+        audit::startSignalLighting();
         audit::singleShadow();
         audit::floodlightsAndLandingShadow();
         audit::inrunConstruction();
@@ -1108,20 +1164,33 @@ int main() {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
             const auto before = sim.frame();
-            const double x = sim.hill().start() + 2;
-            audit::signalCenter = {x, sim.hill().inrun(x) + 2.7, -3};
+            const sjp::visual::StartSignal layout(sim.hill(), before);
+            audit::signalCenters = {layout.lens(0), layout.lens(1)};
+            audit::signalFront = layout.front;
             audit::captureSignal = true;
             const auto signalAt = [&](sjp::Phase phase, float elapsed, double wallTime) {
                 auto frame = before;
                 frame.phase = int32_t(phase);
                 frame.elapsed = elapsed;
                 audit::signalVertices = 0;
+                audit::signalLensVertices = {};
+                audit::signalEmissions = {};
                 r.begin(sim.hill(), frame, wallTime, 0, false);
                 r.finish();
                 audit::balanced();
-                audit::require(audit::signalVertices == 8 * 13 * 2 && !audit::signalMaterial,
+                audit::require(audit::signalVertices == 212 &&
+                                   audit::signalLensVertices == std::array<size_t, 2>{106, 106} &&
+                                   !audit::signalMaterial,
                                "Signal lens lost its material or failed to restore it");
-                return audit::signalEmission;
+                const sjp::visual::StartSignal expected(sim.hill(), frame);
+                audit::require(audit::startLight.positionRange == expected.light().positionRange &&
+                                   audit::startLight.directionCone == expected.light().directionCone &&
+                                   audit::startLightColor == expected.lightColor(),
+                               "Signal's real light does not follow its lens or blink");
+                const int active = phase == sjp::Phase::Ready ? 1 : 0;
+                audit::require(audit::signalEmissions[size_t(1 - active)] == std::array<float, 4>{},
+                               "Both signal lenses glow at once");
+                return audit::signalEmissions[size_t(active)];
             };
             for (int time = 0; time < 4; ++time)
                 for (int weather = 0; weather < 4; ++weather) {

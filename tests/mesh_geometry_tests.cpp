@@ -27,6 +27,13 @@ sjp::gfx::Matrix perspective(float aspect) {
 int main() {
     using namespace sjp::gfx;
     try {
+        const Uniforms unlit;
+        for (auto member : {&Uniforms::signalColor, &Uniforms::signalPositionRange,
+                            &Uniforms::signalDirectionCone, &Uniforms::signalParameters}) {
+            auto changed = unlit;
+            (changed.*member)[0] = 1;
+            require(!(changed == unlit), "Different signal lights can merge into the same draw packet");
+        }
         Mesh mesh;
         Vertex a, b, c, d;
         a.position = {-1, -1, -5};

@@ -3,6 +3,7 @@
 #include "original_skeleton.h"
 #include "visual_weather.h"
 #include "visual_shadow.h"
+#include "visual_start_signal.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -37,21 +38,6 @@ void beam(Vec3 a, Vec3 b, double r, Color c) {
     quad(a - right - up, b - right - up, b + right - up, a + right - up, c);
     quad(a - right + up, b - right + up, b - right - up, a - right - up, c);
     quad(a + right - up, b + right - up, b + right + up, a + right + up, c);
-}
-void sphere(Vec3 p, double r, Color c) {
-    col(c);
-    for (int i = 0; i < 8; i++) {
-        double a = -PI / 2 + i * PI / 8, b = a + PI / 8;
-        sjp::gfx::begin(sjp::gfx::QUAD_STRIP);
-        for (int j = 0; j <= 12; j++)
-            for (double k : {a, b}) {
-                double t = j * 2 * PI / 12;
-                Vec3 n{std::cos(k) * std::cos(t), std::sin(k), std::cos(k) * std::sin(t)};
-                sjp::gfx::normal3d(n.x, n.y, n.z);
-                vertex(p + n * r);
-            }
-        sjp::gfx::end();
-    }
 }
 // A small open, tapered cloth tube. Its tail follows the same displayed angle
 // as the HUD arrow; only gentle sag and flutter change the drawn geometry.
@@ -418,6 +404,8 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::inrunLights(inrun.lights, float(inrun.firstLightX), float(inrun.lightSpacing),
                          inrun.lightColumns, float(visual::InrunLayout::strength(sceneEnvironment.time)),
                          float(visual::InrunLayout::attenuationDistance));
+    const visual::StartSignal signal(h, f);
+    sjp::gfx::signalLight(signal.light(), signal.lightColor(), float(signal.attenuationDistance));
     sjp::gfx::enable(sjp::gfx::FOG);
     float fog[] = {float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1};
     sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, fog);
@@ -427,24 +415,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     terrain(h);
     hillRecordMarker(h);
     scenery(h, f, time);
-    // The start signal and the moving windsock.
-    double gx = h.start() + 2, gy = h.inrun(gx);
-    beam({gx, gy, -3}, {gx, gy + 2.6, -3}, .09, {.2f, .32f, .35f, 1});
-    bool ready = Phase(f.phase) == Phase::Ready;
-    bool blink = ready && f.elapsed >= 5 && std::fmod(f.elapsed, .7) > .35;
-    // Colored signal glass has fixed electrical emission, while its surface
-    // still receives daylight and reflections. The blink's off phase is dark.
-    const Color glass = ready ? Color{.045f, .26f, .075f, 1} : Color{.30f, .025f, .015f, 1};
-    const float signalEmission[]{blink ? 0.f : ready ? .035f : .48f,
-                                 blink ? 0.f : ready ? .47f : .016f,
-                                 blink ? 0.f : ready ? .07f : .008f, 0};
-    const float glassSpecular[]{.08f, .08f, .08f, 1};
-    sjp::gfx::pushAttrib(sjp::gfx::LIGHTING_BIT | sjp::gfx::CURRENT_BIT);
-    sjp::gfx::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::EMISSION, signalEmission);
-    sjp::gfx::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, glassSpecular);
-    sjp::gfx::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SHININESS, 24);
-    sphere({gx, gy + 2.7, -3}, .22, glass);
-    sjp::gfx::popAttrib();
+    startSignalLenses(h, f);
     double wx = 10 * s, wy = h.ground(wx) + 10;
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);

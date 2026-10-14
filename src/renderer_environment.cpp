@@ -996,6 +996,7 @@ void Renderer::terrain(const Hill &h) {
         }
     }
     inrunStructure(h, inrunLayouts[index]);
+    startSignalHousing(h);
     // The continuous service stairs share these short seat-area outriggers.
     // No additional overlapping/sloping platform covers their treads.
     {
