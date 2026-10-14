@@ -791,7 +791,7 @@ void texImage2D(Enum, int level, int, int width, int height, int, Enum format, E
     mip.width = width;
     mip.height = height;
     mip.pixels.resize(size_t(width) * height * 4);
-    const int channels = format == RGB ? 3 : (format == ALPHA || format == LUMINANCE ? 1 : 0);
+    const int channels = format == RGBA ? 4 : (format == RGB ? 3 : (format == ALPHA || format == LUMINANCE ? 1 : 0));
     if (!channels)
         throw std::runtime_error("Unsupported scene texture format");
     const size_t stride =
@@ -802,9 +802,9 @@ void texImage2D(Enum, int level, int, int width, int height, int, Enum format, E
             auto *out = mip.pixels.data() + (size_t(y) * width + x) * 4;
             const auto *in = pixels ? pixels + size_t(y) * stride + x * channels : nullptr;
             out[0] = format == ALPHA ? 255 : in ? in[0] : 0;
-            out[1] = format == RGB && in ? in[1] : out[0];
-            out[2] = format == RGB && in ? in[2] : out[0];
-            out[3] = format == ALPHA && in ? in[0] : 255;
+            out[1] = (format == RGB || format == RGBA) && in ? in[1] : out[0];
+            out[2] = (format == RGB || format == RGBA) && in ? in[2] : out[0];
+            out[3] = format == RGBA && in ? in[3] : (format == ALPHA && in ? in[0] : 255);
         }
 }
 void texParameteri(Enum, Enum property, int value) {

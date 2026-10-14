@@ -155,6 +155,43 @@ struct FallContact {
     }
 };
 thread_local FallContact *contactPass = nullptr;
+enum class Finish { Fabric, Rubber, Ski, Shell, Glass, Skin, Metal };
+void material(Finish finish) {
+    if (contactPass)
+        return; // Fall contact measurement must remain entirely free of drawing calls.
+    float gloss = .035f, shininess = 8;
+    switch (finish) {
+    case Finish::Rubber:
+        gloss = .025f;
+        shininess = 10;
+        break;
+    case Finish::Ski:
+        gloss = .19f;
+        shininess = 46;
+        break;
+    case Finish::Shell:
+        gloss = .25f;
+        shininess = 48;
+        break;
+    case Finish::Glass:
+        gloss = .52f;
+        shininess = 72;
+        break;
+    case Finish::Skin:
+        gloss = .045f;
+        shininess = 14;
+        break;
+    case Finish::Metal:
+        gloss = .20f;
+        shininess = 50;
+        break;
+    default:
+        break;
+    }
+    const float specular[]{gloss * .94f, gloss, gloss * 1.04f, 1};
+    gfx::materialfv(gfx::FRONT_AND_BACK, gfx::SPECULAR, specular);
+    gfx::materialf(gfx::FRONT_AND_BACK, gfx::SHININESS, shininess);
+}
 void emitBegin(sjp::gfx::Enum mode) {
     if (contactPass)
         contactPass->begin(mode);
@@ -290,6 +327,7 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     auto corner = [&](size_t section, double across, double height) {
         return centers[section] + basis.side * (widths[section] * across) + basis.up * height;
     };
+    material(Finish::Ski);
     emitBegin(sjp::gfx::QUADS);
     for (size_t section = 0; section < 2; ++section) {
         // Three adjacent top panels share their edges; stripes do not sit on
@@ -317,11 +355,13 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     emitEnd();
     if (contactPass)
         contactPass->skiSurface = false;
+    material(Finish::Metal);
     orientedBox(ankle + basis.up * .025, basis, {.37, .045, .14}, edge);
     orientedBox(ankle - basis.forward * .13 + basis.up * .067, basis, {.08, .09, .13}, accent);
     orientedBox(ankle + basis.forward * .13 + basis.up * .046, basis, {.085, .055, .14}, accent);
 }
 void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor, Color skin) {
+    material(Finish::Skin);
     ellipsoid(head - basis.up * .054 + basis.forward * .025, basis, {.145, .16, .135}, skin);
     constexpr std::array<double, 7> latitudes{-.32, .05, .36, .71, 1.1, 1.4, PI * .5};
     constexpr int slices = 16;
@@ -330,21 +370,39 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
                basis.up * (.207 * std::sin(latitude)) +
                basis.side * (.192 * std::cos(latitude) * std::sin(angle));
     };
-    emitBegin(sjp::gfx::QUADS);
-    for (size_t ring = 0; ring + 1 < latitudes.size(); ++ring)
-        for (int slice = 0; slice < slices; ++slice) {
-            const double a = slice * 2 * PI / slices, b = (slice + 1) * 2 * PI / slices;
-            const bool glass = ring < 2 && std::cos((a + b) * .5) > .7;
-            const bool racingStripe = (slice == 7 || slice == 8) && ring > 1;
-            const bool vent = ring == 3 && (slice == 4 || slice == 11);
-            Color panel = glass          ? shade(visor, ring == 0 ? .72 : 1.07)
-                          : racingStripe ? trim
-                          : vent         ? shade(shell, .6)
-                                         : shell;
-            quad(point(latitudes[ring], a), point(latitudes[ring + 1], a), point(latitudes[ring + 1], b),
-                 point(latitudes[ring], b), panel);
-        }
-    emitEnd();
+    const auto helmetVertex = [&](double latitude, double angle) {
+        const Vec3 n = (basis.forward * (std::cos(latitude) * std::cos(angle) / .2) +
+                        basis.up * (std::sin(latitude) / .207) +
+                        basis.side * (std::cos(latitude) * std::sin(angle) / .192))
+                           .normalized();
+        emitNormal(n.x, n.y, n.z);
+        vertex(point(latitude, angle));
+    };
+    // Shell and glass reuse the original faces in two compact material groups.
+    for (bool glassPass : {false, true}) {
+        material(glassPass ? Finish::Glass : Finish::Shell);
+        emitBegin(sjp::gfx::QUADS);
+        for (size_t ring = 0; ring + 1 < latitudes.size(); ++ring)
+            for (int slice = 0; slice < slices; ++slice) {
+                const double a = slice * 2 * PI / slices, b = (slice + 1) * 2 * PI / slices;
+                const bool glass = ring < 2 && std::cos((a + b) * .5) > .7;
+                if (glass != glassPass)
+                    continue;
+                const bool racingStripe = (slice == 7 || slice == 8) && ring > 1;
+                const bool vent = ring == 3 && (slice == 4 || slice == 11);
+                Color panel = glass          ? shade(visor, ring == 0 ? .72 : 1.07)
+                              : racingStripe ? trim
+                              : vent         ? shade(shell, .6)
+                                             : shell;
+                color(panel);
+                helmetVertex(latitudes[ring], a);
+                helmetVertex(latitudes[ring + 1], a);
+                helmetVertex(latitudes[ring + 1], b);
+                helmetVertex(latitudes[ring], b);
+            }
+        emitEnd();
+    }
+    material(Finish::Rubber);
     for (double side : {-1.0, 1.0}) {
         const Vec3 ear = head + basis.side * (.153 * side) - basis.up * .015;
         const Vec3 chin = head - basis.up * .175 + basis.forward * .045 + basis.side * (.08 * side);
@@ -376,6 +434,7 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
         const Vec3 ankle = point(ankles[leg]), knee = point(knees[leg]), hip = point(hips[leg]),
                    shoulder = point(shoulders[leg]), elbow = point(elbows[leg]), hand = point(hands[leg]);
         ski(point(rear[leg]), point(front[leg]), point(tips[leg]), ankle, dark, shade(dark, .75), accent);
+        material(Finish::Fabric);
         tailoredSegment(ankle, knee, .095, .09, .12, .11, dark);
         tailoredSegment(knee, hip, .12, .115, .15, .13, suit);
         ellipsoid(knee, segmentBasis(hip - ankle), {.115, .13, .112}, suit, 8, 4);
@@ -383,6 +442,7 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
         tailoredSegment(elbow, hand, .086, .084, .065, .068, suit);
         ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
         const Basis handBasis = segmentBasis(elbow - hand);
+        material(Finish::Rubber);
         ellipsoid(hand, handBasis, {.077, .11, .075}, dark, 8, 5);
         ellipsoid(hand + handBasis.forward * .05 + handBasis.side * (leg == 0 ? -.045 : .045), handBasis,
                   {.044, .057, .038}, dark, 6, 4);
@@ -390,11 +450,13 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
         const Basis boot = skiBasis(point(rear[leg]), point(front[leg]));
         ellipsoid(ankle + boot.forward * .055 + boot.up * .067, boot, {.19, .092, .098}, dark, 10, 5);
         tailoredSegment(ankle + boot.up * .05, ankle + boot.up * .19, .079, .078, .065, .074, dark);
+        material(Finish::Metal);
         orientedBox(ankle + boot.forward * .09 + boot.up * .145, boot, {.035, .022, .167}, white);
         orientedBox(ankle + boot.forward * .15 + boot.up * .09, boot, {.032, .022, .16}, accent);
     }
     const Vec3 hip = point(OriginalJoint::HipCenter), shoulder = point(OriginalJoint::ShoulderCenter),
                head = point(OriginalJoint::Head);
+    material(Finish::Fabric);
     tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
     const Basis torso = segmentBasis(shoulder - hip);
     tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
@@ -443,9 +505,12 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::COLOR_BUFFER_BIT |
                  sjp::gfx::DEPTH_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
-    const float specular[]{.2f, .23f, .24f, 1};
-    sjp::gfx::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, specular);
-    sjp::gfx::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SHININESS, 34);
+    // Enable subtle sun/moon highlights only within this restored athlete
+    // scope. Cloudy conditions attenuate them with the existing direct light.
+    const float specularLight[]{float(lighting.direct.x * .60), float(lighting.direct.y * .60),
+                                float(lighting.direct.z * .60), 1};
+    const float noHighlights[]{0, 0, 0, 1};
+    sjp::gfx::lightfv(gfx::LIGHT0, gfx::SPECULAR, ghost ? noHighlights : specularLight);
     sjp::gfx::pushMatrix();
     sjp::gfx::translated(f.x, f.y, 0);
     drawAthleteGeometry(skeleton, ghost);

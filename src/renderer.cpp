@@ -4,6 +4,8 @@
 #include "visual_weather.h"
 #include "visual_shadow.h"
 #include "visual_start_signal.h"
+#include "visual_sky.h"
+#include "visual_mountains.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -62,8 +64,9 @@ void windsock(Vec3 origin, const Frame &frame, double time) {
         sjp::gfx::end();
     }
 }
-// A sky gradient supplies the atmospheric backdrop without moving the camera.
-void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye, Vec3 target) {
+// Gradient and soft cloud layers share one small background mesh.
+void sky(int width, int height, const visual::EnvironmentLight &light,
+         environment::Conditions conditions, Vec3 eye, Vec3 target, gfx::Id mountainTexture) {
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT |
                          sjp::gfx::COLOR_BUFFER_BIT);
     sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
@@ -78,18 +81,31 @@ void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye,
     sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
     sjp::gfx::pushMatrix();
     sjp::gfx::loadIdentity();
-    sjp::gfx::begin(sjp::gfx::QUAD_STRIP);
-    for (int band = 0; band <= 24; ++band) {
-        const float t = band / 24.f;
-        const float smooth = t * t * (3 - 2 * t);
-        const Vec3 color = visual::mix(light.skyHorizon, light.skyTop, smooth);
-        col({float(color.x), float(color.y), float(color.z), 1});
-        sjp::gfx::vertex2f(0, height * t);
-        sjp::gfx::vertex2f(width, height * t);
-    }
-    sjp::gfx::end();
     const Vec3 forward = (target - eye).normalized(), right = cross(forward, {0, 1, 0}).normalized(),
                up = cross(right, forward).normalized();
+    constexpr int columns = 32, rows = 20;
+    std::array<std::array<Vec3, rows + 1>, columns + 1> colors{};
+    const double halfFov = std::tan(48 * PI / 360), aspect = double(width) / height;
+    for (int x = 0; x <= columns; ++x)
+        for (int y = 0; y <= rows; ++y) {
+            const Vec3 ray = (forward + right * ((2.0 * x / columns - 1) * halfFov * aspect) +
+                              up * ((2.0 * y / rows - 1) * halfFov)).normalized();
+            colors[x][y] = visual::skyColor(light, conditions, ray);
+        }
+    const auto skyVertex = [&](int x, int y) {
+        const auto color = colors[x][y];
+        col({float(color.x), float(color.y), float(color.z), 1});
+        sjp::gfx::vertex2f(float(width * double(x) / columns), float(height * double(y) / rows));
+    };
+    sjp::gfx::begin(sjp::gfx::QUADS);
+    for (int x = 0; x < columns; ++x)
+        for (int y = 0; y < rows; ++y) {
+            skyVertex(x, y);
+            skyVertex(x + 1, y);
+            skyVertex(x + 1, y + 1);
+            skyVertex(x, y + 1);
+        }
+    sjp::gfx::end();
     auto screen = [&](Vec3 direction, double &x, double &y) {
         const double depth = dot(direction, forward), halfFov = std::tan(48 * PI / 360);
         if (depth <= .01)
@@ -104,9 +120,11 @@ void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye,
         double x, y;
         if (screen(light.direction, x, y)) {
             const double radius = height * .0055;
-            const Color color = light.moon ? Color{.83f, .89f, .98f, 1} : Color{1, .91f, .69f, 1};
+            const float visibility = float(1 - visual::skyCloudCover(conditions, light.direction));
+            const Color color = light.moon ? Color{.83f, .89f, .98f, visibility}
+                                          : Color{1, .91f, .69f, visibility};
             sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
-            col({color.r, color.g, color.b, .12f});
+            col({color.r, color.g, color.b, .12f * visibility});
             sjp::gfx::vertex2f(float(x), float(y));
             col({color.r, color.g, color.b, 0});
             for (int i = 0; i <= 24; ++i)
@@ -130,13 +148,55 @@ void sky(int width, int height, const visual::EnvironmentLight &light, Vec3 eye,
                                 std::sin(azimuth) * std::cos(altitude)};
                 if (!screen(star, x, y))
                     continue;
-                col({.75f, .82f, .94f, .58f});
+                col({.75f, .82f, .94f, float(.58 * (1 - visual::skyCloudCover(conditions, star)))});
                 const float r = .6f + float(i % 3) * .2f;
                 for (const auto &p : std::array<std::array<float, 2>, 4>{{{-r, -r}, {r, -r}, {r, r}, {-r, r}}})
                     sjp::gfx::vertex2f(float(x) + p[0], float(y) + p[1]);
             }
             sjp::gfx::end();
         }
+    }
+    // Fully obscured distant mountains must disappear into the sky, rather
+    // than leave a flat, fog-colored cutout of their skyline.
+    if (light.fogEnd > 340) {
+        // A photographic ring at infinity: translation never slides the mountains.
+        // Its extracted alpha leaves the procedural sky and celestial bodies intact.
+        // Existing distance fog supplies the weather haze, without another shader.
+        sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
+        sjp::gfx::loadIdentity();
+        sjp::gfx::ortho(0, width, 0, height, -2000, 2000);
+        sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
+        sjp::gfx::enable(sjp::gfx::TEXTURE_2D);
+        sjp::gfx::bindTexture(sjp::gfx::TEXTURE_2D, mountainTexture);
+        sjp::gfx::enable(sjp::gfx::FOG);
+        const Vec3 hazeColor = visual::mountainHazeColor(light);
+        const float haze[] = {float(hazeColor.x), float(hazeColor.y), float(hazeColor.z), 1};
+        sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, haze);
+        sjp::gfx::fogf(sjp::gfx::FOG_START, float(light.fogStart));
+        sjp::gfx::fogf(sjp::gfx::FOG_END, float(light.fogEnd));
+        const Vec3 tint = visual::mountainTint(light);
+        col({float(tint.x), float(tint.y), float(tint.z), 1});
+        const auto rayAt = [&](int x, int y) {
+            return (forward + right * ((2.0 * x / columns - 1) * halfFov * aspect) +
+                    up * ((2.0 * y / rows - 1) * halfFov))
+                .normalized();
+        };
+        sjp::gfx::begin(sjp::gfx::QUADS);
+        for (int x = 0; x < columns; ++x)
+            for (int y = 0; y < rows; ++y) {
+                const double referenceU = visual::mountainU(rayAt(x, y));
+                for (const auto corner :
+                     std::array<std::array<int, 2>, 4>{{{x, y}, {x + 1, y}, {x + 1, y + 1}, {x, y + 1}}}) {
+                    const auto ray = rayAt(corner[0], corner[1]);
+                    double u = visual::mountainU(ray);
+                    // Interpolate through the panorama's wrap, never across it.
+                    u += std::round(referenceU - u);
+                    sjp::gfx::texCoord2d(u, visual::mountainV(ray));
+                    sjp::gfx::vertex3d(width * double(corner[0]) / columns, height * double(corner[1]) / rows,
+                                       -visual::mountainHazeDistance(ray));
+                }
+            }
+        sjp::gfx::end();
     }
     sjp::gfx::popMatrix();
     sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
@@ -229,6 +289,33 @@ void lookAt(Vec3 eye, Vec3 center) {
     sjp::gfx::translated(-eye.x, -eye.y, -eye.z);
 }
 } // namespace
+void Renderer::loadMountainPanorama(const std::string &path) {
+    SDL_Surface *bitmap = SDL_LoadBMP(path.c_str());
+    if (!bitmap)
+        throw std::runtime_error("Could not load mountain panorama: " + path);
+    SDL_Surface *rgba = SDL_ConvertSurface(bitmap, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(bitmap);
+    if (!rgba)
+        throw std::runtime_error("Could not decode mountain panorama");
+    if (rgba->w != 4096 || rgba->h != 768) {
+        SDL_DestroySurface(rgba);
+        throw std::runtime_error("Mountain panorama dimensions do not match its projection");
+    }
+    std::vector<uint8_t> pixels(size_t(rgba->w) * rgba->h * 4);
+    for (int y = 0; y < rgba->h; ++y)
+        std::copy_n(static_cast<const uint8_t *>(rgba->pixels) + y * rgba->pitch,
+                    rgba->w * 4, pixels.data() + size_t(y) * rgba->w * 4);
+    SDL_DestroySurface(rgba);
+    sjp::gfx::genTextures(1, &mountainTexture);
+    sjp::gfx::bindTexture(sjp::gfx::TEXTURE_2D, mountainTexture);
+    sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
+    sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, 0, sjp::gfx::RGBA, 4096, 768, 0,
+                        sjp::gfx::RGBA, sjp::gfx::UNSIGNED_BYTE, pixels.data());
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MIN_FILTER, sjp::gfx::LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAG_FILTER, sjp::gfx::LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::CLAMP_TO_EDGE);
+}
 Renderer::Font Renderer::loadFont(const std::string &path) {
     FT_Library library;
     FT_Face face;
@@ -284,6 +371,7 @@ Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool v
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
         boldFont = loadFont(assets + "/fonts/Interim-Bold.ttf");
         loadFlagAtlas(assets + "/flags/atlas.bmp");
+        loadMountainPanorama(assets + "/environment/mountains.bmp");
         const auto *d = sjp::gfx::getString(sjp::gfx::RENDERER);
         device = d ? reinterpret_cast<const char *>(d) : "Unknown Vulkan device";
         sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
@@ -309,6 +397,8 @@ Renderer::~Renderer() {
     sjp::gfx::deleteTextures(1, &boldFont.tex);
     if (flagTexture)
         sjp::gfx::deleteTextures(1, &flagTexture);
+    if (mountainTexture)
+        sjp::gfx::deleteTextures(1, &mountainTexture);
     if (snowTexture)
         sjp::gfx::deleteTextures(1, &snowTexture);
     if (naturalSnowTexture)
@@ -374,7 +464,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
         target = target + (wantTarget - target) * blend;
     }
     cameraTime = time;
-    sky(width, height, lighting, eye, target);
+    sky(width, height, lighting, sceneEnvironment, eye, target, mountainTexture);
     lookAt(eye, target);
     sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::enable(sjp::gfx::LIGHTING);

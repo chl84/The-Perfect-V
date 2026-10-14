@@ -152,6 +152,7 @@ void popAttrib() { ++drawCalls; }
 void disable(Enum) { ++drawCalls; }
 void materialfv(Enum, Enum, const float *) { ++drawCalls; }
 void materialf(Enum, Enum, float) { ++drawCalls; }
+void lightfv(Enum, Enum, const float *) { ++drawCalls; }
 void pushMatrix() { ++drawCalls; }
 void popMatrix() { ++drawCalls; }
 void translated(double, double, double) { ++drawCalls; }

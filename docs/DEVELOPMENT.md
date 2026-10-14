@@ -182,6 +182,75 @@ The explicitly invoked render probe reports cached/submitted/culled geometry
 and draw calls. `--no-culling` supplies an unculled reference using the same
 indexed meshes; it is a diagnostic option, not a gameplay setting.
 
+Distant mountains use a prepared, transparent CC0 photographic panorama on a
+world-direction background ring. Only the decorative ridgelines were replaced;
+playable valley vertices, hill/inrun profiles, starts, physics and camera paths
+remain unchanged. The photograph's sky is removed so the existing sky, sun,
+moon and clouds stay separate. Morning/evening retain a cool upper/opposite sky,
+with warm colors restricted to the low horizon toward the sun. Mountain tint
+uses the natural snow material and the same ambient, directional and fill
+light palette as the model, including the weather response. Its lower haze
+blends toward illuminated snow instead of forming a gray band. The original
+valley mesh's final two lateral rows (180–200 scaled metres from the centre)
+fade into the background through cached vertex alpha. Snow beneath all tree
+bases and the entire playable corridor stay opaque; this material blend retains
+positions, depth writes and snow texture pixels. This adds no vertices, draw
+calls, shaders, textures or per-frame terrain work. Existing distance fog
+controls weather visibility and the stronger haze toward the foothills.
+
+The decorative terrain flanks after `outrunBottom()` descend outside a protected
+apron of max(50 hill scales, 24 metres), blending over 60 scales. After both the
+prepared strip (bottom + 47 metres) and the arena fixtures (190 scales), the
+whole decorative continuation rolls into a shallow downslope with continuous
+endpoint height and tangent. This replaces the unbounded uphill extrapolation
+that formed a background snow wall. Hill profile functions, simulation, starts,
+inrun/landing/prepared snow, stands, signs and mast elevations are unchanged.
+Background trees and their contacts read the same decorative surface so they
+remain grounded. Vertex counts, grid coordinates and draw-pass budgets stay fixed.
+The mesh audit retains its original golden hashes: only the explicitly bounded
+backdrop elevations are normalized to their old values when hashing; actual
+protected elevations and every X/Z coordinate/count must still match exactly.
+Separate tests check the backdrop joins and downward slope across all 32 hills.
+Photographed shading is baked, not dynamic
+lighting or image-based illumination. A reflected wrap closes the source photo;
+it is decorative, not a geographic 360-degree capture of a venue.
+The panorama adds one small 32 by 20 textured background mesh and one 4096 by
+768 RGBA texture (12 MiB before driver overhead), loaded once and shared by all
+venues. It needs no new shaders, shadows, image processing or per-frame uploads.
+
+Source/license and offline preparation instructions are in
+`assets/environment/CREDITS.md` and `tools/prepare_mountain_panorama.py`.
+Low inrun decking receives baked ground darkening; exposed foundations use
+small cached contact patches on the existing ground receiver. Athlete fabric,
+rubber, ski coating, helmet, visor and fittings have separate inexpensive vertex
+materials. Highlights follow the existing direct light and are restored after
+drawing the athlete; geometry and fall-contact measurements remain unchanged.
+The sky combines its gradient and two soft cloud scales in one 32 by 20 mesh.
+World-space directions and a cosmetic seed keep clouds stable through cameras,
+pause and replay seeking, with no textures, extra render passes or per-pixel noise.
+Clear weather has no cloud layer. Clear daylight uses a blue sky and reduced
+distance haze so distant ridgelines remain distinct from overcast conditions.
+On 2026-10-14 the photographic backdrop and cool twilight sky were reviewed
+in 256 native 1920×1080, 4× MSAA captures: four venues, four views, all 16
+time/weather combinations. A subsequent 64-capture fog check confirmed that
+fully obscured mountains disappear rather than leave a fog-colored silhouette.
+All 13 standalone suites passed, including frozen snow-coordinate hashes across
+32 hills. Full-game Vulkan validation completed all venues, screens, replay and
+a 64-jump cup. Photograph illumination is baked; these checks do not establish
+physically changing shadows within the photo or a sustained frame-rate guarantee.
+The seam/palette refinement was subsequently checked in 320 native captures
+(four venues, five views including all three gameplay cameras, and all 16
+time/weather combinations), with 13 passing suites and full-game Vulkan
+validation. Frozen snow-coordinate counts/hashes remain identical on all 32
+venues; the material blend changes neither terrain nor start positions.
+
+On 2026-10-15 the downward decorative continuation was reviewed in 320 native
+1920×1080, 4× MSAA captures across four venues, five views and all 16 time/weather
+combinations. All 13 standalone suites and the full-game Vulkan smoke test passed.
+An additional 192 original-physics runs across all 32 hills, headwind/calm/tailwind
+and normal jumps/falls stayed within the protected original surface. The geometry
+change affects only the explicitly bounded backdrop described above.
+
 On 2026-10-14, 224 before/after captures at 1920×1080 with 4× MSAA were pixel
 identical across all 32 hills, three cameras, panorama and day/snow/night scenes.
 All ten standalone suites and the installed full-game Vulkan smoke test passed.

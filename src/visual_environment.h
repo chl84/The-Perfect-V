@@ -111,6 +111,15 @@ inline EnvironmentLight environmentLight(environment::Conditions conditions) {
         light.fogStart = 125;
         light.fogEnd = 800;
     }
+    if (conditions.time == TimeOfDay::Day && conditions.weather == Weather::Sunny) {
+        // Clear winter air: distant ridges retain contrast instead of reading
+        // as an overcast wall. This affects backdrop colors and haze only.
+        light.skyTop = {.30, .54, .79};
+        light.skyHorizon = {.62, .77, .89};
+        light.fog = {.65, .78, .89};
+        light.fogStart = 170;
+        light.fogEnd = 1800;
+    }
     light.direction = light.direction.normalized();
     return light;
 }

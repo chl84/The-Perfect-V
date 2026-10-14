@@ -1,6 +1,8 @@
 #include "competition.h"
 #include "storage.h"
 #include "visual_environment.h"
+#include "visual_sky.h"
+#include "visual_mountains.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -23,6 +25,63 @@ void write(const std::filesystem::path &path, const std::string &text) {
 } // namespace
 int main() {
     using namespace sjp;
+    // A rotating camera must cross the photographic wrap continuously; height
+    // below the ring clamps to the opaque lower edge, and the zenith to sky.
+    const auto seamLeft = visual::mountainU({-1, 0, -.00001});
+    const auto seamRight = visual::mountainU({-1, 0, .00001});
+    require(std::abs((seamRight - seamLeft) - 1) < .00001,
+            "Mountain panorama wrap is not continuous");
+    require(visual::mountainV({0,1,0}) == 0 && visual::mountainV({0,-1,0}) == 1,
+            "Mountain panorama exposes its edges above or below the horizon");
+    require(visual::mountainHazeDistance({1,-.4,0}) > visual::mountainHazeDistance({1,.3,0}),
+            "Mountain foothills lack atmospheric depth");
+    for (const auto &hill : hills()) {
+        const double core = std::max(50 * hill.scale(), 24.0);
+        for (double x : {hill.inrunStart(), hill.start(), 0.0, hill.outrunBottom(),
+                         hill.end(), std::max(420 * hill.scale(), hill.end() + 80 * hill.scale())}) {
+            for (double z : {0.0, -core, core})
+                require(x > std::max(hill.outrunBottom() + 47, 190 * hill.scale()) ||
+                            visual::backdropGround(hill, x, z) == visual::arenaGround(hill, x, z),
+                        "Background correction moves the protected ski/arena surface");
+            if (x <= hill.outrunBottom())
+                require(visual::backdropGround(hill, x, -200 * hill.scale()) ==
+                            visual::arenaGround(hill, x, -200 * hill.scale()),
+                        "Background correction changes terrain before the outrun bottom");
+        }
+        const double distant = hill.end() + 160 * hill.scale();
+        require(visual::backdropGround(hill, distant, 0) < visual::arenaGround(hill, distant, 0),
+                "Background beyond the arena still extrapolates the uphill quadratic");
+        const double tailStart = std::max(hill.outrunBottom() + 47, 190 * hill.scale());
+        require(visual::backdropGround(hill, tailStart, 0) == visual::arenaGround(hill, tailStart, 0) &&
+                    visual::backdropGround(hill, tailStart + 80 * hill.scale(), 0) <
+                        visual::backdropGround(hill, tailStart + 40 * hill.scale(), 0),
+                "Backdrop continuation breaks its join or still slopes uphill");
+        for (int side : {-1,1}) {
+            const double z = side * 200 * hill.scale();
+            const double a = hill.outrunBottom() + 60 * hill.scale();
+            const double b = a + 60 * hill.scale();
+            require(visual::backdropGround(hill, b, z) < visual::backdropGround(hill, a, z),
+                    "Distant outrun flank still climbs into a background wall");
+        }
+        for (int side : {-1,1}) {
+            require(visual::valleyEdgeOpacity(hill, side * 178 * hill.scale()) == 1 &&
+                        visual::valleyEdgeOpacity(hill, side * 200 * hill.scale()) < 1e-12,
+                    "Valley transition affects tree foundations or leaves a hard outer edge");
+            require(visual::valleyEdgeOpacity(hill, side * 185 * hill.scale()) >
+                        visual::valleyEdgeOpacity(hill, side * 195 * hill.scale()),
+                    "Valley transition does not fade toward the boundary");
+        }
+        require(visual::valleyEdgeOpacity(hill, 0) == 1,
+                "Valley transition changes opacity in the playable corridor");
+    }
+    {
+        auto redLight = visual::environmentLight({});
+        redLight.ambient = {1,0,0};
+        redLight.direct = redLight.fill = {0,0,0};
+        const auto tint = visual::mountainTint(redLight);
+        require(tint.x > .9 && tint.y == 0 && tint.z == 0,
+                "Photographic snow ignores the scene's actual light colors");
+    }
     using namespace sjp::environment;
     const auto directory = std::filesystem::temp_directory_path() / "perfect-v-environment-tests";
     std::filesystem::create_directories(directory);
@@ -50,6 +109,23 @@ int main() {
             for (int weather = 0; weather < 4; ++weather) {
                 const Conditions conditions{TimeOfDay(time), Weather(weather), 7654321};
                 const auto light = visual::environmentLight(conditions);
+                for (int angle = 0; angle < 48; ++angle) {
+                    const Vec3 direction = Vec3{std::cos(angle * .31), (angle % 9 - 2) * .15,
+                                                std::sin(angle * .31)}.normalized();
+                    const auto sky = visual::skyColor(light, conditions, direction);
+                    const auto repeat = visual::skyColor(light, conditions, direction);
+                    const auto neighbor = visual::skyColor(light, conditions,
+                                                          (direction + Vec3{1e-6, 0, 0}).normalized());
+                    const double cover = visual::skyCloudCover(conditions, direction);
+                    if (weather == int(Weather::Sunny))
+                        require(cover == 0, "Clear weather must not draw clouds");
+                    require(cover >= 0 && cover <= 1 && (sky - repeat).length() == 0 &&
+                                (sky - neighbor).length() < 1e-4,
+                            "Sky clouds flicker, have hard seams or invalid coverage");
+                    for (double channel : {sky.x, sky.y, sky.z})
+                        require(std::isfinite(channel) && channel >= 0 && channel <= 1,
+                                "Sky color is outside its valid range");
+                }
                 require(std::abs(light.direction.length() - 1) < 1e-12 && light.direction.y > .1 &&
                             light.fogStart > 0 && light.fogEnd > light.fogStart &&
                             light.shadowStrength >= 0 && light.shadowStrength <= .4,
@@ -61,6 +137,23 @@ int main() {
                                 "Environmental color is invalid");
                 require(light.moon == (time == int(TimeOfDay::Night)), "Night does not use moonlight");
                 const auto clear = visual::environmentLight({TimeOfDay(time), Weather::Sunny, 0});
+                if (time == int(TimeOfDay::Day) && weather == int(Weather::Sunny))
+                    require(light.skyTop.z - light.skyTop.x > .35 &&
+                                light.fogEnd >
+                                    visual::environmentLight({TimeOfDay::Day, Weather::Overcast, 0}).fogEnd *
+                                        1.8,
+                            "Clear daylight has a gray sky or excessive distance haze");
+                if (weather == int(Weather::Sunny) &&
+                    (time == int(TimeOfDay::Morning) || time == int(TimeOfDay::Evening))) {
+                    const Vec3 toward = Vec3{light.direction.x, .02, light.direction.z}.normalized();
+                    const Vec3 away = Vec3{-light.direction.x, .02, -light.direction.z}.normalized();
+                    const auto upper = visual::skyColor(light, conditions, {0, 1, 0});
+                    const auto warm = visual::skyColor(light, conditions, toward);
+                    const auto cool = visual::skyColor(light, conditions, away);
+                    require(upper.z > upper.x && cool.z > cool.x &&
+                                (warm.x - warm.z) - (cool.x - cool.z) > .1,
+                            "Twilight paints the upper/opposite sky orange or loses the warm sun horizon");
+                }
                 if (weather != int(Weather::Sunny))
                     require(light.shadowStrength < clear.shadowStrength && light.celestialVisibility == 0,
                             "Cloudy conditions keep sharp sunlight and shadows");

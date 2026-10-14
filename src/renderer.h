@@ -64,6 +64,7 @@ class Renderer {
     SDL_Window *window;
     Font regular, boldFont;
     sjp::gfx::Id flagTexture = 0;
+    sjp::gfx::Id mountainTexture = 0;
     sjp::gfx::Id snowTexture = 0;
     sjp::gfx::Id naturalSnowTexture = 0;
     sjp::gfx::Id spruceMarkerTexture = 0;
@@ -83,6 +84,7 @@ class Renderer {
     std::array<visual::GrandstandLayout, HILL_COUNT> grandstandLayouts;
     Font loadFont(const std::string &);
     void loadFlagAtlas(const std::string &);
+    void loadMountainPanorama(const std::string &);
     void terrain(const Hill &);
     void hillRecordMarker(const Hill &);
     void inrunStructure(const Hill &, const visual::InrunLayout &);

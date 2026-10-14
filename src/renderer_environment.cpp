@@ -2,6 +2,7 @@
 #include "original_skeleton.h"
 #include "visual_weather.h"
 #include "visual_floodlights.h"
+#include "visual_mountains.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -91,10 +92,10 @@ void sphere(Vec3 p, double r, Color color) {
         sjp::visual::end();
     }
 }
-// This is the existing decorative valley profile. The central corridor and
-// all inrun vertices retain exactly the original hill surface coordinates.
+// The ski corridor, landing area and inrun retain the original coordinates.
+// Distant decorative flanks and the extension past the prepared arena turn downhill.
 double terrainY(const Hill &h, double x, double z) {
-    return visual::arenaGround(h, x, z);
+    return visual::backdropGround(h, x, z);
 }
 double preparedSnowWeight(const Hill &h, double x, double z) {
     const double side = clamp((25 * h.scale() - std::abs(z)) / (8 * h.scale()), 0.0, 1.0);
@@ -106,8 +107,16 @@ double preparedSnowWeight(const Hill &h, double x, double z) {
 Color snowColor(const Hill &h, double x, double z) {
     const double variation = .014 * std::sin(x * .057 + z * .037) + .009 * std::sin(x * .19 - z * .083);
     const double corridor = preparedSnowWeight(h, x, z);
-    return {float(.83 + .065 * corridor + variation), float(.89 + .035 * corridor + variation),
-            float(.94 + .012 * corridor + variation * .6), 1};
+    const Color color{float(.83 + .065 * corridor + variation), float(.89 + .035 * corridor + variation),
+                      float(.94 + .012 * corridor + variation * .6), 1};
+    double occlusion = 0;
+    if (x >= h.inrunStart() && x <= 0 && std::abs(z) < 4.8) {
+        const double gap = std::max(0.0, h.inrun(x) - .62 - terrainY(h, x, z));
+        occlusion = (1 - smoothRange(2.1, 4.8, std::abs(z))) * (1 - smoothRange(.2, 6.0, gap));
+    }
+    // Soft ambient contact under low decking, baked into both ground layers.
+    // The separate ski-track material never receives this darkening.
+    return shade(color, 1 - .10 * occlusion);
 }
 Vec3 terrainSnowNormal(const Hill &h, Vec3 p) {
     const double dx = 3 * h.scale(), dz = 10 * h.scale();
@@ -128,6 +137,8 @@ void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = fals
         Color color = snowColor(h, p.x, p.z);
         if (groomed)
             color.a = float(preparedSnowWeight(h, p.x, p.z));
+        else
+            color.a = float(visual::valleyEdgeOpacity(h, p.z));
         col(color);
         sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
         vertex(p);
@@ -356,7 +367,17 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
         a = b;
     }
 }
-void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
+double groundReceiverY(const Hill &h, double x, double z) {
+    const double step = 3 * h.scale(), zStep = 10 * h.scale();
+    const double first = std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale());
+    const double x0 = first + std::floor((x - first) / step) * step;
+    const double z0 = -200 * h.scale() + std::floor((z + 200 * h.scale()) / zStep) * zStep;
+    const double u = (x - x0) / step, v = (z - z0) / zStep;
+    const double a = terrainY(h, x0, z0), b = terrainY(h, x0, z0 + zStep),
+                 c = terrainY(h, x0 + step, z0 + zStep), d = terrainY(h, x0 + step, z0);
+    return v >= u ? a * (1 - v) + b * (v - u) + c * u : a * (1 - u) + c * v + d * (u - v);
+}
+void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity, bool foundation = false) {
     constexpr int sides = 16, rings = 4;
     for (int ring = 0; ring < rings; ++ring) {
         const double inner = ring / double(rings), outer = (ring + 1) / double(rings);
@@ -366,90 +387,10 @@ void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
             for (double radius : {outer, inner}) {
                 const double x = p.x + std::cos(angle) * rx * radius, z = p.z + std::sin(angle) * rz * radius;
                 col({.12f, .22f, .31f, float(opacity * (1 - radius) * (1 - radius))});
-                vertex({x, terrainY(h, x, z) + .018, z});
+                vertex({x, (foundation ? groundReceiverY(h, x, z) : terrainY(h, x, z)) + .018, z});
             }
         }
         sjp::visual::end();
-    }
-}
-void mountainRidge(double scale, int layer) {
-    constexpr int columns = 32, rows = 9;
-    std::array<std::array<Vec3, rows>, columns> points{};
-    const double depth = (650 + layer * 270) * scale, width = (230 + layer * 35) * scale;
-    const double floor = (-165 - layer * 8) * scale, nominal = (215 + layer * 67) * scale;
-    for (int i = 0; i < columns; ++i) {
-        const double seed = layer * 193.0 + i * 17.13;
-        const double x = (-1040 + i * 71) * scale;
-        const double summitX = x + (hash(seed + 1) - .5) * 32 * scale;
-        const double summitZ = -depth + (hash(seed + 2) - .5) * 42 * scale;
-        const double height = nominal * (.61 + hash(seed + 3) * .53 + .06 * std::sin(i * .72 + layer));
-        const double frontWidth = width * (.87 + hash(seed + 4) * .24);
-        const double backWidth = width * (.73 + hash(seed + 5) * .20);
-        const double frontLine = .46 + hash(seed + 6) * .18;
-        const double backLine = .50 + hash(seed + 7) * .15;
-        const std::array<double, rows> fractions{{0, .20, frontLine, .82, 1, .82, backLine, .20, 0}};
-        for (int row = 0; row < rows; ++row) {
-            const double fraction = fractions[row];
-            const double side = row < 4 ? 1 : (row > 4 ? -1 : 0);
-            const double spread = side > 0 ? frontWidth : backWidth;
-            // Offset intermediate foothill knots to form oblique ridge spurs
-            // instead of a row of radial cone-shaped mountains.
-            const double spur = (row == 1 || row == 7) ? (hash(seed + row * 11) - .5) * 37 * scale : 0;
-            points[i][row] = {x + (summitX - x) * fraction + spur, floor + height * fraction,
-                              summitZ + side * spread * (1 - fraction)};
-        }
-    }
-    const Color rock{float(.38 + layer * .055), float(.46 + layer * .05), float(.50 + layer * .05), 1};
-    const Color cap{float(.83 + layer * .022), float(.89 + layer * .017), float(.94 + layer * .010), 1};
-    for (int i = 0; i < columns - 1; ++i)
-        for (int row = 0; row < rows - 1; ++row) {
-            const bool snowy = row >= 2 && row <= 5;
-            const double seed = i * 31.91 + row * 9.37 + layer * 137;
-            const Color color = shade(snowy ? cap : rock, .89 + hash(seed) * .17);
-            const Vec3 a = points[i][row], b = points[i][row + 1], c = points[i + 1][row + 1],
-                       d = points[i + 1][row];
-            // Shared vertices partition snow/rock without overlapping shells.
-            // Alternating diagonals and facet tones add alpine rock bands.
-            if ((i + row) % 2) {
-                triangle(a, d, b, color);
-                triangle(b, d, c, shade(color, snowy ? 1.015 : .96));
-            } else {
-                triangle(a, c, b, color);
-                triangle(a, d, c, shade(color, snowy ? .99 : 1.06));
-            }
-        }
-    // The existing valley mesh ends at z=-200*scale. Continue only the distant
-    // mountain's lower foothills well below the visible valley, so its base
-    // never exposes sky from the existing cameras. Ridge and snowline vertices
-    // above remain untouched, and the near skirt stays outside that valley.
-    for (int edge : {0, rows - 1}) {
-        const double direction = edge == 0 ? 1.0 : -1.0;
-        for (int i = 0; i < columns - 1; ++i) {
-            const Vec3 a = points[i][edge], b = points[i + 1][edge];
-            const auto lower = [&](Vec3 p, double advance, double y) {
-                p.y = y * scale;
-                p.z += direction * advance * scale;
-                if (edge == 0)
-                    p.z = std::min(p.z, -205 * scale);
-                return p;
-            };
-            const Vec3 middleA = lower(a, 85, -320), middleB = lower(b, 85, -320),
-                       bottomA = lower(a, 170, -720), bottomB = lower(b, 170, -720);
-            const Color upper = shade(rock, .96 + hash(i * 9.37 + layer * 131) * .08);
-            const Color lowerRock{float(.45 + layer * .05), float(.53 + layer * .05),
-                                  float(.57 + layer * .05), 1};
-            if (edge == 0) {
-                triangle(a, middleA, b, upper);
-                triangle(b, middleA, middleB, shade(upper, 1.025));
-                triangle(middleA, bottomA, middleB, lowerRock);
-                triangle(middleB, bottomA, bottomB, shade(lowerRock, .98));
-            } else {
-                triangle(a, b, middleA, upper);
-                triangle(b, middleB, middleA, shade(upper, 1.025));
-                triangle(middleA, middleB, bottomA, lowerRock);
-                triangle(middleB, bottomB, bottomA, shade(lowerRock, .98));
-            }
-        }
     }
 }
 struct Tree {
@@ -911,8 +852,8 @@ void Renderer::terrain(const Hill &h) {
     sjp::visual::enable(sjp::gfx::TEXTURE_2D);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, naturalSnowTexture);
     sjp::visual::texEnvi(sjp::gfx::TEXTURE_ENV, sjp::gfx::TEXTURE_ENV_MODE, sjp::gfx::MODULATE);
-    // Same bounds, cell dimensions, and vertex heights as the existing hill.
-    // Grooming, grain, and broad snow color variation are material-only.
+    // Retain bounds/cells and protected ski/arena vertices. Only the backdrop
+    // flanks/continuation turn downhill instead of extrapolating indefinitely.
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s); x < std::max(420 * s, h.end() + 80 * s);
          x += 3 * s)
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
@@ -936,10 +877,8 @@ void Renderer::terrain(const Hill &h) {
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z}, true);
     sjp::visual::popAttrib();
     sjp::visual::disable(sjp::gfx::TEXTURE_2D);
-    // Three broad alpine ridgelines sit well behind the forest. Their lower
-    // silhouette opens the sky and lets atmospheric fog separate the layers.
-    for (int layer = 2; layer >= 0; --layer)
-        mountainRidge(s, layer);
+    // Distant photographic mountains are drawn with the sky, behind this
+    // valley and its descending decorative continuation.
     // All soft ground contacts share one state pass, instead of switching
     // depth/blend/lighting hundreds of times between individual trees.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT);
@@ -956,6 +895,13 @@ void Renderer::terrain(const Hill &h) {
             contactShadow(h, tree.base, tree.height * .61, tree.height * .48, .20f);
             visual::flush();
         }
+    }
+    for (const auto &support : inrunLayouts[index].supports) {
+        if (!support.exposed())
+            continue;
+        for (int side : {-1, 1})
+            contactShadow(h, {support.x, 0, side * visual::inrunColumnZ}, 1.15, 1.05, .24f, true);
+        visual::flush();
     }
     for (int side : {-1, 1}) {
         const double near = std::max(25 * s, 8.0), front = side * (near - 1.0);

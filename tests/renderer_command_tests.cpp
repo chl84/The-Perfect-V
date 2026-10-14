@@ -240,6 +240,7 @@ struct SnowVertex {
     sjp::Vec3 position, normal;
 };
 std::vector<SnowVertex> snowLighting;
+const sjp::Hill *snowHill = nullptr;
 void smoothSnow(const sjp::Hill &hill) {
     std::map<std::array<double, 3>, sjp::Vec3> shared;
     size_t inrunShared = 0, landingShared = 0, surroundingShared = 0;
@@ -264,8 +265,9 @@ void smoothSnow(const sjp::Hill &hill) {
 }
 void protectedSnow(int hill) {
     // Snapshot of every natural/prepared snow and inrun vertex before the
-    // construction changes. Geometry, including its original elevations,
-    // must remain byte-identical on all 32 venues.
+    // construction changes. Keep all X/Z coordinates and protected elevations
+    // byte-identical. Only distant flank/continuation elevations are normalized
+    // to the original below; their actual geometry is audited separately.
     static const std::array<std::pair<size_t, uint64_t>, sjp::HILL_COUNT> frozen{{
         {52692, 8929634750460910395ULL},
         {52932, 4961535559577657852ULL},
@@ -366,7 +368,14 @@ void position(double x, double y, double z) {
         (boundTexture == protectedTexture || boundTexture == protectedTexture + 1)) {
         ++snowVertices;
         snowLighting.push_back({{x, y, z}, {current.normal[0], current.normal[1], current.normal[2]}});
-        for (double value : {x, y, z}) {
+        double protectedY = y;
+        if (snowHill && (x > std::max(snowHill->outrunBottom() + 47, 190 * snowHill->scale()) ||
+            (x > snowHill->outrunBottom() && std::abs(z) > std::max(50 * snowHill->scale(), 24.0)))) {
+            protectedY = sjp::visual::arenaGround(*snowHill, x, z);
+            require(y <= protectedY + 1e-7,
+                    "Decorative background rises above the original uphill extrapolation");
+        }
+        for (double value : {x, protectedY, z}) {
             uint64_t bits;
             std::memcpy(&bits, &value, sizeof(bits));
             snowHash = (snowHash ^ bits) * 1099511628211ULL;
@@ -989,11 +998,13 @@ int main() {
                 audit::spectatorSoles.clear();
                 audit::captureBoards = true;
                 audit::captureSnow = true;
+                audit::snowHill = &s.hill();
                 audit::snowHash = 1469598103934665603ULL;
                 audit::snowVertices = 0;
                 audit::snowLighting.clear();
                 r.begin(s.hill(), s.frame(), 4, 0, true);
                 audit::captureSnow = false;
+                audit::snowHill = nullptr;
                 audit::protectedSnow(hi);
                 audit::smoothSnow(s.hill());
                 audit::captureBoards = false;

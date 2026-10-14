@@ -80,6 +80,7 @@ inline constexpr Enum QUAD_STRIP = 0x0008;
 inline constexpr Enum RENDERER = 0x1F01;
 inline constexpr Enum REPEAT = 0x2901;
 inline constexpr Enum RGB = 0x1907;
+inline constexpr Enum RGBA = 0x1908;
 inline constexpr Enum SAMPLES = 0x80A9;
 inline constexpr Enum SHININESS = 0x1601;
 inline constexpr Enum SMOOTH = 0x1D01;
