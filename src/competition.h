@@ -1,5 +1,6 @@
 #pragma once
 #include "physics.h"
+#include "nationality.h"
 #include <array>
 #include <cstdint>
 #include <string>
@@ -38,8 +39,9 @@ std::vector<int> originalCompetitionRanks(const std::vector<float> &values);
 int originalCupAward(CupMode mode, int rank);
 float originalCompetitionTotal(float previous, const Hill &, const Result &);
 bool validateCupSetup(const CupSetup &, std::string *error = nullptr);
-CupSetup defaultCupSetup();
-CupSetup defaultTeamCupSetup();
+void assignCpuIdentity(CupSetup &, size_t participant, uint32_t seed, bool retainCountry = false);
+CupSetup defaultCupSetup(uint32_t identitySeed = athleteIdentitySeed());
+CupSetup defaultTeamCupSetup(uint32_t identitySeed = athleteIdentitySeed());
 
 class Competition {
   public:

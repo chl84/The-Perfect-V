@@ -85,7 +85,12 @@ is available when the recorded input sequence fits that format.
 ## Competitions and saves
 
 Practice supports unlimited retries. World Cup accepts 1–16 human/CPU entrants;
-Team Cup accepts 1–4 teams of four. Select hills, seasons, CPU levels and whether
+Team Cup accepts 1–4 teams of four. CPU entrants receive random nationalities and
+country-specific first/last names; CPU teams share one randomly selected nationality.
+Names and countries stay fixed through the cup and save/resume. Flags replace country
+codes in the interface; click a flag in cup setup to edit the nationality.
+
+Select hills, seasons, CPU levels and whether
 to watch CPU jumps. Local players share the machine, and interrupted competitions
 can be resumed from checkpoints. Official standing human jumps can set hill records.
 

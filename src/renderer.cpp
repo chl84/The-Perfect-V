@@ -297,6 +297,7 @@ Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool v
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
         boldFont = loadFont(assets + "/fonts/Interim-Bold.ttf");
+        loadFlagAtlas(assets + "/flags/atlas.bmp");
         const auto *d = sjp::gfx::getString(sjp::gfx::RENDERER);
         device = d ? reinterpret_cast<const char *>(d) : "Unknown Vulkan device";
         sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
@@ -318,6 +319,8 @@ Renderer::~Renderer() {
             sjp::gfx::deleteLists(l, 1);
     sjp::gfx::deleteTextures(1, &regular.tex);
     sjp::gfx::deleteTextures(1, &boldFont.tex);
+    if (flagTexture)
+        sjp::gfx::deleteTextures(1, &flagTexture);
     if (snowTexture)
         sjp::gfx::deleteTextures(1, &snowTexture);
     if (naturalSnowTexture)

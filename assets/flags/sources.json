@@ -1,0 +1,266 @@
+[
+  {
+    "code": "FIN",
+    "country": "Finland",
+    "source": "https://flagcdn.com/w80/fi.png",
+    "width": 80,
+    "height": 49,
+    "sha256": "0450ed61fdb1680a727663e3a922635e03e4cb3fa019c258b8a1e2e2a6e73701"
+  },
+  {
+    "code": "SUI",
+    "country": "Switzerland",
+    "source": "https://flagcdn.com/w80/ch.png",
+    "width": 80,
+    "height": 80,
+    "sha256": "c0238ceffa2927c670890712efe6eafdce019fa68e9118486ac08c2651ae4a4c"
+  },
+  {
+    "code": "CZE",
+    "country": "Czech Rep.",
+    "source": "https://flagcdn.com/w80/cz.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "2b1d29778294d45d3678cd7fdc240de70a16a638dd752be4a212401389dd44e5"
+  },
+  {
+    "code": "BLR",
+    "country": "Belarus",
+    "source": "https://flagcdn.com/w80/by.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "4e980c20f56bca6204cdf0e541650d4cb2552e39af1b830c31be497412af6232"
+  },
+  {
+    "code": "AUT",
+    "country": "Austria",
+    "source": "https://flagcdn.com/w80/at.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "6db2a0734919d8c19430b79af8b2682be3a6cb878162aaff1c9c2a47b7660953"
+  },
+  {
+    "code": "USA",
+    "country": "USA",
+    "source": "https://flagcdn.com/w80/us.png",
+    "width": 80,
+    "height": 42,
+    "sha256": "59ac434b97e6db8b4fcee5c8e1996995562747e76875625f0886f1936488b7c9"
+  },
+  {
+    "code": "LAT",
+    "country": "Latvia",
+    "source": "https://flagcdn.com/w80/lv.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "645630d51b2968c8aee6ca8ea1d4823b774fa54a2e8fad4c05ae6c7909430c28"
+  },
+  {
+    "code": "POL",
+    "country": "Poland",
+    "source": "https://flagcdn.com/w80/pl.png",
+    "width": 80,
+    "height": 50,
+    "sha256": "bc81e9a8f5f9482d3b266a434f5f28441b8df90b29c6f7e8d08d120d8dfb97d0"
+  },
+  {
+    "code": "JPN",
+    "country": "Japan",
+    "source": "https://flagcdn.com/w80/jp.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "25c1ac6db4fa0b5e6b79b4efe546683c8589cf060f5f848b27be02944fad8114"
+  },
+  {
+    "code": "BEL",
+    "country": "Belgium",
+    "source": "https://flagcdn.com/w80/be.png",
+    "width": 80,
+    "height": 69,
+    "sha256": "4bb0a14682b00ccb8912a25aee9a44a5129362d0c09e3cfdb5257879bd23adb3"
+  },
+  {
+    "code": "ISL",
+    "country": "Iceland",
+    "source": "https://flagcdn.com/w80/is.png",
+    "width": 80,
+    "height": 58,
+    "sha256": "c3c910c259f77d246b2159e5287520a28cc849672ba622a60f50734fd2b1699e"
+  },
+  {
+    "code": "ENG",
+    "country": "England",
+    "source": "https://flagcdn.com/w80/gb-eng.png",
+    "width": 80,
+    "height": 48,
+    "sha256": "51fab4e1b9edf84a4798756f8984c5d767d5d6326dd3614c59de3893bcbeb62e"
+  },
+  {
+    "code": "GER",
+    "country": "Germany",
+    "source": "https://flagcdn.com/w80/de.png",
+    "width": 80,
+    "height": 48,
+    "sha256": "5eb33c86a8f1cd43cbbd990aee89e4ce4fabf7efdece1529be66fb1becf29fc9"
+  },
+  {
+    "code": "EST",
+    "country": "Estonia",
+    "source": "https://flagcdn.com/w80/ee.png",
+    "width": 80,
+    "height": 51,
+    "sha256": "7d6d0649338f46de56927d05a4430f471f572c6e5e46dc52aae9d5cf3cfdfd03"
+  },
+  {
+    "code": "NOR",
+    "country": "Norway",
+    "source": "https://flagcdn.com/w80/no.png",
+    "width": 80,
+    "height": 58,
+    "sha256": "f58edc8912be7c7f5a462809dae326895a9b529bd841475a4aedf0ccf26e6d7f"
+  },
+  {
+    "code": "AUS",
+    "country": "Australia",
+    "source": "https://flagcdn.com/w80/au.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "eb3cd6aba81315a7db38b55a555938f3d4c1553342eafb3a37e13d4d1fe76450"
+  },
+  {
+    "code": "IRL",
+    "country": "Ireland",
+    "source": "https://flagcdn.com/w80/ie.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "3d67eb9367c3f8903cce0f1af01203d4e5edeb72c0106a6ef856d25ff943eb5b"
+  },
+  {
+    "code": "UKR",
+    "country": "Ukraine",
+    "source": "https://flagcdn.com/w80/ua.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "a7474c46f2e957e4d27bd034119bc4be4bf9b1faf908338d0f5d97574e1ba07d"
+  },
+  {
+    "code": "HUN",
+    "country": "Hungary",
+    "source": "https://flagcdn.com/w80/hu.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "5e54bb353099fd19f6e6ce673d7248bf83090909d5b4728367971fae097b23b0"
+  },
+  {
+    "code": "SWE",
+    "country": "Sweden",
+    "source": "https://flagcdn.com/w80/se.png",
+    "width": 80,
+    "height": 50,
+    "sha256": "e8433ddb96b727f2b2420f21f588feb88a5f3984b0c2fe65e97e0b5285f3a2ef"
+  },
+  {
+    "code": "ITA",
+    "country": "Italy",
+    "source": "https://flagcdn.com/w80/it.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "655b1b31b9a3d3b6f659863e6ffebedaf8810e5e97f12fea687e9ede6d298c3d"
+  },
+  {
+    "code": "DEN",
+    "country": "Denmark",
+    "source": "https://flagcdn.com/w80/dk.png",
+    "width": 80,
+    "height": 61,
+    "sha256": "7f9de76f88b1049ad15974b93e1bc863280bfc3c5c566227a702e57684e0f233"
+  },
+  {
+    "code": "SVK",
+    "country": "Slovakia",
+    "source": "https://flagcdn.com/w80/sk.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "bfb0ce5b40660048a0e13fdc9089c26d872a4cc41f709065276b80bc15fca0ca"
+  },
+  {
+    "code": "CAN",
+    "country": "Canada",
+    "source": "https://flagcdn.com/w80/ca.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "c6a0b1b087f62170a41cd9d0b35bd532df0286608cc7c1c5a8c3639937b6c867"
+  },
+  {
+    "code": "LTU",
+    "country": "Lithuania",
+    "source": "https://flagcdn.com/w80/lt.png",
+    "width": 80,
+    "height": 48,
+    "sha256": "58b3036362d8b800df8df379a5b38b899163d317023f8ca85725f4b26a90bda6"
+  },
+  {
+    "code": "KAZ",
+    "country": "Kazakhstan",
+    "source": "https://flagcdn.com/w80/kz.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "9dd15436c71357bfe6059992a9a83cd60e634a3ae99200c7d67a5410e986b9d2"
+  },
+  {
+    "code": "CHN",
+    "country": "China",
+    "source": "https://flagcdn.com/w80/cn.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "fdbfb0d49ec098827d28f297a4ee3614edd1dcc014bcdf978b7dce73c7b7b4f1"
+  },
+  {
+    "code": "FRA",
+    "country": "France",
+    "source": "https://flagcdn.com/w80/fr.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "2a539c1a42f160aab68730f4caaa322bd6fbccf42145015bb7544961671a9cbd"
+  },
+  {
+    "code": "NED",
+    "country": "Netherlands",
+    "source": "https://flagcdn.com/w80/nl.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "2551bcd6a2ea816da99fd646a6f68feef0e3b2897216b1afca88a6e4283ee42f"
+  },
+  {
+    "code": "RUS",
+    "country": "Russia",
+    "source": "https://flagcdn.com/w80/ru.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "fe1a82a5145e5fba6982bb14cb20663b888a5feabada2235d036825fa4cbcac8"
+  },
+  {
+    "code": "KOR",
+    "country": "South Korea",
+    "source": "https://flagcdn.com/w80/kr.png",
+    "width": 80,
+    "height": 53,
+    "sha256": "8a0e8db363c5177c129bdc1140f5c219f17014153a5da592877c4b4c718c248f"
+  },
+  {
+    "code": "SLO",
+    "country": "Slovenia",
+    "source": "https://flagcdn.com/w80/si.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "37c463135e3fbd09539b6bbcd2edb668897657161b7e5a205ecd0294f4100f14"
+  },
+  {
+    "code": "GBR",
+    "country": "United Kingdom",
+    "source": "https://flagcdn.com/w80/gb.png",
+    "width": 80,
+    "height": 40,
+    "sha256": "94f29281d0b2b67b035dd279a4b43b18b8be9e889f5287af2b2c5e3723e0c810"
+  }
+]

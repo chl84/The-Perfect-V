@@ -139,7 +139,7 @@ class App {
     CupSetup worldSetup = defaultCupSetup(), teamSetup = defaultTeamCupSetup();
     bool setupTeam = false, hasCupSave = false;
     int setupTab = 0, setupPage = 0, standingsPage = 0, editingName = -1;
-    std::string editText, message, replayExportError, completedName;
+    std::string editText, message, replayExportError, completedName, completedCountry;
     bool editingCountry = false;
     int completedRound = 0, completedEvent = 0;
     std::filesystem::path replayDirectory;
@@ -277,6 +277,12 @@ class App {
             else
                 worldSetup = saved.setup();
         }
+        for (CupSetup *setup : {&worldSetup, &teamSetup})
+            for (size_t i = 0; i < setup->participants.size(); ++i) {
+                const auto &p = setup->participants[i];
+                if (p.computer && (p.name.rfind("CPU ", 0) == 0 || p.name.rfind(p.country + " ", 0) == 0))
+                    assignCpuIdentity(*setup, i, athleteIdentitySeed());
+            }
         replayDirectory = dataDir;
         SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
         hasReplay = loadReplay(dataDir + "/latest-dsj2.sjr", lastReplay);
@@ -419,6 +425,10 @@ class App {
         int jumper = activeJumper();
         return jumper >= 0 ? cup.entries()[size_t(jumper)].participant.name : "YOU";
     }
+    std::string jumperCountry() const {
+        int jumper = activeJumper();
+        return jumper >= 0 ? cup.entries()[size_t(jumper)].participant.country : "";
+    }
     void checkpointCup() {
         if (!competition)
             return;
@@ -518,6 +528,7 @@ class App {
     }
     void completeJump() {
         completedName = jumperName();
+        completedCountry = jumperCountry();
         completedRound = round;
         completedEvent = cupEvent;
         sessionWeather = sim.weatherState();
@@ -564,18 +575,44 @@ class App {
         if (accept && !editText.empty()) {
             if (editingName >= 0 && editingName < int(setup.participants.size())) {
                 auto &p = setup.participants[size_t(editingName)];
-                (editingCountry ? p.country : p.name) = editText;
+                if (editingCountry) {
+                    const auto *nation = nationality(editText);
+                    if (!nation) {
+                        message = "Unknown country code";
+                        return;
+                    }
+                    p.country = nation->code;
+                    if (p.computer)
+                        assignCpuIdentity(setup, size_t(editingName), athleteIdentitySeed(), true);
+                } else
+                    p.name = editText;
             } else if (editingName <= -2) {
                 size_t index = size_t(-editingName - 2);
                 if (index < setup.teams.size()) {
                     auto &t = setup.teams[index];
-                    (editingCountry ? t.country : t.name) = editText;
-                    for (auto &p : setup.participants)
-                        if (p.team == int(index))
-                            p.country = t.country;
+                    if (editingCountry) {
+                        const auto *nation = nationality(editText);
+                        if (!nation) {
+                            message = "Unknown country code";
+                            return;
+                        }
+                        if (nationality(t.name) == nationality(t.country))
+                            t.name = nation->name;
+                        t.country = nation->code;
+                        for (size_t i = 0; i < setup.participants.size(); ++i) {
+                            auto &p = setup.participants[i];
+                            if (p.team == int(index)) {
+                                p.country = t.country;
+                                if (p.computer)
+                                    assignCpuIdentity(setup, i, athleteIdentitySeed(), true);
+                            }
+                        }
+                    } else
+                        t.name = editText;
                 }
             }
         }
+        message.clear();
         editingName = -1;
         SDL_StopTextInput(window);
     }
@@ -693,8 +730,11 @@ class App {
         return interpolateFrame(a, b, k);
     }
     void action(Action a, int value = 0) {
-        if (editingName != -1)
+        if (editingName != -1) {
             finishNameEdit(true);
+            if (editingName != -1)
+                return;
+        }
         message.clear();
         buttons.clear();
         bool playerAction = a == Action::CupPlayerName || a == Action::CupPlayerCountry ||
@@ -789,6 +829,10 @@ class App {
         case Action::CupTeamName:
         case Action::CupTeamCountry: {
             bool team = a == Action::CupTeamName || a == Action::CupTeamCountry;
+            if (setupTeam && a == Action::CupPlayerCountry) {
+                value = editableSetup().participants[size_t(value)].team;
+                team = true;
+            }
             editingCountry = a == Action::CupTeamCountry || a == Action::CupPlayerCountry;
             editingName = team ? -2 - value : value;
             editText = team ? (editingCountry ? editableSetup().teams[size_t(value)].country
@@ -798,10 +842,14 @@ class App {
             SDL_StartTextInput(window);
             break;
         }
-        case Action::CupPlayerType:
-            editableSetup().participants[size_t(value)].computer =
-                !editableSetup().participants[size_t(value)].computer;
+        case Action::CupPlayerType: {
+            auto &setup = editableSetup();
+            auto &p = setup.participants[size_t(value)];
+            p.computer = !p.computer;
+            if (p.computer)
+                assignCpuIdentity(setup, size_t(value), athleteIdentitySeed());
             break;
+        }
         case Action::CupPlayerLevel:
             editableSetup().participants[size_t(value)].level =
                 (editableSetup().participants[size_t(value)].level + 1) % 6;
@@ -1161,6 +1209,12 @@ class App {
                      bool selected = false) {
         button(label, x, y, w, a, value, selected, 35, 13);
     }
+    void flagButton(const std::string &country, float x, float y, float w, Action action, int value) {
+        const bool hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + 35;
+        renderer->rect(x, y, w, 35, {.042f, .097f, .125f, hover ? 1.f : .86f}, 6);
+        renderer->countryFlag(country, x + (w - 30) / 2, y + 7, 30, 21);
+        buttons.push_back({x, y, w, 35, action, value});
+    }
     void textLink(const std::string &label, float x, float y, float w, Action a, float size = 15) {
         bool hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + 36;
         if (hover)
@@ -1204,7 +1258,8 @@ class App {
         r.text("THE PERFECT V", x + 59, y - 2, 23, colors::white, true);
         const bool hover = mouseX >= 76 && mouseX <= 392 && mouseY >= 249 && mouseY <= 295;
         r.rect(76, 249, 316, 46, {.025f, .071f, .094f, hover ? .9f : .65f}, 6);
-        r.text(h.name + " / K" + std::to_string(h.k), 96, 262, 16, colors::white);
+        r.countryFlag(h.country, 96, 261, 28, 20);
+        r.text(h.name + " / K" + std::to_string(h.k), 137, 262, 16, colors::white);
         r.line(364, 267, 370, 273, colors::muted, 1.4);
         r.line(370, 273, 376, 267, colors::muted, 1.4);
         buttons.push_back({76, 249, 316, 46, Action::Hills});
@@ -1240,6 +1295,7 @@ class App {
                 r.rect(x + 1, y + 1, 312, 214, {.16f, .53f, .48f, .14f}, 11);
                 r.rect(x, y + 20, 3, 47, colors::teal, 1);
             }
+            r.countryFlag(h.country, x + 252, y + 36, 40, 27);
             r.text(h.name, x + 20, y + 36, 23, colors::white, true);
             r.text("K" + std::to_string(h.k), x + 20, y + 91, 34, selected ? colors::teal : colors::white,
                    true);
@@ -1334,7 +1390,8 @@ class App {
                 r.rect(65, y + 1, 1308, 45, {.16f, .53f, .48f, .13f}, 7);
                 r.rect(64, y + 10, 3, 27, colors::teal, 1);
             }
-            r.text(hills()[i].name, 89, y + 13, 17, colors::white, true);
+            r.countryFlag(hills()[i].country, 89, y + 12, 30, 21);
+            r.text(hills()[i].name, 136, y + 13, 17, colors::white, true);
             r.text("K" + std::to_string(hills()[i].k), 870, y + 16, 13, colors::muted);
             r.textRight(records.best[i] ? number(records.best[i]) + " m" : "--", 1334, y + 10, 21,
                         records.best[i] ? colors::teal : colors::muted, true);
@@ -1353,8 +1410,9 @@ class App {
         if (competition) {
             r.glassPanel(470, 28, 490, 67, 7, .86f);
             const std::string name = jumperName();
-            const float size = std::min(18.f, 454.f / std::max(1.f, r.textWidth(name, 1, true)));
-            r.text(name, 488, 39, size, colors::white, true);
+            const float size = std::min(18.f, 406.f / std::max(1.f, r.textWidth(name, 1, true)));
+            r.countryFlag(jumperCountry(), 488, 39, 28, 20);
+            r.text(name, 532, 39, size, colors::white, true);
             r.text("Event " + std::to_string(cupEvent + 1) + " / " + std::to_string(cup.eventCount()) +
                        "   Round " + std::to_string(round + 1),
                    488, 70, 11, colors::muted);
@@ -1431,11 +1489,13 @@ class App {
         }
         if (s.beforeTakeoff || s.disqualified)
             r.text(s.feedback, 326, 595, 14, colors::muted);
-        if (competition)
+        if (competition) {
+            r.countryFlag(completedCountry, 326, 633, 24, 17);
             r.text(completedName + "  /  EVENT " + std::to_string(completedEvent + 1) + " OF " +
                        std::to_string(cup.eventCount()) + "  /  ROUND " + std::to_string(completedRound + 1) +
                        " OF 2",
-                   326, 633, 12, colors::teal, true);
+                   366, 633, 12, colors::teal, true);
+        }
         button(competition ? "Continue" : "Jump again", 326, 691, 265,
                competition ? Action::Next : Action::Again, 0, true);
         if (hasReplay && !s.disqualified)
@@ -1460,8 +1520,8 @@ class App {
             if (setupTeam) {
                 for (int t = 0; t < int(setup.teams.size()); ++t) {
                     smallButton(setup.teams[size_t(t)].name, 65 + t * 266, 299, 177, Action::CupTeamName, t);
-                    smallButton(setup.teams[size_t(t)].country, 250 + t * 266, 299, 63,
-                                Action::CupTeamCountry, t);
+                    flagButton(setup.teams[size_t(t)].country, 250 + t * 266, 299, 63, Action::CupTeamCountry,
+                               t);
                 }
                 smallButton("- team", 1150, 299, 96, Action::CupTeamCount, -1);
                 smallButton("+ team", 1257, 299, 111, Action::CupTeamCount, 1);
@@ -1476,7 +1536,7 @@ class App {
                 r.glassPanel(65, y, 1303, 43, 8, .86f);
                 r.text(std::to_string(i + 1), 83, y + 12, 14, colors::muted);
                 smallButton(p.name, 132, y + 3, 330, Action::CupPlayerName, i);
-                smallButton(p.country, 479, y + 3, 82, Action::CupPlayerCountry, i);
+                flagButton(p.country, 479, y + 3, 82, Action::CupPlayerCountry, i);
                 smallButton(p.computer ? "CPU" : "Human", 582, y + 3, 127, Action::CupPlayerType, i);
                 if (p.computer)
                     smallButton(levels[p.level], 728, y + 3, 155, Action::CupPlayerLevel, i);
@@ -1513,7 +1573,10 @@ class App {
         r.glassPanel(300, 211, 840, 470, 16, .94f);
         r.pill(cup.setup().mode == CupMode::Team ? "TEAM CUP" : "WORLD CUP", 343, 246);
         r.text("Next jumper", 343, 304, 24, colors::muted);
-        r.text(jumperName(), 343, 354, 43, colors::white, true);
+        r.countryFlag(jumperCountry(), 343, 359, 44, 30);
+        const std::string name = jumperName();
+        const float nameSize = std::min(43.f, 684.f / std::max(1.f, r.textWidth(name, 1, true)));
+        r.text(name, 405, 354, nameSize, colors::white, true);
         r.text(sim.hill().name + " / EVENT " + std::to_string(cup.event() + 1) + " OF " +
                    std::to_string(cup.eventCount()) + " / ROUND " + std::to_string(cup.round() + 1),
                343, 423, 16, colors::teal);
@@ -1574,8 +1637,9 @@ class App {
                 r.text(number(e.results[0].total), 658, y + 13, 18, colors::white);
                 r.text(number(e.results[1].total), 832, y + 13, 18, colors::white);
             }
-            r.text(name, 174, y + 13, 18, colors::white, true);
-            r.text(country, 493, y + 16, 12, colors::muted);
+            r.countryFlag(country, 174, y + 14, 30, 21);
+            const float nameSize = std::min(18.f, 415.f / std::max(1.f, r.textWidth(name, 1, true)));
+            r.text(name, 222, y + 13, nameSize, colors::white, true);
             r.text(number(total), 1034, y + 13, 18, colors::white, true);
             r.textRight(std::to_string(points), 1334, y + 13, 19, colors::white, true);
         }
@@ -2060,6 +2124,20 @@ class App {
         selectedHill = 2;
         setupTeam = false;
         changeScreen(Screen::CupSetup);
+        clickButton(Action::CupPlayerType, 1);
+        clickButton(Action::CupPlayerType, 1);
+        if (!worldSetup.participants[1].computer || !nationality(worldSetup.participants[1].country) ||
+            worldSetup.participants[1].name.find(' ') == std::string::npos)
+            throw std::runtime_error("Converting a participant to CPU did not generate an identity");
+        clickButton(Action::CupPlayerCountry, 1);
+        editText = "ZZZ";
+        finishNameEdit(true);
+        if (editingName == -1 || message.empty())
+            throw std::runtime_error("Unknown nationality was silently accepted");
+        editText = "deu";
+        finishNameEdit(true);
+        if (editingName != -1 || worldSetup.participants[1].country != "GER")
+            throw std::runtime_error("Flag selector did not canonicalize an ISO country code");
         while (worldSetup.participants.size() < 16)
             action(Action::CupAddPlayer);
         for (int page = 0; page < 2; ++page) {
@@ -2147,6 +2225,15 @@ class App {
             throw std::runtime_error("Changing team count overwrote an existing team");
         teamSetup.teams[0].name = "NORWAY";
         action(Action::CupTeamCount, -1);
+        clickButton(Action::CupPlayerCountry, 4);
+        if (editingName != -3)
+            throw std::runtime_error("Member flag did not select the team's nationality");
+        editText = "JPN";
+        finishNameEdit(true);
+        for (int i = 4; i < 8; ++i)
+            if (teamSetup.participants[size_t(i)].country != "JPN" ||
+                teamSetup.participants[size_t(i)].name.find(' ') == std::string::npos)
+                throw std::runtime_error("Team nationality change did not update its CPU members");
         teamSetup.hills = {0, 1};
         action(Action::CupPlayerName, 0);
         editText = "HOTSEAT ONE";

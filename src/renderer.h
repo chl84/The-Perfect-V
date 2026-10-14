@@ -39,6 +39,7 @@ class Renderer {
     void textRight(const std::string &, float x, float y, float size, Color c = colors::white,
                    bool bold = false);
     void pill(const std::string &, float x, float y, Color c = colors::teal);
+    void countryFlag(const std::string &country, float x, float y, float w = 32, float h = 22);
     void windArrow(float x, float y, double speed, double angle);
     void finish();
     void capture(const std::string &path);
@@ -61,6 +62,7 @@ class Renderer {
     };
     SDL_Window *window;
     Font regular, boldFont;
+    sjp::gfx::Id flagTexture = 0;
     sjp::gfx::Id snowTexture = 0;
     sjp::gfx::Id naturalSnowTexture = 0;
     sjp::gfx::Id spruceMarkerTexture = 0;
@@ -76,6 +78,7 @@ class Renderer {
     std::array<visual::InrunLayout, HILL_COUNT> inrunLayouts;
     std::array<visual::GrandstandLayout, HILL_COUNT> grandstandLayouts;
     Font loadFont(const std::string &);
+    void loadFlagAtlas(const std::string &);
     void terrain(const Hill &);
     void inrunStructure(const Hill &, const visual::InrunLayout &);
     void scenery(const Hill &, const Frame &, double time);

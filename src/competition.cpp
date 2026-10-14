@@ -84,25 +84,58 @@ bool validateCupSetup(const CupSetup &setup, std::string *error) {
     } else if (!setup.teams.empty()) return fail(error, "World Cup does not use teams");
     return true;
 }
-CupSetup defaultCupSetup() {
+void assignCpuIdentity(CupSetup &setup, size_t index, uint32_t seed, bool retainCountry) {
+    if (index >= setup.participants.size())
+        return;
+    auto &p = setup.participants[index];
+    const std::string country = setup.mode == CupMode::Team && p.team >= 0 && p.team < int(setup.teams.size())
+                                    ? setup.teams[size_t(p.team)].country
+                                : retainCountry ? p.country
+                                                : "";
+    if (!country.empty() && !nationality(country))
+        return;
+    for (;;) {
+        const auto identity = randomAthleteIdentity(seed++, country);
+        const bool duplicate = std::any_of(
+            setup.participants.begin(), setup.participants.end(),
+            [&](const CupParticipant &other) { return &other != &p && other.name == identity.name; });
+        if (!duplicate) {
+            p.name = identity.name;
+            p.country = identity.country;
+            return;
+        }
+    }
+}
+CupSetup defaultCupSetup(uint32_t identitySeed) {
     CupSetup setup;
     setup.participants.push_back({"PLAYER 1", "NOR", false, 2, -1, 0});
-    for (int i = 1; i < 8; ++i)
-        setup.participants.push_back({"CPU " + std::to_string(i), "FIN", true, 2, -1, 0});
+    for (int i = 1; i < 8; ++i) {
+        setup.participants.push_back({"", "", true, 2, -1, 0});
+        assignCpuIdentity(setup, size_t(i), environment::hash(identitySeed ^ uint32_t(i)));
+    }
     for (int h = 0; h < int(HILL_COUNT); ++h) setup.hills.push_back(h);
     return setup;
 }
-CupSetup defaultTeamCupSetup() {
+CupSetup defaultTeamCupSetup(uint32_t identitySeed) {
     CupSetup setup;
     setup.mode = CupMode::Team;
-    constexpr const char *names[] = {"NORWAY", "FINLAND", "AUSTRIA", "GERMANY"};
-    constexpr const char *countries[] = {"NOR", "FIN", "AUT", "GER"};
-    setup.teams.clear();
     for (int t = 0; t < 4; ++t) {
-        setup.teams.push_back({names[t], countries[t]});
-        for (int member = 0; member < 4; ++member)
-            setup.participants.push_back({std::string(countries[t]) + " " + std::to_string(member + 1),
-                                          countries[t], t != 0, 2, t, member});
+        const Nationality *nation = nationality("NOR");
+        if (t != 0) {
+            uint32_t seed = environment::hash(identitySeed ^ uint32_t(t));
+            do {
+                nation = nationality(randomAthleteIdentity(seed++).country);
+            } while (std::any_of(setup.teams.begin(), setup.teams.end(),
+                                 [&](const CupTeam &team) { return team.country == nation->code; }));
+        }
+        setup.teams.push_back({t == 0 ? "NORWAY" : nation->name, nation->code});
+        for (int member = 0; member < 4; ++member) {
+            setup.participants.push_back({std::string(nation->code) + " " + std::to_string(member + 1),
+                                          nation->code, t != 0, 2, t, member});
+            if (t != 0)
+                assignCpuIdentity(setup, setup.participants.size() - 1,
+                                  environment::hash(identitySeed ^ uint32_t(t * 4 + member)));
+        }
     }
     for (int h = 0; h < int(HILL_COUNT); ++h) setup.hills.push_back(h);
     return setup;
