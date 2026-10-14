@@ -1257,21 +1257,26 @@ class App {
         r.line(x + 19, y + 8, x + 27, y - 3, colors::white, 2);
         r.line(x + 27, y - 3, x + 43, y + 23, colors::white, 2);
         r.text("THE PERFECT V", x + 59, y - 2, 23, colors::white, true);
-        const bool hover = mouseX >= 76 && mouseX <= 392 && mouseY >= 249 && mouseY <= 295;
-        r.rect(76, 249, 316, 46, {.025f, .071f, .094f, hover ? .9f : .65f}, 6);
-        r.countryFlag(h.country, 96, 261, 28, 20);
-        r.text(h.name + " / K" + std::to_string(h.k), 137, 262, 16, colors::white);
-        r.line(364, 267, 370, 273, colors::muted, 1.4);
-        r.line(370, 273, 376, 267, colors::muted, 1.4);
-        buttons.push_back({76, 249, 316, 46, Action::Hills});
-        button("Practice", 76, 323, 316, Action::Practice, 0, true, 54, 18);
-        button("Cup", 76, 391, 316, Action::Cup, 0, false, 54, 18);
-        button("Replays", 76, 459, 316, Action::ReplayBrowse, 0, false, 54, 18);
-        textLink("Records", 76, 540, 130, Action::Records);
-        textLink("Settings", 222, 540, 130, Action::Settings);
+        constexpr float quitY = 809;
+        const float groupHeight = hasCupSave ? 360.f : 314.f;
+        // Balance the visible group against the logo and Quit text, excluding
+        // the extra padding in the links' click targets.
+        const float groupY = (y + 23 + quitY + 8 - groupHeight) / 2;
+        const bool hover = mouseX >= x && mouseX <= x + 316 && mouseY >= groupY && mouseY <= groupY + 46;
+        r.rect(x, groupY, 316, 46, {.025f, .071f, .094f, hover ? .9f : .65f}, 6);
+        r.countryFlag(h.country, x + 20, groupY + 12, 28, 20);
+        r.text(h.name + " / K" + std::to_string(h.k), x + 61, groupY + 13, 16, colors::white);
+        r.line(x + 288, groupY + 18, x + 294, groupY + 24, colors::muted, 1.4);
+        r.line(x + 294, groupY + 24, x + 300, groupY + 18, colors::muted, 1.4);
+        buttons.push_back({x, groupY, 316, 46, Action::Hills});
+        button("Practice", x, groupY + 74, 316, Action::Practice, 0, true, 54, 18);
+        button("Cup", x, groupY + 142, 316, Action::Cup, 0, false, 54, 18);
+        button("Replays", x, groupY + 210, 316, Action::ReplayBrowse, 0, false, 54, 18);
+        textLink("Records", x, groupY + 291, 130, Action::Records);
+        textLink("Settings", x + 146, groupY + 291, 130, Action::Settings);
         if (hasCupSave)
-            textLink("Resume cup", 76, 586, 170, Action::CupResume);
-        textLink("Quit", 76, 809, 95, Action::Quit, 14);
+            textLink("Resume cup", x, groupY + 337, 170, Action::CupResume);
+        textLink("Quit", x, quitY, 95, Action::Quit, 14);
     }
     void hillPagination(float y) {
         auto &r = *renderer;
