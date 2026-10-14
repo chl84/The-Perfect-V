@@ -32,6 +32,14 @@ bool replaceFile(const std::string &path, std::ofstream &out) {
     return !ec;
 }
 } // namespace
+bool updateHillRecord(Records &records, int hill, const Result &result, bool human) {
+    if (!human || hill < 0 || size_t(hill) >= records.best.size() || result.crashed || result.disqualified ||
+        result.beforeTakeoff || !std::isfinite(result.distance) || result.distance <= 0 ||
+        result.distance > 1000 || result.distance <= records.best[size_t(hill)])
+        return false;
+    records.best[size_t(hill)] = result.distance;
+    return true;
+}
 bool saveRecords(const std::string &path, const Records &r) {
     if (!environment::valid(r.environment))
         return false;

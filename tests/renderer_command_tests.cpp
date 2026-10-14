@@ -258,6 +258,8 @@ std::vector<Saved> attributes;
 std::map<sjp::gfx::Enum, int> matrices{{sjp::gfx::MODELVIEW, 1}, {sjp::gfx::PROJECTION, 1}, {sjp::gfx::TEXTURE, 1}};
 sjp::gfx::Enum matrix = sjp::gfx::MODELVIEW, primitiveMode = sjp::gfx::TRIANGLES;
 bool primitive = false, depth = true;
+sjp::gfx::Id captureRecordList = 0;
+std::vector<sjp::Vec3> recordVertices;
 sjp::gfx::Id compiling = 0, nextList = 1, nextTexture = 1;
 struct List {
     size_t vertices = 0, commands = 0;
@@ -293,6 +295,8 @@ sjp::Vec3 cameraEye;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 std::vector<sjp::Vec3> standTops, spectatorSoles;
 void position(double x, double y, double z) {
+    if (captureRecordList && compiling == captureRecordList)
+        recordVertices.push_back({x, y, z});
     if (captureSnow && compiling && textureEnabled &&
         (boundTexture == protectedTexture || boundTexture == protectedTexture + 1)) {
         ++snowVertices;
@@ -1178,8 +1182,54 @@ int main() {
                                r.environmentConditions().weather == sjp::environment::Weather::Sunny,
                            "A default jump selected random weather instead of day and sun");
         }
+        {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            for (int hi = 0; hi < int(sjp::HILL_COUNT); ++hi) {
+                sjp::Simulation sim(hi, 0);
+                const auto &hill = sim.hill();
+                r.setHillRecord(0);
+                r.begin(hill, sim.frame(), 0, 0, false);
+                r.finish();
+                const auto terrainCache = audit::nextList;
+                const double distance = hill.k + 13.5;
+                r.setHillRecord(distance);
+                audit::captureRecordList = audit::nextList;
+                audit::recordVertices.clear();
+                r.begin(hill, sim.frame(), 0, 0, false);
+                r.finish();
+                audit::captureRecordList = 0;
+                audit::require(audit::nextList == terrainCache + 1 && !audit::recordVertices.empty(),
+                               "Record rebuilt terrain or did not create its small marker mesh");
+                const sjp::visual::CameraSurface snow(hill);
+                double lowX = 1e9, highX = -1e9;
+                for (const auto &p : audit::recordVertices) {
+                    audit::require(std::abs(p.y - snow.height(p.x, p.z)) < 1e-7,
+                                   "Blue record spray floats above or sinks into snow");
+                    lowX = std::min(lowX, p.x);
+                    highX = std::max(highX, p.x);
+                }
+                audit::require(std::abs((lowX + highX) / 2 - hill.atDistance(distance)) < 1e-7,
+                               "Blue record marker is not at the measured record distance");
+                const auto cached = audit::nextList;
+                r.begin(hill, sim.frame(), 1, 0, false);
+                r.finish();
+                audit::require(audit::nextList == cached, "Record marker geometry rebuilt every frame");
+                r.setHillRecord(distance + .5);
+                r.begin(hill, sim.frame(), 2, 0, false);
+                r.finish();
+                audit::require(audit::nextList == cached + 1 && audit::lists.size() <= 3,
+                               "Improved record rebuilt terrain or leaked the previous marker");
+                r.setHillRecord(0);
+                r.begin(hill, sim.frame(), 3, 0, false);
+                r.finish();
+                audit::require(audit::lists.size() <= 2, "Empty record left its marker visible/cached");
+                audit::balanced();
+                audit::require(audit::depth, "Record overlay leaked depth-write state");
+            }
+        }
+        audit::require(audit::lists.empty() && audit::textures.empty(), "Record marker leaked GPU resources");
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");
-        audit::require(audit::maximumLists <= 2, "Terrain cache retains more than two venues");
+        audit::require(audit::maximumLists <= 3, "Cache exceeds two venues and one small record marker");
         std::cout << "PASS: finite commands, balanced stacks, bounded cache, live current attributes, "
                      "zero-size window, resource cleanup, rectangular terrain-aligned advertisements "
                      "on all 32 hills; no GPU used\n";

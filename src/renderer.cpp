@@ -317,6 +317,8 @@ Renderer::~Renderer() {
     for (auto l : landscapes)
         if (l)
             sjp::gfx::deleteLists(l, 1);
+    if (recordMarkerMesh)
+        sjp::gfx::deleteLists(recordMarkerMesh, 1);
     sjp::gfx::deleteTextures(1, &regular.tex);
     sjp::gfx::deleteTextures(1, &boldFont.tex);
     if (flagTexture)
@@ -423,6 +425,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::fogf(sjp::gfx::FOG_START, lighting.fogStart * s);
     sjp::gfx::fogf(sjp::gfx::FOG_END, lighting.fogEnd * s);
     terrain(h);
+    hillRecordMarker(h);
     scenery(h, f, time);
     // The start signal and the moving windsock.
     double gx = h.start() + 2, gy = h.inrun(gx);

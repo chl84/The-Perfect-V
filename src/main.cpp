@@ -534,9 +534,7 @@ class App {
         sessionWeather = sim.weatherState();
         sessionAuxiliary = sim.pose.auxiliary;
         bool human = !competition || !activeComputer();
-        if (competition && human && !sim.result.crashed && !sim.result.disqualified &&
-            sim.result.distance > records.best[selectedHill]) {
-            records.best[selectedHill] = sim.result.distance;
+        if (updateHillRecord(records, selectedHill, sim.result, human)) {
             newRecord = true;
             if (!saveRecords(dataDir + "/records-dsj2.dat", records))
                 storageError = true;
@@ -1300,7 +1298,7 @@ class App {
             r.text("K" + std::to_string(h.k), x + 20, y + 91, 34, selected ? colors::teal : colors::white,
                    true);
             if (records.best[i] > 0)
-                r.text("Best " + number(records.best[i]) + " m", x + 21, y + 187, 12, colors::muted);
+                r.text("Record " + number(records.best[i]) + " m", x + 21, y + 187, 12, colors::muted);
             buttons.push_back({x, y, 314, 216, Action::SelectHill, i});
         }
         hillPagination(722);
@@ -1379,7 +1377,7 @@ class App {
         auto &r = *renderer;
         r.text("HILL", 89, 242, 11, colors::muted, true);
         r.text("K POINT", 870, 242, 11, colors::muted, true);
-        r.textRight("PERSONAL BEST", 1334, 242, 11, colors::muted, true);
+        r.textRight("HILL RECORD", 1334, 242, 11, colors::muted, true);
         int first = hillPage * HILLS_PER_PAGE;
         for (int slot = 0; slot < HILLS_PER_PAGE && first + slot < hillCount(); slot++) {
             int i = first + slot;
@@ -1452,7 +1450,7 @@ class App {
         r.rect(326, 121, 78, 3, colors::teal, 1);
         r.pill(s.disqualified ? "DISQUALIFIED"
                : s.crashed    ? "FALL"
-               : newRecord    ? "NEW PERSONAL BEST"
+               : newRecord    ? "NEW HILL RECORD"
                               : "RESULT",
                326, 154, s.crashed || s.disqualified ? colors::orange : colors::teal);
         r.textRight(sim.hill().name + " / K" + std::to_string(sim.hill().k), 1114, 161, 13, colors::muted);
@@ -1732,6 +1730,7 @@ class App {
         else if (panorama)
             conditions = environment::resolve(records.environment, 0x7abc9013U);
         renderer->setEnvironment(conditions);
+        renderer->setHillRecord(records.best[size_t(hi)]);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
         renderer->overlay();
         switch (screen) {
@@ -1905,6 +1904,7 @@ class App {
         clickButton(Action::Practice);
         if (screen != Screen::Playing)
             throw std::runtime_error("Practice button input failed");
+        const double practiceRecordBefore = records.best[size_t(selectedHill)];
         auto key = [&](SDL_Keycode code) {
             SDL_Event e{};
             e.type = SDL_EVENT_KEY_DOWN;
@@ -1999,6 +1999,10 @@ class App {
                       << ", landing=" << mouseLanding << '\n';
             return 1;
         }
+        if (records.best[size_t(selectedHill)] != std::max(practiceRecordBefore, sim.result.distance) ||
+            loadRecords(dataDir + "/records-dsj2.dat").best != records.best)
+            throw std::runtime_error("Standing practice jump did not persist its all-time human record");
+        const auto replayRecords = records.best;
         beginReplay();
         seekReplay(replayDuration() * .6);
         updateAudio(0);
@@ -2026,6 +2030,8 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/replay.ppm");
         renderer->finish();
+        if (records.best != replayRecords)
+            throw std::runtime_error("Replay changed hill records");
         Simulation successfulJump = sim;
         sim.reset(0, 0);
         sim.setWind(0, 0);
@@ -2301,6 +2307,8 @@ class App {
         int visibleJumps = 0;
         while (!cup.complete()) {
             if (screen == Screen::JumpReady) {
+                const bool cpuJumper = activeComputer();
+                const auto beforeRecords = records.best;
                 startTurn();
                 for (int n = 0; n < 20000 && screen == Screen::Playing; ++n) {
                     sim.step(ORIGINAL_TICK, autopilot(sim));
@@ -2309,6 +2317,8 @@ class App {
                 }
                 if (screen != Screen::Result)
                     throw std::runtime_error("Visible CPU/human cup jump failed");
+                if (cpuJumper && records.best != beforeRecords)
+                    throw std::runtime_error("Visible CPU jump set a hill record");
                 ++visibleJumps;
                 Competition restored;
                 if (!loadCompetition(dataDir + "/cup.sjc", restored) ||

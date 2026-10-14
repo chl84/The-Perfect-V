@@ -264,7 +264,7 @@ sjp::gfx::Id makeSprayMarkerTexture() {
         }
     return makeMarkerTexture(std::move(pixels), width, height);
 }
-void distanceMarkerStrip(const Hill &h, double x, int distance, double width, double extent, Color color) {
+void distanceMarkerStrip(const Hill &h, double x, double distance, double width, double extent, Color color) {
     const double scale = h.scale(), step = 3 * scale, zStep = 10 * scale;
     const double gridStart = std::min(-170 * scale, h.inrunStart() - 60 * scale);
     const double halfWidth = width * .5 / std::hypot(1.0, h.slope(x));
@@ -1078,21 +1078,21 @@ void Renderer::terrain(const Hill &h) {
     // uphill snow across their full width, and their posts embed in the mesh.
     {
         const double x = h.kMarkerX;
-        constexpr double width = 2.45, height = 1.12, depth = .22;
+        constexpr double width = 1.60, height = .74, depth = .16;
         const visual::CameraSurface snow(h);
-        const Color c{.94f, .28f, .28f, 1};
+        const Color c{.50f, .28f, .26f, 1};
         for (int side : {-1, 1}) {
             const double z = side * 20 * s, y = snow.height(x, z);
             double highestSnow = y;
             for (double xx : {x - width * .5, x, x + width * .5})
                 for (double zz : {z - depth * .5, z, z + depth * .5})
                     highestSnow = std::max(highestSnow, snow.height(xx, zz));
-            const double panelY = std::max(y + 1.1, highestSnow + .35 + height * .5);
-            const double postTop = std::max(y + 3.0, panelY + height * .5 + .18);
+            const double panelY = std::max(y + .90, highestSnow + .25 + height * .5);
+            const double postTop = panelY + height * .5 + .12;
             beam({x, y - .30, z}, {x, postTop, z}, .08, c);
-            box({x, panelY, z}, {width, height, depth}, {.91f, .24f, .24f, 1});
-            signText("K" + std::to_string(h.k), {x, panelY + .02, z - side * .116}, 2.15, .65, side,
-                     {.98f, .97f, .92f, 1});
+            box({x, panelY, z}, {width, height, depth}, {.68f, .31f, .29f, 1});
+            signText("K" + std::to_string(h.k), {x, panelY + .01, z - side * (depth * .5 + .006)}, 1.38, .43,
+                     side, {.98f, .97f, .92f, 1});
             box({x, postTop, z}, {.24, .20, .24}, {.94f, .95f, .90f, 1});
         }
     }
@@ -1149,6 +1149,44 @@ void Renderer::terrain(const Hill &h) {
     // Finish writes current attributes, so restore the caller's state last.
     sjp::visual::popAttrib();
     sjp::gfx::endList();
+}
+
+void Renderer::hillRecordMarker(const Hill &h) {
+    const double distance = hillRecordDistance;
+    if (!std::isfinite(distance) || distance <= 0 || distance > 1000) {
+        if (recordMarkerMesh) {
+            gfx::deleteLists(recordMarkerMesh, 1);
+            recordMarkerMesh = 0;
+        }
+        return;
+    }
+    if (recordMarkerMesh && recordMarkerHill == h.id && cachedRecordDistance == distance) {
+        gfx::callList(recordMarkerMesh);
+        return;
+    }
+    if (recordMarkerMesh)
+        gfx::deleteLists(recordMarkerMesh, 1);
+    recordMarkerHill = h.id;
+    cachedRecordDistance = distance;
+    // Only this tiny mesh changes when a human improves the record; the hill
+    // cache, snow profile and original distance integration remain intact.
+    recordMarkerMesh = gfx::genLists(1);
+    gfx::newList(recordMarkerMesh, gfx::COMPILE_AND_EXECUTE);
+    visual::StaticBatch batch;
+    visual::pushAttrib(gfx::ENABLE_BIT | gfx::TEXTURE_BIT | gfx::DEPTH_BUFFER_BIT | gfx::COLOR_BUFFER_BIT |
+                       gfx::POLYGON_BIT | gfx::CURRENT_BIT);
+    visual::disable(gfx::LIGHTING);
+    visual::enable(gfx::TEXTURE_2D);
+    visual::bindTexture(gfx::TEXTURE_2D, sprayMarkerTexture);
+    visual::enable(gfx::BLEND);
+    visual::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
+    visual::depthMask(gfx::FALSE);
+    visual::enable(gfx::POLYGON_OFFSET_FILL);
+    visual::polygonOffset(-1, -1);
+    distanceMarkerStrip(h, h.atDistance(distance), distance, .85, 20, {.25f, .41f, .65f, .82f});
+    batch.finish();
+    visual::popAttrib();
+    gfx::endList();
 }
 
 void Renderer::scenery(const Hill &h, const Frame &frame, double time) {

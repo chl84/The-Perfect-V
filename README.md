@@ -92,7 +92,8 @@ codes in the interface; click a flag in cup setup to edit the nationality.
 
 Select hills, seasons, CPU levels and whether
 to watch CPU jumps. Local players share the machine, and interrupted competitions
-can be resumed from checkpoints. Official standing human jumps can set hill records.
+can be resumed from checkpoints. Standing human jumps in practice and cups can set all-time hill records. The blue
+spray line marks the saved record on each hill; CPU jumps and replays cannot update it.
 
 Preferences, records and replays remain in the existing SDL user-data directory.
 The launcher prints its location as `Saves:` when the game starts. The name change

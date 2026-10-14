@@ -44,6 +44,7 @@ class Renderer {
     void finish();
     void capture(const std::string &path);
     void resetCamera() { cameraInit = false; }
+    void setHillRecord(double distance) { hillRecordDistance = distance; }
     void setJumpWeather(uint32_t seed, environment::Selection selection = {});
     void setEnvironment(environment::Conditions, bool restart = false);
     const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
@@ -67,6 +68,9 @@ class Renderer {
     sjp::gfx::Id naturalSnowTexture = 0;
     sjp::gfx::Id spruceMarkerTexture = 0;
     sjp::gfx::Id sprayMarkerTexture = 0;
+    sjp::gfx::Id recordMarkerMesh = 0;
+    double hillRecordDistance = 0, cachedRecordDistance = 0;
+    std::string recordMarkerHill;
     std::array<sjp::gfx::Id, HILL_COUNT> landscapes{};
     std::array<uint64_t, HILL_COUNT> landscapeUse{};
     uint64_t landscapeClock = 0;
@@ -80,6 +84,7 @@ class Renderer {
     Font loadFont(const std::string &);
     void loadFlagAtlas(const std::string &);
     void terrain(const Hill &);
+    void hillRecordMarker(const Hill &);
     void inrunStructure(const Hill &, const visual::InrunLayout &);
     void scenery(const Hill &, const Frame &, double time);
     void athlete(const Hill &, const Frame &, bool ghost);
