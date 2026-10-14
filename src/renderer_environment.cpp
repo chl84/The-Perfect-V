@@ -109,14 +109,22 @@ Color snowColor(const Hill &h, double x, double z) {
     return {float(.83 + .065 * corridor + variation), float(.89 + .035 * corridor + variation),
             float(.94 + .012 * corridor + variation * .6), 1};
 }
+Vec3 terrainSnowNormal(const Hill &h, Vec3 p) {
+    const double dx = 3 * h.scale(), dz = 10 * h.scale();
+    return Vec3{-(terrainY(h, p.x + dx, p.z) - terrainY(h, p.x - dx, p.z)) / (2 * dx), 1,
+                -(terrainY(h, p.x, p.z + dz) - terrainY(h, p.x, p.z - dz)) / (2 * dz)}
+        .normalized();
+}
 void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = false) {
     if (groomed && preparedSnowWeight(h, a.x, a.z) == 0 && preparedSnowWeight(h, b.x, b.z) == 0 &&
         preparedSnowWeight(h, c.x, c.z) == 0 && preparedSnowWeight(h, d.x, d.z) == 0)
         return;
-    const Vec3 n = cross(b - a, c - a).normalized();
+    // Both snow layers share smooth vertex normals across the entire valley.
+    // Only lighting changes; the original terrain vertices remain untouched.
     sjp::visual::begin(sjp::gfx::QUADS);
-    sjp::visual::normal(n.x, n.y, n.z);
     for (Vec3 p : {a, b, c, d}) {
+        const Vec3 normal = terrainSnowNormal(h, p);
+        sjp::visual::normal(normal.x, normal.y, normal.z);
         Color color = snowColor(h, p.x, p.z);
         if (groomed)
             color.a = float(preparedSnowWeight(h, p.x, p.z));
@@ -126,12 +134,16 @@ void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = fals
     }
     sjp::visual::end();
 }
-void texturedQuad(Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
-    const Vec3 n = cross(b - a, c - a).normalized();
+void inrunSnowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     col(color);
     sjp::visual::begin(sjp::gfx::QUADS);
-    sjp::visual::normal(n.x, n.y, n.z);
     for (Vec3 p : {a, b, c, d}) {
+        // Sample only the existing inrun profile, including its clipped end.
+        // These vertex normals are computed once and retained in the cached mesh.
+        const double left = std::max(h.inrunStart(), p.x - 2 * h.scale());
+        const double right = std::min(0.0, p.x + 2 * h.scale());
+        const Vec3 n = Vec3{-(h.inrun(right) - h.inrun(left)) / (right - left), 1, 0}.normalized();
+        sjp::visual::normal(n.x, n.y, n.z);
         sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
         vertex(p);
     }
@@ -974,7 +986,7 @@ void Renderer::terrain(const Hill &h) {
     for (double x = h.inrunStart(); x < 0; x += 2 * s) {
         const double xx = std::min(0.0, x + 2 * s), y = h.inrun(x), yy = h.inrun(xx);
         sjp::visual::enable(sjp::gfx::TEXTURE_2D);
-        texturedQuad({x, y, -2.3}, {x, y, 2.3}, {xx, yy, 2.3}, {xx, yy, -2.3}, {.92f, .96f, .97f, 1});
+        inrunSnowQuad(h, {x, y, -2.3}, {x, y, 2.3}, {xx, yy, 2.3}, {xx, yy, -2.3}, {.92f, .96f, .97f, 1});
         sjp::visual::disable(sjp::gfx::TEXTURE_2D);
         quad({x, y - .62, 2.3}, {xx, yy - .62, 2.3}, {xx, yy, 2.3}, {x, y, 2.3}, {.33f, .29f, .25f, 1});
         quad({x, y - .62, -2.3}, {x, y, -2.3}, {xx, yy, -2.3}, {xx, yy - .62, -2.3}, {.33f, .29f, .25f, 1});

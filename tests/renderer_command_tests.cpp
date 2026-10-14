@@ -236,6 +236,32 @@ bool textureEnabled = false, captureSnow = false;
 sjp::gfx::Id boundTexture = 0, protectedTexture = 0;
 uint64_t snowHash = 1469598103934665603ULL;
 size_t snowVertices = 0;
+struct SnowVertex {
+    sjp::Vec3 position, normal;
+};
+std::vector<SnowVertex> snowLighting;
+void smoothSnow(const sjp::Hill &hill) {
+    std::map<std::array<double, 3>, sjp::Vec3> shared;
+    size_t inrunShared = 0, landingShared = 0, surroundingShared = 0;
+    for (const auto &vertex : snowLighting) {
+        const auto p = vertex.position, n = vertex.normal;
+        const bool inrun =
+            p.x < 0 && std::abs(std::abs(p.z) - 2.3) < 1e-8 && std::abs(p.y - hill.inrun(p.x)) < 1e-8;
+        const bool landing =
+            p.x > 6 * hill.scale() && p.x < hill.outrunBottom() + 20 && std::abs(p.z) < 10 * hill.scale();
+        require(n.y > 0 && std::abs(n.length() - 1) < 1e-6, "Snow normal is not upward and unit length");
+        const auto [it, inserted] = shared.emplace(std::array<double, 3>{p.x, p.y, p.z}, n);
+        if (!inserted) {
+            require((it->second - n).length() < 1e-6,
+                    "Shared snow vertices have discontinuous lighting normals");
+            (inrun ? inrunShared : landing ? landingShared : surroundingShared)++;
+        }
+    }
+    // Static batching still emits each existing snow quad as six vertices.
+    require(snowLighting.size() % 6 == 0, "Snow topology changed");
+    require(inrunShared > 20 && landingShared > 20 && surroundingShared > 100,
+            "Snow lighting audit did not cover the inrun, landing and surrounding terrain");
+}
 void protectedSnow(int hill) {
     // Snapshot of every natural/prepared snow and inrun vertex before the
     // construction changes. Geometry, including its original elevations,
@@ -339,6 +365,7 @@ void position(double x, double y, double z) {
     if (captureSnow && compiling && textureEnabled &&
         (boundTexture == protectedTexture || boundTexture == protectedTexture + 1)) {
         ++snowVertices;
+        snowLighting.push_back({{x, y, z}, {current.normal[0], current.normal[1], current.normal[2]}});
         for (double value : {x, y, z}) {
             uint64_t bits;
             std::memcpy(&bits, &value, sizeof(bits));
@@ -913,7 +940,7 @@ int main() {
                 uint8_t(i / 360000), uint8_t(i / 6000 % 60), uint8_t(i / 100 % 60), uint8_t(i % 100));
             snowy += sjp::visual::snowForJump(seed);
         }
-        audit::require(snowy > 14500 && snowy < 15500, "Snowfall probability differs from 15 percent");
+        audit::require(snowy > 29000 && snowy < 31000, "Snowfall probability differs from 30 percent");
         for (double angle : {0.0, sjp::PI / 4, sjp::PI / 2, sjp::PI, -sjp::PI / 2, -sjp::PI / 4}) {
             sjp::Frame f;
             f.windAngle = float(angle);
@@ -964,9 +991,11 @@ int main() {
                 audit::captureSnow = true;
                 audit::snowHash = 1469598103934665603ULL;
                 audit::snowVertices = 0;
+                audit::snowLighting.clear();
                 r.begin(s.hill(), s.frame(), 4, 0, true);
                 audit::captureSnow = false;
                 audit::protectedSnow(hi);
+                audit::smoothSnow(s.hill());
                 audit::captureBoards = false;
                 audit::rectangularBoards(s.hill());
                 audit::flatGrandstands();

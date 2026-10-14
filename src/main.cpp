@@ -3,6 +3,7 @@
 #include "original_replay.h"
 #include "physics.h"
 #include "renderer.h"
+#include "jump_feedback.h"
 #include "presentation_timing.h"
 #include "storage.h"
 #include "visual_weather.h"
@@ -153,6 +154,7 @@ class App {
     int weatherHill = -1;
     environment::Conditions activeEnvironment;
     environment::Conditions replayEnvironment;
+    visual::JumpFeedback completedFeedback;
     uint32_t visualJumpSerial = 0;
     bool synchronousRendering = false, noMsaa = false, gpuValidation = false;
     bool smokeMouseCapture = false;
@@ -527,6 +529,7 @@ class App {
         newJump(Screen::JumpReady);
     }
     void completeJump() {
+        completedFeedback = visual::jumpFeedback(sim);
         completedName = jumperName();
         completedCountry = jumperCountry();
         completedRound = round;
@@ -1461,14 +1464,8 @@ class App {
         r.line(326, 410, 1114, 410, {.3f, .42f, .48f, .55f});
         r.text("DISTANCE", 326, 434, 11, colors::muted, true);
         r.text(number(s.distancePoints) + " pts", 326, 459, 23, colors::white, true);
-        r.text("STYLE", 603, 434, 11, colors::muted, true);
-        r.text(number(s.stylePoints) + " pts", 603, 459, 23, colors::white, true);
-        r.text("LANDING", 893, 434, 11, colors::muted, true);
-        r.text(s.disqualified                   ? "--"
-               : s.crashed                      ? "Fall"
-               : s.landing == Landing::Telemark ? "Telemark"
-                                                : "Two-foot",
-               893, 459, 23, s.crashed ? colors::orange : colors::teal, true);
+        r.textRight("STYLE", 1114, 434, 11, colors::muted, true);
+        r.textRight(number(s.stylePoints) + " pts", 1114, 459, 23, colors::white, true);
         auto min = std::min_element(s.judges.begin(), s.judges.end());
         auto max = std::max_element(s.judges.begin(), s.judges.end());
         if (min == max && s.judges.size() > 1)
@@ -1485,8 +1482,18 @@ class App {
             if (drop)
                 r.line(x + 11, 535, x + 73, 535, colors::muted, 1);
         }
-        if (s.beforeTakeoff || s.disqualified)
-            r.text(s.feedback, 326, 595, 14, colors::muted);
+        const std::array<const char *, 3> labels{"TAKEOFF", "FLIGHT", "LANDING"};
+        const std::array<visual::FeedbackItem, 3> feedback{
+            completedFeedback.takeoff, completedFeedback.flight, completedFeedback.landing};
+        for (size_t i = 0; i < feedback.size(); ++i) {
+            const float x = 326 + i * 277;
+            const Color color = feedback[i].tone == visual::FeedbackTone::Good ? colors::teal
+                                : feedback[i].tone == visual::FeedbackTone::Improve ? colors::orange
+                                                                                   : colors::muted;
+            r.text(labels[i], x, 579, 11, colors::muted, true);
+            r.rect(x, 607, 4, 4, color, 2);
+            r.text(feedback[i].text, x + 14, 597, 17, colors::white, true);
+        }
         if (competition) {
             r.countryFlag(completedCountry, 326, 633, 24, 17);
             r.text(completedName + "  /  EVENT " + std::to_string(completedEvent + 1) + " OF " +

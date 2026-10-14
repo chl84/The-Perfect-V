@@ -38,8 +38,8 @@ inline Conditions resolve(Selection selection, uint32_t seed) {
         result.time = TimeOfDay(hash(seed ^ 0x71d046a3U) % 4);
     if (selection.weather == Weather::Random) {
         const uint32_t roll = hash(seed ^ 0x53a9d107U) % 10000U;
-        result.weather = roll < 1500   ? Weather::Snowfall
-                         : roll < 2500 ? Weather::Fog
+        result.weather = roll < 3000   ? Weather::Snowfall
+                         : roll < 4000 ? Weather::Fog
                          : roll < 5500 ? Weather::Overcast
                                        : Weather::Sunny;
     }

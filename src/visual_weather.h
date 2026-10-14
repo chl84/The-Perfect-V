@@ -8,7 +8,8 @@ inline uint32_t weatherHash(uint32_t seed) {
     return environment::hash(seed);
 }
 inline bool snowForJump(uint32_t seed) {
-    return weatherHash(seed ^ 0x53a9d107U) % 10000U < 1500U;
+    return environment::resolve({environment::TimeOfDay::Day, environment::Weather::Random}, seed).weather ==
+           environment::Weather::Snowfall;
 }
 inline uint32_t replayWeatherSeed(const Replay &replay) {
     uint32_t seed = uint32_t(replay.hill) ^ 0x16ba3f29U;

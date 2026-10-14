@@ -43,8 +43,8 @@ int main() {
         }
         for (size_t count : times)
             require(count > 24000 && count < 26000, "Random time does not include all four periods");
-        require(weather[0] > 43500 && weather[0] < 46500 && weather[1] > 28500 && weather[1] < 31500 &&
-                    weather[2] > 14000 && weather[2] < 16000 && weather[3] > 9000 && weather[3] < 11000,
+        require(weather[0] > 43500 && weather[0] < 46500 && weather[1] > 14000 && weather[1] < 16000 &&
+                    weather[2] > 28500 && weather[2] < 31500 && weather[3] > 9000 && weather[3] < 11000,
                 "Random weather distribution is incorrect");
         for (int time = 0; time < 4; ++time)
             for (int weather = 0; weather < 4; ++weather) {

@@ -255,6 +255,15 @@ coaching text are omitted. Flight controls and physics remain unchanged; control
 instructions remain on the Help screen. Outrun distance shows the measured landing
 result rather than continuing to count travel after landing.
 
+The result card adds three compact assessments: takeoff timing, flight balance
+and landing. `jump_feedback.h` reads the finished simulation once: timing comes
+from the recorded takeoff input and frame position, balance from the original
+style accumulator, and fall causes from the original landing classification.
+Timing uses a practical 0.14–0.25 second band before the edge, not an exact
+prediction of the best possible jump. Scores, physics and replay/save formats
+are unaffected. Missing stages display `--`; inrun falls and start timeouts do
+not receive a flight or landing assessment for a jump that did not happen.
+
 ## Save compatibility
 
 The display name, executable and repository use The Perfect V. The internal SDL
@@ -276,8 +285,8 @@ Practice resolves random choices once per new jump. A cup resolves choices once
 per event and retains them for all participants, team member groups and both
 rounds. Its resolved conditions and selection policy survive checkpoint/resume.
 The next event gets a fresh draw, including a second season on the same hill.
-Random times are equally weighted. Random weather uses 45% sunny, 30% overcast,
-15% snowfall and 10% fog. Native replays store the resolved conditions and cosmetic
+Random times are equally weighted. Random weather uses 45% sunny, 15% overcast,
+30% snowfall and 10% fog. Native replays store the resolved conditions and cosmetic
 seed, so seeking, camera changes and changed preferences cannot reselect weather.
 Existing replay files and version 1/2 cup saves remain readable, defaulting their
 missing cosmetic metadata to day and sun. Original .RPL exports retain their
