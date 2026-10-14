@@ -13,28 +13,6 @@ namespace {
 void col(Color c) {
     sjp::gfx::color4f(c.r, c.g, c.b, c.a);
 }
-void roundedGradient(float x, float y, float w, float h, float radius, Color top, Color bottom) {
-    radius = std::min(radius, std::min(w, h) / 2);
-    auto point = [&](float px, float py) {
-        float t = clamp((py - y) / h, 0.f, 1.f);
-        col({top.r + (bottom.r - top.r) * t, top.g + (bottom.g - top.g) * t, top.b + (bottom.b - top.b) * t,
-             top.a + (bottom.a - top.a) * t});
-        sjp::gfx::vertex2f(px, py);
-    };
-    sjp::gfx::begin(sjp::gfx::TRIANGLE_FAN);
-    point(x + w / 2, y + h / 2);
-    for (int corner = 0; corner < 4; ++corner) {
-        double a = -PI / 2 + corner * PI / 2;
-        float cx = corner == 0 || corner == 1 ? x + w - radius : x + radius;
-        float cy = corner == 0 || corner == 3 ? y + radius : y + h - radius;
-        for (int i = 0; i <= 12; ++i) {
-            double b = a + i * PI / 24;
-            point(cx + std::cos(b) * radius, cy + std::sin(b) * radius);
-        }
-    }
-    point(x + w - radius, y);
-    sjp::gfx::end();
-}
 } // namespace
 void Renderer::overlay() {
     sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
@@ -85,14 +63,9 @@ void Renderer::rect(float x, float y, float w, float h, Color c, float radius) {
 void Renderer::glassPanel(float x, float y, float w, float h, float radius, float opacity) {
     if (w <= 2 || h <= 2)
         return;
-    // Layered translucent shapes produce a quiet, soft edge without a framebuffer blur pass.
-    rect(x - 9, y - 5, w + 18, h + 20, {.01f, .025f, .035f, .025f}, radius + 9);
-    rect(x - 5, y - 2, w + 10, h + 13, {.01f, .025f, .035f, .05f}, radius + 5);
-    rect(x - 2, y + 2, w + 4, h + 5, {.01f, .025f, .035f, .12f}, radius + 2);
-    roundedGradient(x, y, w, h, radius, {.47f, .65f, .7f, .31f}, {.23f, .4f, .46f, .13f});
-    roundedGradient(x + 1, y + 1, w - 2, h - 2, std::max(0.f, radius - 1), {.068f, .13f, .17f, opacity},
-                    {.031f, .071f, .105f, opacity + (1 - opacity) * .32f});
-    line(x + radius + 3, y + 1, x + w - radius - 3, y + 1, {.79f, .92f, .95f, .13f});
+    // A single dark fill keeps the UI readable without blur or layered shadows.
+    rect(x, y, w, h, {.042f, .097f, .125f, opacity}, std::min(radius, 7.f));
+    line(x + 8, y + 1, x + w - 8, y + 1, {.65f, .78f, .81f, .13f});
 }
 void Renderer::gradient(float x, float y, float w, float h, Color a, Color b) {
     sjp::gfx::begin(sjp::gfx::QUADS);

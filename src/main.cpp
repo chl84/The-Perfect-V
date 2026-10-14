@@ -116,7 +116,7 @@ class App {
     SDL_Window *window = nullptr;
     std::unique_ptr<Renderer> renderer;
     std::unique_ptr<Audio> audio;
-    Screen screen = Screen::Menu, replayReturn = Screen::Menu;
+    Screen screen = Screen::Menu, replayReturn = Screen::Menu, helpReturn = Screen::Menu;
     Simulation sim{2, 2};
     Records records;
     Replay lastReplay;
@@ -224,7 +224,7 @@ class App {
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
             throw std::runtime_error(SDL_GetError());
-        window = SDL_CreateWindow("The Perfect V", 1440, 900,
+        window = SDL_CreateWindow("The Perfect V", smoke ? 1920 : 1440, smoke ? 1080 : 900,
                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                       (hidden ? SDL_WINDOW_HIDDEN : 0));
         if (!window)
@@ -717,6 +717,7 @@ class App {
             changeScreen(Screen::Hills);
             break;
         case Action::Help:
+            helpReturn = screen;
             changeScreen(Screen::Help);
             break;
         case Action::Settings:
@@ -729,7 +730,9 @@ class App {
             running = false;
             break;
         case Action::Back:
-            if (screen == Screen::Replay) {
+            if (screen == Screen::Help) {
+                changeScreen(helpReturn);
+            } else if (screen == Screen::Replay) {
                 renderer->resetCamera();
                 changeScreen(replayReturn);
             } else {
@@ -1136,36 +1139,39 @@ class App {
         }
     }
     void button(const std::string &label, float x, float y, float w, Action a, int value = 0,
-                bool primary = false) {
+                bool primary = false, float h = 50, float size = 15) {
         auto &r = *renderer;
-        float h = 50;
         bool hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
-        Color bg = primary ? colors::teal : Color{.12f, .21f, .26f, .88f};
+        Color bg = primary ? colors::teal : Color{.042f, .097f, .125f, .86f};
         if (hover) {
-            bg.r = std::min(1.f, bg.r + .08f);
-            bg.g = std::min(1.f, bg.g + .08f);
-            bg.b = std::min(1.f, bg.b + .08f);
+            bg.r = std::min(1.f, bg.r + .06f);
+            bg.g = std::min(1.f, bg.g + .06f);
+            bg.b = std::min(1.f, bg.b + .06f);
         }
-        if (primary) {
-            r.rect(x - 2, y + 4, w + 4, h + 1, {.01f, .035f, .045f, .2f}, 11);
-            r.rect(x, y, w, h, bg, 9);
-            r.gradient(x + 9, y + 2, w - 18, h - 4, {1, 1, 1, .08f}, {1, 1, 1, 0});
-            r.line(x + 12, y + 1, x + w - 12, y + 1, {.82f, 1, .95f, .48f});
-        } else {
-            r.glassPanel(x, y, w, h, 9, hover ? .94f : .8f);
-            if (hover)
-                r.rect(x + 1, y + 1, w - 2, h - 2, {bg.r, bg.g, bg.b, .35f}, 8);
-        }
-        r.text(label, x + (w - r.textWidth(label, 15, true)) / 2, y + 15, 15,
-               primary ? colors::ink : colors::white, true);
+        r.rect(x, y, w, h, bg, 7);
+        if (!primary)
+            r.line(x + 8, y + 1, x + w - 8, y + 1, {.65f, .78f, .81f, .13f});
+        const float labelSize = std::min(size, (w - (w < 100 ? 24 : 40)) / std::max(1.f, r.textWidth(label, 1, true)));
+        const float textX = w < 100 ? x + (w - r.textWidth(label, labelSize, true)) / 2 : x + 20;
+        r.text(label, textX, y + (h - labelSize) / 2 - 2, labelSize, primary ? colors::ink : colors::white,
+               true);
         buttons.push_back({x, y, w, h, a, value});
     }
-    void smallButton(const std::string &label, float x, float y, float w, Action a, int value = 0) {
-        bool hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + 35;
-        renderer->rect(x, y, w, 35, {.34f, .5f, .55f, hover ? .43f : .22f}, 7);
-        renderer->rect(x + 1, y + 1, w - 2, 33, {.06f, .13f, .17f, hover ? .97f : .75f}, 6);
-        renderer->text(label, x + 12, y + 8, 13, colors::white);
-        buttons.push_back({x, y, w, 35, a, value});
+    void smallButton(const std::string &label, float x, float y, float w, Action a, int value = 0,
+                     bool selected = false) {
+        button(label, x, y, w, a, value, selected, 35, 13);
+    }
+    void textLink(const std::string &label, float x, float y, float w, Action a, float size = 15) {
+        bool hover = mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + 36;
+        if (hover)
+            renderer->rect(x, y, w, 36, {.042f, .097f, .125f, .86f}, 6);
+        renderer->text(label, x + 20, y + 8, size, hover ? colors::white : colors::muted);
+        buttons.push_back({x, y, w, 36, a});
+    }
+    void dimViewport(Color color) {
+        auto &r = *renderer;
+        r.rect(-r.offsetX / r.uiScale, -r.offsetY / r.uiScale, r.width / r.uiScale, r.height / r.uiScale,
+               color);
     }
     void brand(float x, float y) {
         auto &r = *renderer;
@@ -1175,96 +1181,53 @@ class App {
         r.line(x + 27, y - 3, x + 43, y + 22, colors::white, 2);
         r.text("THE PERFECT V", x + 58, y - 1, 20, colors::white, true);
     }
-    void top(const std::string &title, const std::string &subtitle) {
+    void top(const std::string &title, const std::string &subtitle = {}) {
         auto &r = *renderer;
-        r.rect(0, 0, 1440, 900, {.025f, .065f, .1f, .84f});
-        r.gradient(0, 0, 1440, 220, {.04f, .11f, .15f, .25f}, {.04f, .11f, .15f, 0});
+        dimViewport({.023f, .057f, .079f, .9f});
         brand(64, 46);
-        smallButton("<  Back", 1250, 40, 126, Action::Back);
-        r.text(title, 64, 123, 44, colors::white, true);
-        r.text(subtitle, 66, 186, 17, colors::muted);
-        r.line(65, 218, 1374, 218, {.63f, .78f, .83f, .13f});
-        r.line(65, 218, 120, 218, colors::teal, 2);
-    }
-    void keyHint(const std::string &key, const std::string &label, float x, float y) {
-        auto &r = *renderer;
-        float w = r.textWidth(key, 11, true) + 16;
-        r.rect(x, y + 2, w, 24, {.01f, .035f, .055f, .18f}, 5);
-        r.rect(x, y, w, 24, {.35f, .51f, .56f, .5f}, 5);
-        r.rect(x + 1, y + 1, w - 2, 21, {.1f, .19f, .24f, .92f}, 4);
-        r.text(key, x + 8, y + 5, 11, colors::white, true);
-        r.text(label, x + w + 9, y + 3, 13, colors::muted);
+        smallButton("Back", 1250, 40, 126, Action::Back);
+        r.text(title, 64, 126, 36, colors::white, true);
+        if (!subtitle.empty())
+            r.text(subtitle, 66, 183, 14, colors::muted);
     }
     void menu() {
         auto &r = *renderer;
         const auto &h = hills()[selectedHill];
-        r.gradient(0, 0, 1000, 900, {.035f, .09f, .13f, .98f}, {.035f, .09f, .13f, 0});
-        r.gradient(0, 690, 1440, 210, {.04f, .09f, .13f, .96f}, {.04f, .09f, .13f, .7f});
-        brand(68, 45);
-        r.glassPanel(1111, 32, 273, 42, 9, .67f);
-        r.textRight("ALPINE EDITION  /  01", 1370, 46, 12, colors::white, true);
-        r.pill("THE HILL IS CALLING", 72, 160);
-        r.text("Find your", 66, 211, 66, colors::white, true);
-        r.text("perfect flight.", 66, 291, 66, colors::white, true);
-        r.text("A moment of courage. A few seconds of freedom.", 72, 393, 17, colors::white);
-        r.text(std::to_string(hillCount()) + " original hills. Real-time wind. Every metre earned.", 72, 424,
-               17, colors::muted);
-        button("Start practice  >", 72, 488, 244, Action::Practice, 0, true);
-        button("Cup setup", 332, 488, 170, Action::Cup);
+        const float left = -r.offsetX / r.uiScale, top = -r.offsetY / r.uiScale;
+        r.gradient(left, top, 970 - left, r.height / r.uiScale, {.023f, .057f, .079f, .98f},
+                   {.023f, .057f, .079f, 0});
+        constexpr float x = 76, y = 66;
+        r.line(x, y + 23, x + 15, y, colors::teal, 2);
+        r.line(x + 15, y, x + 30, y + 23, colors::teal, 2);
+        r.line(x + 19, y + 8, x + 27, y - 3, colors::white, 2);
+        r.line(x + 27, y - 3, x + 43, y + 23, colors::white, 2);
+        r.text("THE PERFECT V", x + 59, y - 2, 23, colors::white, true);
+        const bool hover = mouseX >= 76 && mouseX <= 392 && mouseY >= 249 && mouseY <= 295;
+        r.rect(76, 249, 316, 46, {.025f, .071f, .094f, hover ? .9f : .65f}, 6);
+        r.text(h.name + " / K" + std::to_string(h.k), 96, 262, 16, colors::white);
+        r.line(364, 267, 370, 273, colors::muted, 1.4);
+        r.line(370, 273, 376, 267, colors::muted, 1.4);
+        buttons.push_back({76, 249, 316, 46, Action::Hills});
+        button("Practice", 76, 323, 316, Action::Practice, 0, true, 54, 18);
+        button("Cup", 76, 391, 316, Action::Cup, 0, false, 54, 18);
+        button("Replays", 76, 459, 316, Action::ReplayBrowse, 0, false, 54, 18);
+        textLink("Records", 76, 540, 130, Action::Records);
+        textLink("Settings", 222, 540, 130, Action::Settings);
         if (hasCupSave)
-            button("Resume cup", 518, 488, 190, Action::CupResume);
-        smallButton("How to jump", 72, 557, 143, Action::Help);
-        smallButton("Settings", 228, 557, 107, Action::Settings);
-        smallButton("Records", 348, 557, 107, Action::Records);
-        if (hasReplay)
-            smallButton("Last replay", 72, 604, 143, Action::Replay);
-        smallButton("Replay library", 228, 604, 166, Action::ReplayBrowse);
-        r.glassPanel(1040, 531, 326, 133, 12, .84f);
-        r.rect(1040, 548, 3, 43, colors::teal, 1);
-        r.text(h.country, 1063, 548, 11, colors::teal, true);
-        r.text(h.name, 1062, 571, 23, colors::white, true);
-        r.text("K " + std::to_string(h.k), 1064, 609, 14, colors::muted);
-        smallButton("Change hill  >", 1206, 610, 140, Action::Hills);
-        r.line(72, 719, 1368, 719, {.5f, .65f, .7f, .2f});
-        r.text("CHOOSE YOUR HILL", 72, 742, 11, colors::muted, true);
-        smallButton("Browse all " + std::to_string(hillCount()) + "  >", 1198, 730, 170, Action::Hills);
-        for (int slot = 0; slot < std::min(6, hillCount()); slot++) {
-            int i = (selectedHill + slot) % hillCount();
-            float x = 72 + slot * 218;
-            const auto &hill = hills()[i];
-            bool select = i == selectedHill;
-            r.glassPanel(x, 775, 204, 65, 9, select ? .93f : .7f);
-            if (select)
-                r.rect(x + 1, 776, 202, 63, {.17f, .51f, .46f, .13f}, 8);
-            if (select)
-                r.rect(x, 775, 3, 65, colors::teal, 1);
-            r.text("K" + std::to_string(hill.k), x + 14, 785, 18, select ? colors::teal : colors::white,
-                   true);
-            r.text(hill.name, x + 14, 815, 12, colors::muted);
-            buttons.push_back({x, 775, 204, 65, Action::SelectHill, i});
-        }
-        r.text("MOUSE + KEYBOARD", 72, 869, 10, colors::muted, true);
-        keyHint("ENTER", "Practice", 310, 860);
-        keyHint("F11", "Fullscreen", 494, 860);
-        smallButton("Quit", 1294, 858, 74, Action::Quit);
+            textLink("Resume cup", 76, 586, 170, Action::CupResume);
+        textLink("Quit", 76, 809, 95, Action::Quit, 14);
     }
     void hillPagination(float y) {
         auto &r = *renderer;
-        int first = hillPage * HILLS_PER_PAGE;
-        int last = std::min(first + HILLS_PER_PAGE, hillCount());
-        r.text("HILLS " + std::to_string(first + 1) + " - " + std::to_string(last) + " OF " +
-                   std::to_string(hillCount()),
-               66, y + 10, 12, colors::muted, true);
-        r.text("PAGE " + std::to_string(hillPage + 1) + " / " + std::to_string(hillPages()), 1040, y + 10, 12,
-               colors::muted, true);
+        r.text(std::to_string(hillPage + 1) + " / " + std::to_string(hillPages()), 1040, y + 10, 13,
+               colors::muted);
         if (hillPage > 0)
-            smallButton("<  Previous", 1174, y, 98, Action::HillPage, -1);
+            smallButton("Previous", 1174, y, 98, Action::HillPage, -1);
         if (hillPage + 1 < hillPages())
-            smallButton("Next  >", 1283, y, 91, Action::HillPage, 1);
+            smallButton("Next", 1283, y, 91, Action::HillPage, 1);
     }
     void hillSelect() {
-        top("Choose your hill.", "Explore all original venues. Select a hill, then start practice or visit "
-                                 "every hill in the cup.");
+        top("Hills");
         auto &r = *renderer;
         int first = hillPage * HILLS_PER_PAGE;
         for (int slot = 0; slot < HILLS_PER_PAGE && first + slot < hillCount(); slot++) {
@@ -1277,113 +1240,88 @@ class App {
                 r.rect(x + 1, y + 1, 312, 214, {.16f, .53f, .48f, .14f}, 11);
                 r.rect(x, y + 20, 3, 47, colors::teal, 1);
             }
-            r.pill(h.flying()  ? "SKI FLYING"
-                   : h.k <= 90 ? "NORMAL HILL"
-                               : "LARGE HILL",
-                   x + 20, y + 20, selected ? colors::teal : colors::muted);
-            r.text(h.name, x + 20, y + 62, 23, colors::white, true);
-            r.text(h.country, x + 21, y + 98, 11, colors::muted, true);
-            r.text("K" + std::to_string(h.k), x + 20, y + 128, 34, selected ? colors::teal : colors::white,
+            r.text(h.name, x + 20, y + 36, 23, colors::white, true);
+            r.text("K" + std::to_string(h.k), x + 20, y + 91, 34, selected ? colors::teal : colors::white,
                    true);
-            r.text(records.best[i] > 0 ? "BEST  " + number(records.best[i]) + " m" : "No personal best yet",
-                   x + 21, y + 187, 12, colors::muted);
+            if (records.best[i] > 0)
+                r.text("Best " + number(records.best[i]) + " m", x + 21, y + 187, 12, colors::muted);
             buttons.push_back({x, y, 314, 216, Action::SelectHill, i});
         }
         hillPagination(722);
-        r.text("SELECTED: " + hills()[selectedHill].name + " / " + hills()[selectedHill].subtitle, 66, 778,
-               14, colors::muted);
-        keyHint("ARROWS", "Select hill", 66, 832);
-        keyHint("PGUP / PGDN", "Pages", 277, 832);
         button("World cup", 955, 811, 157, Action::Cup);
-        button("Start practice  >", 1128, 811, 246, Action::Practice, 0, true);
+        button("Practice", 1128, 811, 246, Action::Practice, 0, true);
     }
     void help() {
-        top("A few seconds. Four small moves.",
-            "Authentic mouse controls, with a keyboard option while you learn.");
+        top("Controls");
         auto &r = *renderer;
-        struct Lesson {
-            std::string n, title, one, two, key;
+        r.text("ACTION", 86, 248, 12, colors::muted, true);
+        r.text("MOUSE", 360, 248, 12, colors::muted, true);
+        r.text("KEYBOARD", 1070, 248, 12, colors::muted, true);
+        struct Control {
+            const char *action, *mouse, *key;
         };
-        const Lesson lessons[] = {
-            {"01", "Read the wind", "Headwind helps you fly. At the green light,",
-             "left-click to start within 15 seconds.", "Keyboard: SPACE to start"},
-            {"02", "Time your takeoff", "Near the board, hold both buttons through",
-             "the takeoff. Then release both for landing.", "Keyboard: SPACE near the board"},
-            {"03", "Find your flying position", "Move the mouse gently up and down.",
-             "Keep a steady position through the flight.", "Keyboard: UP / DOWN or W / S"},
-            {"04", "Finish with a telemark", "Before contact, press one button, then the other.",
-             "More delay = wider telemark, more style and risk.",
-             "Keyboard: T telemark / B two-foot (both buttons)"}};
-        for (int i = 0; i < 4; i++) {
-            float x = 64 + (i % 2) * 670, y = 251 + (i / 2) * 225;
-            r.glassPanel(x, y, 647, 207, 12, .9f);
-            r.text(lessons[i].n, x + 24, y + 22, 29, colors::teal, true);
-            r.text(lessons[i].title, x + 86, y + 27, 23, colors::white, true);
-            r.text(lessons[i].one, x + 26, y + 88, 15, colors::muted);
-            r.text(lessons[i].two, x + 26, y + 116, 15, colors::muted);
-            r.text(lessons[i].key, x + 26, y + 164, 13, colors::white, true);
+        const Control controls[] = {{"Start", "Left button; release during inrun", "Space"},
+                                    {"Takeoff", "Hold both buttons near the edge, then release", "Space"},
+                                    {"Flight position", "Move up / down", "Up / Down or W / S"},
+                                    {"Telemark", "One button, then the other before contact", "T"},
+                                    {"Two-foot landing", "Both buttons together", "B or Space"}};
+        for (int i = 0; i < 5; ++i) {
+            const float y = 282 + i * 64;
+            r.glassPanel(64, y, 1310, 54, 7, .86f);
+            r.text(controls[i].action, 86, y + 16, 17, colors::white, true);
+            r.text(controls[i].mouse, 360, y + 17, 16, colors::muted);
+            r.text(controls[i].key, 1070, y + 17, 16, colors::white);
         }
-        r.text("THE SCORE", 66, 743, 11, colors::teal, true);
-        r.text("Distance points + three of five style marks. The highest and lowest marks are dropped.", 66,
-               769, 16, colors::white);
-        r.text("C changes camera  /  G shows your last jump as a ghost  /  ESC pauses  /  R replays a "
-               "finished jump",
-               66, 803, 13, colors::muted);
-        r.text("New to jumping? Try England K50 or Austria K70 in practice.", 66, 848, 13, colors::muted);
-        button("Try it on the hill  >", 1128, 829, 246, Action::Practice, 0, true);
+        const Control shortcuts[] = {{"Pause", "", "Esc"}, {"Camera", "", "C"},       {"Ghost", "", "G"},
+                                     {"Sound", "", "M"},   {"Fullscreen", "", "F11"}, {"Replay", "", "R"}};
+        for (int i = 0; i < 6; ++i) {
+            const float x = 86 + (i % 3) * 436, y = 658 + (i / 3) * 59;
+            r.text(shortcuts[i].action, x, y, 15, colors::muted);
+            r.text(shortcuts[i].key, x + 170, y, 15, colors::white, true);
+        }
     }
     void settings() {
-        top("Make it feel like you.", "Settings are saved automatically when you close the game.");
+        top("Settings");
         auto &r = *renderer;
         const char *cams[] = {"Side follow", "Chase", "Wide"};
-        const char *winds[] = {"Original variable wind", "Calm", "Steady headwind", "Steady tailwind"};
+        const char *winds[] = {"Variable", "Calm", "Headwind", "Tailwind"};
         struct Setting {
-            std::string title, detail, value;
+            std::string title, value;
             Action action;
         };
-        const Setting rows[] = {
-            {"Camera", "Press C during a jump.", cams[camera], Action::Camera},
-            {"Sound", "Press M to toggle sound.", records.sound ? "On" : "Off", Action::Sound},
-            {"Wind conditions", "Practice only; cup wind stays original.", winds[windMode], Action::Wind},
-            {"Last jump ghost", "Show the last jump on this hill.", ghost ? "On" : "Off", Action::Ghost}};
+        const Setting rows[] = {{"Camera", cams[camera], Action::Camera},
+                                {"Sound", records.sound ? "On" : "Off", Action::Sound},
+                                {"Practice wind", winds[windMode], Action::Wind},
+                                {"Last jump ghost", ghost ? "On" : "Off", Action::Ghost}};
         for (int i = 0; i < 4; ++i) {
             const float y = 253 + i * 87;
-            r.glassPanel(64, y, 644, 74, 10, .9f);
-            r.text(rows[i].title, 86, y + 12, 18, colors::white, true);
-            r.text(rows[i].detail, 86, y + 46, 12, colors::muted);
-            button(rows[i].value + "  >", 456, y + 13, 230, rows[i].action);
+            r.glassPanel(64, y, 644, 74, 7, .9f);
+            r.text(rows[i].title, 86, y + 25, 18, colors::white, true);
+            button(rows[i].value, 456, y + 12, 230, rows[i].action);
         }
-        r.glassPanel(738, 253, 636, 185, 10, .9f);
+        r.glassPanel(738, 253, 636, 185, 7, .9f);
         r.text("Time of day", 758, 271, 19, colors::white, true);
         for (int i = 0; i <= 4; ++i)
-            button(environment::name(environment::TimeOfDay(i)), 758 + (i % 3) * 205,
-                   307 + (i / 3) * 59, 186, Action::TimeOfDay, i, int(records.environment.time) == i);
-        r.glassPanel(738, 456, 636, 214, 10, .9f);
+            button(environment::name(environment::TimeOfDay(i)), 758 + (i % 3) * 205, 307 + (i / 3) * 59, 186,
+                   Action::TimeOfDay, i, int(records.environment.time) == i);
+        r.glassPanel(738, 456, 636, 185, 7, .9f);
         r.text("Weather", 758, 474, 19, colors::white, true);
         for (int i = 0; i <= 4; ++i)
-            button(environment::name(environment::Weather(i)), 758 + (i % 3) * 205,
-                   510 + (i / 3) * 59, 186, Action::Weather, i, int(records.environment.weather) == i);
-        r.text("Only wind affects the jump.", 758, 641, 13, colors::muted);
-        r.glassPanel(64, 619, 644, 152, 10, .9f);
+            button(environment::name(environment::Weather(i)), 758 + (i % 3) * 205, 510 + (i / 3) * 59, 186,
+                   Action::Weather, i, int(records.environment.weather) == i);
+        r.glassPanel(64, 619, 644, 123, 7, .9f);
         r.text("Mouse sensitivity", 86, 636, 19, colors::white, true);
-        r.text("1.0x matches original mouse counts.", 86, 671, 13, colors::muted);
-        button("Original 1.0x", 86, 710, 169, Action::SensitivityReset);
-        button("-", 326, 710, 56, Action::SensitivityDown);
-        r.text(number(records.sensitivity) + "x", 430, 722, 18, colors::teal, true);
-        button("+", 630, 710, 56, Action::SensitivityUp);
-        r.text("Practice: fixed for each jump.", 758, 692, 14, colors::white);
-        r.text("Cups: fixed for all jumpers and both rounds of each event.", 758, 720, 13, colors::muted);
-        smallButton("Day & sun", 1202, 751, 151, Action::EnvironmentReset);
-        r.text("Choose conditions before starting practice or a new cup.", 758, 764, 12, colors::muted);
-        r.text("F11 switches between windowed and fullscreen. Your progress is stored locally.", 66, 809, 14,
-               colors::muted);
+        smallButton("Reset", 86, 690, 130, Action::SensitivityReset);
+        smallButton("-", 326, 690, 56, Action::SensitivityDown);
+        r.text(number(records.sensitivity) + "x", 430, 697, 18, colors::teal, true);
+        smallButton("+", 630, 690, 56, Action::SensitivityUp);
+        smallButton("Day & sun", 1202, 662, 151, Action::EnvironmentReset);
+        button("Controls", 64, 803, 210, Action::Help);
     }
     void recordScreen() {
-        top("Your longest flights.",
-            "Official standing jumps by human cup participants qualify for personal bests.");
+        top("Records");
         auto &r = *renderer;
         r.text("HILL", 89, 242, 11, colors::muted, true);
-        r.text("COUNTRY", 570, 242, 11, colors::muted, true);
         r.text("K POINT", 870, 242, 11, colors::muted, true);
         r.textRight("PERSONAL BEST", 1334, 242, 11, colors::muted, true);
         int first = hillPage * HILLS_PER_PAGE;
@@ -1396,95 +1334,72 @@ class App {
                 r.rect(65, y + 1, 1308, 45, {.16f, .53f, .48f, .13f}, 7);
                 r.rect(64, y + 10, 3, 27, colors::teal, 1);
             }
-            std::string ordinal = (i < 9 ? "0" : "") + std::to_string(i + 1);
-            r.text(ordinal, 89, y + 13, 17, colors::teal, true);
-            r.text(hills()[i].name, 153, y + 13, 17, colors::white, true);
-            r.text(hills()[i].country, 570, y + 16, 12, colors::muted);
+            r.text(hills()[i].name, 89, y + 13, 17, colors::white, true);
             r.text("K" + std::to_string(hills()[i].k), 870, y + 16, 13, colors::muted);
             r.textRight(records.best[i] ? number(records.best[i]) + " m" : "--", 1334, y + 10, 21,
                         records.best[i] ? colors::teal : colors::muted, true);
             buttons.push_back({64, y, 1310, 47, Action::SelectHill, i});
         }
         hillPagination(722);
-        r.text("SELECTED: " + hills()[selectedHill].name, 66, 778, 14, colors::muted);
-        button("Practice selected hill  >", 1077, 808, 296, Action::Practice, 0, true);
+        button("Practice", 1077, 808, 296, Action::Practice, 0, true);
         if (hasReplay)
-            button("Watch last replay", 64, 808, 238, Action::Replay);
+            button("Last replay", 64, 808, 238, Action::Replay);
     }
     void hud() {
         auto &r = *renderer;
         const auto &h = sim.hill();
-        // Keep venue and weather at the edges; the jumper has the center.
-        r.glassPanel(32, 28, 360, 74, 10, .76f);
-        r.text(h.name, 50, 40, 21, colors::white, true);
-        r.text("K" + std::to_string(h.k) + (competition ? "" : " / Practice") +
-                   " / " + environment::description(activeEnvironment), 50, 76, 11,
-               colors::muted);
+        r.glassPanel(32, 28, 320, 48, 7, .86f);
+        r.text(h.name + " / K" + std::to_string(h.k), 50, 41, 18, colors::white, true);
         if (competition) {
-            r.glassPanel(470, 28, 490, 74, 10, .76f);
+            r.glassPanel(470, 28, 490, 67, 7, .86f);
             const std::string name = jumperName();
-            const float size = std::min(20.f, 454.f / std::max(1.f, r.textWidth(name, 1, true)));
-            r.text(name, 488, 40, size, colors::white, true);
-            r.text((cup.setup().mode == CupMode::Team ? "Team cup  " : "World cup  ") +
-                       std::to_string(cupEvent + 1) + " / " + std::to_string(cup.eventCount()) +
-                       "  /  Round " + std::to_string(round + 1),
-                   488, 76, 11, colors::muted);
+            const float size = std::min(18.f, 454.f / std::max(1.f, r.textWidth(name, 1, true)));
+            r.text(name, 488, 39, size, colors::white, true);
+            r.text("Event " + std::to_string(cupEvent + 1) + " / " + std::to_string(cup.eventCount()) +
+                       "   Round " + std::to_string(round + 1),
+                   488, 70, 11, colors::muted);
         }
-        r.glassPanel(1218, 28, 190, 74, 10, .76f);
-        r.windArrow(1242, 61, sim.windSpeed, sim.displayWindAngle());
-        r.textRight(number(sim.windSpeed) + " m/s", 1390, 39, 24, colors::white, true);
-        r.textRight(sim.wind >= 0 ? "Headwind" : "Tailwind", 1390, 76, 11, colors::muted);
-
+        r.glassPanel(1208, 28, 200, 48, 7, .86f);
+        r.windArrow(1237, 52, sim.windSpeed, sim.displayWindAngle());
+        r.textRight(number(sim.windSpeed) + " m/s", 1390, 39, 22, colors::white, true);
         if (sim.phase == Phase::Ready) {
-            r.glassPanel(32, 116, 105, 34, 8, .76f);
-            r.text("START", 45, 126, 10, colors::muted);
-            r.textRight(number(sim.countdown, 0) + " s", 125, 124, 13,
-                        sim.countdown < 5 ? colors::orange : colors::teal, true);
-            if (!competition || !activeComputer()) {
-                r.glassPanel(590, 798, 260, 42, 10, .72f);
-                const std::string hint = "SPACE / LEFT CLICK";
-                r.text(hint, 720 - r.textWidth(hint, 12, true) / 2, 812, 12, colors::white, true);
-            }
+            r.glassPanel(32, 88, 80, 34, 7, .86f);
+            r.text(number(sim.countdown, 0) + " s", 50, 95, 16,
+                   sim.countdown < 5 ? colors::orange : colors::teal, true);
             return;
         }
-
-        r.glassPanel(32, 754, 174, 104, 10, .76f);
-        r.text("SPEED", 50, 766, 10, colors::muted, true);
-        r.text(number(std::sqrt(sim.vx * sim.vx + sim.vy * sim.vy) * 3.6, 0), 48, 790, 40,
-               colors::white, true);
-        r.textRight("km/h", 188, 829, 11, colors::muted);
+        r.glassPanel(32, 801, 174, 57, 7, .86f);
+        r.text(number(std::hypot(sim.vx, sim.vy) * 3.6, 0), 48, 811, 30, colors::white, true);
+        r.textRight("km/h", 188, 829, 12, colors::muted);
         if (sim.phase == Phase::Flight || sim.phase == Phase::Outrun) {
-            r.glassPanel(220, 754, 184, 104, 10, .76f);
-            r.text("DISTANCE", 238, 766, 10, colors::muted, true);
+            r.glassPanel(220, 801, 184, 57, 7, .86f);
             const double distance = sim.phase == Phase::Flight ? h.distance(sim.x) : sim.result.distance;
-            r.text(number(distance), 236, 795, 32, colors::white, true);
-            r.textRight("m", 386, 829, 11, colors::muted);
+            r.text(number(distance), 236, 811, 30, colors::white, true);
+            r.textRight("m", 386, 829, 12, colors::muted);
         }
     }
     void paused() {
         auto &r = *renderer;
-        r.rect(0, 0, 1440, 900, {.03f, .08f, .12f, .78f});
+        dimViewport({.023f, .057f, .079f, .78f});
         r.glassPanel(472, 285, 496, 320, 16, .94f);
         r.text("Paused", 508, 317, 38, colors::white, true);
         button("Resume", 510, 398, 420, Action::Resume, 0, true);
         button("Leave jump", 510, 465, 420, Action::Back);
-        r.text("ESC / ENTER", 511, 560, 12, colors::muted);
     }
     void result() {
         auto &r = *renderer;
         const auto &s = sim.result;
-        r.rect(0, 0, 1440, 900, {.025f, .07f, .1f, .7f});
+        dimViewport({.023f, .057f, .079f, .7f});
         r.glassPanel(287, 121, 866, 662, 16, .95f);
         r.rect(326, 121, 78, 3, colors::teal, 1);
         r.pill(s.disqualified ? "DISQUALIFIED"
                : s.crashed    ? "FALL"
                : newRecord    ? "NEW PERSONAL BEST"
-                              : "JUMP COMPLETE",
+                              : "RESULT",
                326, 154, s.crashed || s.disqualified ? colors::orange : colors::teal);
         r.textRight(sim.hill().name + " / K" + std::to_string(sim.hill().k), 1114, 161, 13, colors::muted);
-        r.text("Jump result", 324, 211, 32, colors::white, true);
         r.text(number(s.distance), 321, 282, 82, s.crashed ? colors::white : colors::teal, true);
-        r.text("metres", 611, 344, 18, colors::muted);
+        r.text("m", 611, 344, 18, colors::muted);
         r.textRight(number(s.total), 1114, 301, 56, colors::white, true);
         r.textRight("TOTAL POINTS", 1112, 369, 11, colors::muted, true);
         r.line(326, 410, 1114, 410, {.3f, .42f, .48f, .55f});
@@ -1507,8 +1422,7 @@ class App {
             float x = 424 + i * 106;
             bool noMarks = s.beforeTakeoff || s.disqualified;
             bool drop = !noMarks && (&s.judges[i] == &*min || &s.judges[i] == &*max);
-            r.rect(x, 509, 88, 47, drop ? Color{.25f, .36f, .41f, .23f}
-                                     : Color{.27f, .88f, .78f, .2f}, 7);
+            r.rect(x, 509, 88, 47, drop ? Color{.25f, .36f, .41f, .23f} : Color{.27f, .88f, .78f, .2f}, 7);
             r.rect(x + 1, 510, 86, 45, {.07f, .14f, .18f, .92f}, 6);
             std::string v = noMarks ? "--" : number(s.judges[i]);
             r.text(v, x + 15, 521, 18, drop ? colors::muted : colors::white, true);
@@ -1522,33 +1436,27 @@ class App {
                        std::to_string(cup.eventCount()) + "  /  ROUND " + std::to_string(completedRound + 1) +
                        " OF 2",
                    326, 633, 12, colors::teal, true);
-        button(competition ? "Continue cup  >" : "Jump again  >", 326, 691, 265,
+        button(competition ? "Continue" : "Jump again", 326, 691, 265,
                competition ? Action::Next : Action::Again, 0, true);
         if (hasReplay && !s.disqualified)
-            button("Watch replay", 608, 691, 217, Action::Replay);
-        button("Main menu", 842, 691, 271, Action::Back);
-        keyHint("ENTER", competition ? "Continue" : "Jump again", 326, 811);
-        if (hasReplay)
-            keyHint("R", "Replay", 581, 811);
+            button("Replay", 608, 691, 217, Action::Replay);
+        button("Menu", 842, 691, 271, Action::Back);
     }
     void cupSetupUI() {
         auto &r = *renderer;
         auto &setup = editableSetup();
-        top("Build your cup.", "Shared controls / Up to 16 jumpers / Original event and start-order rules");
-        smallButton(setupTeam ? "World cup" : "World cup *", 65, 209, 150, Action::CupSetupMode, 0);
-        smallButton(setupTeam ? "Team cup *" : "Team cup", 230, 209, 150, Action::CupSetupMode, 1);
-        smallButton(setupTab == 0 ? "Participants *" : "Participants", 398, 209, 176, Action::CupSetupTab, 0);
-        smallButton(setupTab == 1 ? "Hills *" : "Hills", 590, 209, 110, Action::CupSetupTab, 1);
+        top("Cup");
+        smallButton("World cup", 65, 209, 150, Action::CupSetupMode, 0, !setupTeam);
+        smallButton("Team cup", 230, 209, 150, Action::CupSetupMode, 1, setupTeam);
+        smallButton("Participants", 398, 209, 176, Action::CupSetupTab, 0, setupTab == 0);
+        smallButton("Hills", 590, 209, 110, Action::CupSetupTab, 1, setupTab == 1);
         smallButton(setup.doubleSeason ? "Two seasons" : "One season", 726, 209, 170, Action::CupSeasons);
         smallButton(setup.skipCpu ? "CPU: skip" : "CPU: watch", 912, 209, 156, Action::CupCpuView);
-        smallButton("< Menu", 1235, 209, 140, Action::Back);
         int pages = 1;
         if (setupTab == 0) {
             int count = int(setup.participants.size());
             pages = (count + 7) / 8;
             setupPage = clamp(setupPage, 0, pages - 1);
-            r.text("Click a name or country to edit. Each human takes a turn on this machine.", 65, 265, 14,
-                   colors::muted);
             if (setupTeam) {
                 for (int t = 0; t < int(setup.teams.size()); ++t) {
                     smallButton(setup.teams[size_t(t)].name, 65 + t * 266, 299, 177, Action::CupTeamName, t);
@@ -1579,25 +1487,26 @@ class App {
         } else {
             pages = hillPages();
             setupPage = clamp(setupPage, 0, pages - 1);
-            r.text("Hills run in their original order. Select at least one.", 65, 265, 14, colors::muted);
-            smallButton("All 32", 1128, 265, 110, Action::CupHillsAll, 1);
+            smallButton("All", 1128, 265, 110, Action::CupHillsAll, 1);
             smallButton("Clear", 1255, 265, 113, Action::CupHillsAll, 0);
             for (int row = 0, h = setupPage * 8; h < std::min(hillCount(), (setupPage + 1) * 8); ++row, ++h) {
                 bool chosen = std::find(setup.hills.begin(), setup.hills.end(), h) != setup.hills.end();
-                button(std::string(chosen ? "[x] " : "[ ] ") + hills()[h].name + " / K" +
-                           std::to_string(hills()[h].k),
-                       65, 321 + row * 53, 1303, Action::CupHillToggle, h, chosen);
+                button(hills()[h].name + " / K" + std::to_string(hills()[h].k), 65, 321 + row * 53, 1303,
+                       Action::CupHillToggle, h, chosen);
             }
         }
-        smallButton("< Prev", 65, 769, 110, Action::CupSetupPage, -1);
-        r.text("Page " + std::to_string(setupPage + 1) + " / " + std::to_string(pages), 194, 781, 13,
-               colors::muted);
-        smallButton("Next >", 330, 769, 110, Action::CupSetupPage, 1);
+        if (pages > 1) {
+            if (setupPage > 0)
+                smallButton("Previous", 65, 769, 110, Action::CupSetupPage, -1);
+            r.text(std::to_string(setupPage + 1) + " / " + std::to_string(pages), 194, 781, 13,
+                   colors::muted);
+            if (setupPage + 1 < pages)
+                smallButton("Next", 330, 769, 110, Action::CupSetupPage, 1);
+        }
         r.text(std::to_string(setup.participants.size()) + " jumpers / " +
-                   std::to_string(setup.hills.size()) + " hills / " +
-                   std::to_string(setup.hills.size() * (setup.doubleSeason ? 2 : 1)) + " events",
+                   std::to_string(setup.hills.size()) + " hills",
                65, 828, 15, colors::teal, true);
-        button("Start cup  >", 1128, 802, 240, Action::CupStart, 0, true);
+        button("Start cup", 1128, 802, 240, Action::CupStart, 0, true);
     }
     void jumpReadyUI() {
         auto &r = *renderer;
@@ -1614,15 +1523,12 @@ class App {
             r.text(cup.setup().teams[size_t(p.team)].name + " / MEMBER " + std::to_string(p.member + 1), 343,
                    457, 16, colors::muted);
         }
-        r.text(activeComputer() ? "Watch the original CPU technique."
-                                : "Pass the controls to this player. Enter when ready.",
-               343, 505, 16, colors::muted);
-        button(activeComputer() ? "Watch jump  >" : "Ready  >", 343, 576, 310, Action::StartTurn, 0, true);
+        button(activeComputer() ? "Watch" : "Ready", 343, 576, 310, Action::StartTurn, 0, true);
         button("Save & menu", 690, 576, 360, Action::Back);
     }
     void standings() {
         bool final = cup.finalEvent() && cup.eventComplete();
-        top(final ? "The cup is decided." : "Every jump counts.",
+        top(final ? "Cup results" : "Standings",
             hills()[cup.hill()].name + " / EVENT " + std::to_string(cup.event() + 1) + " OF " +
                 std::to_string(cup.eventCount()) + " / " + environment::description(cup.visualEnvironment()));
         auto &r = *renderer;
@@ -1673,34 +1579,37 @@ class App {
             r.text(number(total), 1034, y + 13, 18, colors::white, true);
             r.textRight(std::to_string(points), 1334, y + 13, 19, colors::white, true);
         }
-        r.text("Tied scores share a place and cup points.", 66, 780, 14, colors::muted);
         if (pages > 1) {
-            smallButton("< Page", 66, 817, 119, Action::CupSetupPage, -1);
-            smallButton("Page >", 202, 817, 119, Action::CupSetupPage, 1);
+            smallButton("Previous", 66, 817, 119, Action::CupSetupPage, -1);
+            smallButton("Next", 202, 817, 119, Action::CupSetupPage, 1);
         }
-        button(final ? "Finish cup" : "Next hill  >", 1128, 808, 246, Action::Next, 0, true);
+        button(final ? "Finish cup" : "Next hill", 1128, 808, 246, Action::Next, 0, true);
         smallButton("Save & menu", 922, 816, 184, Action::Back);
     }
     void replayFilesUI() {
         auto &r = *renderer;
-        top("Your replay library.", "Open original DSJ .RPL files or The Perfect V .SJR files. You can also "
-                                    "drop a file onto the game.");
+        top("Replays");
         r.text(replayDirectory.string().substr(0, 135), 66, 245, 14, colors::teal);
-        smallButton("< Parent folder", 65, 282, 220, Action::ReplayParent);
-        smallButton("< Menu", 1235, 282, 140, Action::Back);
+        smallButton("Parent folder", 65, 282, 220, Action::ReplayParent);
+        if (hasReplay)
+            smallButton("Last replay", 1160, 282, 215, Action::Replay);
         for (int row = 0, i = replayPage * 8; i < std::min(int(replayFiles.size()), (replayPage + 1) * 8);
              ++row, ++i) {
             const auto &path = replayFiles[size_t(i)];
-            button((std::filesystem::is_directory(path) ? "Folder: " : "") + path.filename().string(), 65,
+            button((std::filesystem::is_directory(path) ? "/ " : "") + path.filename().string(), 65,
                    345 + row * 53, 1303, Action::ReplayFile, i);
         }
         if (replayFiles.empty())
-            r.text("No replay files in this folder.", 66, 363, 18, colors::muted);
-        smallButton("< Prev", 65, 808, 110, Action::ReplayBrowsePage, -1);
-        r.text("Page " + std::to_string(replayPage + 1) + " / " +
-                   std::to_string(std::max(1, (int(replayFiles.size()) + 7) / 8)),
-               194, 820, 13, colors::muted);
-        smallButton("Next >", 330, 808, 110, Action::ReplayBrowsePage, 1);
+            r.text("No replays", 66, 363, 18, colors::muted);
+        const int pages = std::max(1, (int(replayFiles.size()) + 7) / 8);
+        if (pages > 1) {
+            if (replayPage > 0)
+                smallButton("Previous", 65, 808, 110, Action::ReplayBrowsePage, -1);
+            r.text(std::to_string(replayPage + 1) + " / " + std::to_string(pages), 194, 820, 13,
+                   colors::muted);
+            if (replayPage + 1 < pages)
+                smallButton("Next", 330, 808, 110, Action::ReplayBrowsePage, 1);
+        }
     }
     void replayUI() {
         auto &r = *renderer;
@@ -1714,9 +1623,10 @@ class App {
                    58, 119, 10, colors::muted);
         r.text(environment::description(replayEnvironment), 58, canExportOriginal ? 148 : 119, 11,
                colors::muted);
-        smallButton("<  Back", 1268, 39, 126, Action::Back);
-        smallButton("Export .SJR", 952, 39, 142, Action::ReplayExportNative);
-        smallButton("Export .RPL", 1110, 39, 142, Action::ReplayExport);
+        smallButton("Back", 1268, 39, 126, Action::Back);
+        smallButton("Export .SJR", canExportOriginal ? 952 : 1110, 39, 142, Action::ReplayExportNative);
+        if (canExportOriginal)
+            smallButton("Export .RPL", 1110, 39, 142, Action::ReplayExport);
         r.glassPanel(180, 752, 1080, 102, 14, .9f);
         smallButton(replayPlaying && replayTime < replayDuration() ? "Pause" : "Play", 202, 775, 74,
                     Action::ReplayPlay);
@@ -1729,11 +1639,7 @@ class App {
         r.textRight(number(replaySpeed, 2) + "x", 1241, 811, 13, colors::teal, true);
         smallButton("-", 1170, 768, 33, Action::ReplaySlow);
         smallButton("+", 1212, 768, 33, Action::ReplayFast);
-        r.glassPanel(24, 860, 971, 35, 8, .74f);
-        keyHint("SPACE", "Play / pause", 38, 868);
-        keyHint("1 - 4", "Speed", 292, 868);
-        keyHint("LEFT / RIGHT", "Seek", 509, 868);
-        keyHint("C", "Camera", 827, 868);
+        smallButton("Camera " + std::to_string(camera + 1), 1268, 84, 126, Action::Camera);
     }
     void render() {
         buttons.clear();
@@ -1812,10 +1718,9 @@ class App {
         }
         if (editingName != -1) {
             renderer->rect(330, 290, 780, 215, colors::panel, 12);
-            renderer->text(editingCountry ? "Country code" : "Enter a name", 363, 321, 22, colors::white,
-                           true);
+            renderer->text(editingCountry ? "Country code" : "Name", 363, 321, 22, colors::white, true);
             renderer->text(editText + "_", 363, 379, 27, colors::teal, true);
-            renderer->text("Backspace to edit / Enter to save / Esc to cancel", 363, 456, 14, colors::muted);
+            renderer->text("Enter: Save    Esc: Cancel", 363, 456, 14, colors::muted);
         }
         if (storageError) {
             renderer->rect(38, 115, 510, 38, {.4f, .16f, .12f, .9f}, 5);
@@ -1898,21 +1803,42 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/menu.ppm");
         renderer->finish();
+        clickButton(Action::Hills);
+        if (screen != Screen::Hills)
+            throw std::runtime_error("Home hill selector failed");
+        clickButton(Action::Back);
+        clickButton(Action::Records);
+        if (screen != Screen::Records)
+            throw std::runtime_error("Home Records link failed");
+        clickButton(Action::Back);
+        clickButton(Action::Settings);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Home Settings link failed");
+        clickButton(Action::Help);
+        if (screen != Screen::Help)
+            throw std::runtime_error("Settings Controls link failed");
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/controls.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Controls did not return to Settings");
+        clickButton(Action::Back);
+        clickButton(Action::Cup);
+        if (screen != Screen::CupSetup)
+            throw std::runtime_error("Home Cup button failed");
+        clickButton(Action::Back);
+        clickButton(Action::ReplayBrowse);
+        if (screen != Screen::ReplayFiles)
+            throw std::runtime_error("Home Replays button failed");
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/replay-files.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
         // Exercise the actual menu hit testing, keyboard start, pause and mouse takeoff.
-        if (smokeMouseCapture)
-            clickButton(Action::Practice);
-        else {
-            SDL_Event event{};
-            event.type = SDL_EVENT_MOUSE_MOTION;
-            event.motion.x = 200;
-            event.motion.y = 512;
-            SDL_PushEvent(&event);
-            event = {};
-            event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
-            event.button.button = SDL_BUTTON_LEFT;
-            SDL_PushEvent(&event);
-            events();
-        }
+        clickButton(Action::Practice);
         if (screen != Screen::Playing)
             throw std::runtime_error("Practice button input failed");
         auto key = [&](SDL_Keycode code) {
@@ -2244,7 +2170,7 @@ class App {
                 if (teamJumps == 0) {
                     action(Action::Back);
                     const auto beforeResume = mouseCaptureTransitions;
-                    action(Action::CupResume);
+                    clickButton(Action::CupResume);
                     requireCapture(false);
                     if (mouseCaptureTransitions != beforeResume)
                         throw std::runtime_error("Resuming the cup unnecessarily captured the pointer");
@@ -2304,7 +2230,7 @@ class App {
                     throw std::runtime_error("Completed result checkpoint failed");
                 if (visibleJumps == 1) {
                     action(Action::Back);
-                    action(Action::CupResume);
+                    clickButton(Action::CupResume);
                 } else
                     cupNext();
             } else if (screen == Screen::Standings)

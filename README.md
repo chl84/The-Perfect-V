@@ -56,6 +56,8 @@ reports the GPU, SDL version, MSAA, synchronization and submission limits.
 
 ## Controls
 
+Open **Settings > Controls** for the in-game control reference.
+
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
 | Leave the gate | Hold left button | Space |
@@ -68,7 +70,7 @@ reports the GPU, SDL version, MSAA, synchronization and submission limits.
 | Toggle ghost | Settings | G |
 | Toggle sound | Settings | M |
 | Toggle fullscreen | — | F11 |
-| Watch replay | Results or main menu | R |
+| Watch replay | Results or Replays | R |
 
 Release the start button during the inrun. Hold both buttons near the board to
 extend through takeoff, and release both afterward to enable landing preparation.
