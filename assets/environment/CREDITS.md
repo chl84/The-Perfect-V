@@ -9,7 +9,8 @@ Original: https://www.flickr.com/photos/alisabbagh/34979848156/
 License: **CC0 1.0**, https://creativecommons.org/publicdomain/zero/1.0/
 
 `mountains.bmp` is an adapted decorative panorama: skyline extraction, neutral
-color treatment, resizing and a reflected wrap. It is not a geographic 360°
+color treatment, mild baked detail blur, reduced contrast, resizing and a
+reflected wrap. It is not a geographic 360°
 photograph or a location-specific depiction of the ski venues.
 
 Regenerate with `python tools/prepare_mountain_panorama.py ORIGINAL.jpg`

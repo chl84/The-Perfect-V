@@ -40,11 +40,16 @@ with tempfile.TemporaryDirectory(prefix='perfect-v-panorama-') as tmp:
     polygon = 'polygon ' + ' '.join(f'{x},{y+1.5}' for x,y in outline)
     subprocess.run(['magick','-size','1600x611','xc:black','-fill','white',
                     '-draw',polygon,'-resize','2048x768!','-blur','0x.65',str(mask)],check=True)
-    # Neutralize small warm foreground patches without painting fake snow.
-    subprocess.run(['magick',str(source),'-resize','2048x768!','-modulate','100,45,100',
-                    '-channel','R','-evaluate','multiply','.95','+channel',
-                    '-channel','G','-evaluate','multiply','.98','+channel',
-                    '-channel','B','-evaluate','multiply','1.02','+channel',
+    # Soften photographic detail before applying the separate skyline mask:
+    # the ridge stays readable without blurring the modeled arena. Compress
+    # contrast toward the renderer's .88 snow white point and remove most of
+    # the baked color cast so scene lighting supplies the snow's actual hue.
+    # All of this is baked once; runtime texture dimensions/cost stay identical.
+    subprocess.run(['magick',str(source),'-resize','2048x768!',
+                    '-channel','RGB','-blur','0x1.6',
+                    '-modulate','100,12,100',
+                    '-evaluate','multiply','.82','-evaluate','add','15.84%',
+                    '+channel',
                     str(mask),'-alpha','off','-compose','CopyOpacity','-composite',
                     str(cutout)],check=True)
     # Reflect at the photographed edges to close the ring without a hard

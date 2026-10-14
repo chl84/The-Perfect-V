@@ -190,8 +190,14 @@ moon and clouds stay separate. Morning/evening retain a cool upper/opposite sky,
 with warm colors restricted to the low horizon toward the sun. Mountain tint
 uses the natural snow material and the same ambient, directional and fill
 light palette as the model, including the weather response. Its lower haze
-blends toward illuminated snow instead of forming a gray band. The original
-valley mesh's final two lateral rows (180–200 scaled metres from the centre)
+blends toward illuminated snow instead of forming a gray band. Photographic
+fine detail is softened offline with a 1.6-pixel Gaussian blur at the
+2048×768 preparation size. Contrast is compressed to 82% around the .88 snow
+white point, and residual saturation is reduced to 12% so the scene's light
+palette supplies most of its color. The skyline alpha is applied separately
+and stays identical. These adjustments affect only the prepared photograph,
+with no lens blur, extra runtime processing or change in texture size.
+The original valley mesh's final two lateral rows (180–200 scaled metres from the centre)
 fade into the background through cached vertex alpha. Snow beneath all tree
 bases and the entire playable corridor stay opaque; this material blend retains
 positions, depth writes and snow texture pixels. This adds no vertices, draw
@@ -250,6 +256,12 @@ combinations. All 13 standalone suites and the full-game Vulkan smoke test passe
 An additional 192 original-physics runs across all 32 hills, headwind/calm/tailwind
 and normal jumps/falls stayed within the protected original surface. The geometry
 change affects only the explicitly bounded backdrop described above.
+
+The subsequent photograph softening/color treatment was checked in 80 native
+1920×1080, 4× MSAA captures (four venues, flight/panorama, all four clear times
+and day/night for the other weather types). Environment and renderer command
+suites passed. BMP dimensions/header and every skyline alpha byte match the
+previous asset; only its RGB pixels changed.
 
 On 2026-10-14, 224 before/after captures at 1920×1080 with 4× MSAA were pixel
 identical across all 32 hills, three cameras, panorama and day/snow/night scenes.
