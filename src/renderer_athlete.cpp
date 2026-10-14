@@ -12,6 +12,8 @@ struct FallContact {
     const Hill &hill;
     Vec3 origin;
     double start, step, firstX, lift = 0;
+    bool skiSurface = false;
+    Vec3 skiAnkle, skiDirection;
     std::vector<double> heights;
     sjp::gfx::Enum mode = sjp::gfx::QUADS;
     size_t count = 0;
@@ -52,7 +54,15 @@ struct FallContact {
     }
     void measure(Vec3 local) {
         const Vec3 p = local + origin;
-        lift = std::max(lift, surface(p.x, p.z) + .008 - p.y);
+        // Only the distant ski ends may press into snow during a fall. Keep
+        // bindings, boots and the complete body clear, with no pose changes.
+        double snowPress = 0;
+        if (skiSurface) {
+            const double distance = std::abs(dot(local - skiAnkle, skiDirection));
+            const double t = clamp((distance - .30) / .65, 0.0, 1.0);
+            snowPress = .15 * t * t * (3 - 2 * t);
+        }
+        lift = std::max(lift, surface(p.x, p.z) + .008 - snowPress - p.y);
     }
     void edge(Vec3 a, Vec3 b) {
         // A triangle edge can cross a terrain-grid bend between its endpoints.
@@ -217,6 +227,11 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
 }
 void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Color accent) {
     const Basis basis = skiBasis(rear, front);
+    if (contactPass) {
+        contactPass->skiSurface = true;
+        contactPass->skiAnkle = ankle;
+        contactPass->skiDirection = basis.forward;
+    }
     const std::array<Vec3, 3> centers{rear, front, tip};
     constexpr std::array<double, 3> widths{.071, .095, .066};
     constexpr double halfThickness = .018;
@@ -248,6 +263,8 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     quad(corner(2, 1, -halfThickness), corner(2, -1, -halfThickness), corner(2, -1, halfThickness),
          corner(2, 1, halfThickness), edge);
     emitEnd();
+    if (contactPass)
+        contactPass->skiSurface = false;
     orientedBox(ankle + basis.up * .025, basis, {.37, .045, .14}, edge);
     orientedBox(ankle - basis.forward * .13 + basis.up * .067, basis, {.08, .09, .13}, accent);
     orientedBox(ankle + basis.forward * .13 + basis.up * .046, basis, {.085, .055, .14}, accent);
@@ -354,7 +371,7 @@ Frame displayedAthleteFrame(const Hill &h, const Frame &f) {
         explicit MeasurementScope(FallContact &contact) : previous(contactPass) { contactPass = &contact; }
         ~MeasurementScope() { contactPass = previous; }
     } scope(contact);
-    // Measure the actual suit, helmet, boots, gloves and skis without GL calls.
+    // Measure the actual skin without GL calls; only ski ends get snow allowance.
     // One rigid translation preserves all joint angles, limb lengths and rolling.
     drawAthleteGeometry(skeleton, false);
     display.y = float(double(f.y) + contact.lift);

@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "original_skeleton.h"
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -35,8 +36,47 @@ sjp::Frame check(const sjp::Hill &h, const sjp::Frame &f) {
     const auto repeat = sjp::displayedAthleteFrame(h, f);
     require(result.y == repeat.y, "Paused/repeated presentation is not deterministic");
     const auto settled = sjp::displayedAthleteFrame(h, result);
-    require(std::abs(double(settled.y) - result.y) < .0001, "Corrected mesh still penetrates snow");
+    require(std::abs(double(settled.y) - result.y) < .0001, "Fall still needs contact correction");
     return result;
+}
+void skiEndContact() {
+    const auto &hill = sjp::hills()[0];
+    sjp::Frame frame = sjp::Simulation(0, 0).frame();
+    frame.x = float(hill.outrunBottom());
+    frame.y = float(sjp::visual::CameraSurface(hill).height(frame.x, 0));
+    frame.phase = int(sjp::Phase::Finished);
+    frame.crashed = 1;
+    frame.hasRenderSkeleton = true;
+    frame.renderSkeleton = sjp::originalSkeleton(frame.pose, frame.leadingLeg).points;
+    for (auto &point : frame.renderSkeleton)
+        point.y += 2;
+    using J = sjp::OriginalJoint;
+    auto point = [&](sjp::Frame &f, J joint) -> sjp::Vec3 & { return f.renderSkeleton[size_t(joint)]; };
+    // Isolate shallow ski-end penetration with the body/bindings clear. The
+    // unchanged ski mesh should enter the snow instead of lifting the body.
+    for (int leg = 0; leg < 2; ++leg) {
+        const double z = leg == 0 ? .35 : -.35;
+        point(frame, leg == 0 ? J::SkiRear1 : J::SkiRear2) = {-1, .20, z};
+        point(frame, leg == 0 ? J::SkiFront1 : J::SkiFront2) = {1.628, -.085, z};
+        point(frame, leg == 0 ? J::SkiTip1 : J::SkiTip2) = {1.648, -.02, z};
+    }
+    require(check(hill, frame).y == frame.y, "Shallow ski ends still lift the whole jumper");
+    auto deep = frame;
+    point(deep, J::SkiFront1).y -= .35;
+    point(deep, J::SkiTip1).y -= .35;
+    const auto corrected = check(hill, deep);
+    require(corrected.y > deep.y + .25 && corrected.y < deep.y + .40,
+            "Ski-end snow allowance is absent or allows excessive burial");
+    auto headContact = frame;
+    point(headContact, J::Head).y = -.35;
+    require(check(hill, headContact).y > headContact.y + .35,
+            "Ski allowance also lets the helmet enter the snow");
+    auto bootContact = frame;
+    point(bootContact, J::Ankle1).y = -.20;
+    require(check(hill, bootContact).y > bootContact.y + .15,
+            "Ski allowance also lets boots/bindings enter the snow");
+    frame.crashed = 0;
+    require(check(hill, frame).y == frame.y, "Ski allowance affects non-falling jumps");
 }
 } // namespace
 // The CPU contact calculation must work without a window or graphics context.
@@ -58,6 +98,7 @@ void translated(double, double, double) { ++drawCalls; }
 
 int main() {
     try {
+        skiEndContact();
         size_t samples = 0;
         double maximumLift = 0;
         for (int hill = 0; hill < int(sjp::HILL_COUNT); ++hill) {
