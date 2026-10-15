@@ -409,7 +409,19 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
         tailoredSegment(ear, chin, .011, .015, .011, .015, shade(shell, .66));
     }
 }
-void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color hairLight, Color hairDark) {
+double fringeLift(const Frame &frame) {
+    // Distance past the board gives a short, smooth rise without maintaining
+    // animation state. Recorded/interpolated frames therefore also work when
+    // seeking or pausing. Wind eases away as the jumper slows in the outrun.
+    const auto smooth = [](double t) {
+        t = clamp(t, 0.0, 1.0);
+        return t * t * (3 - 2 * t);
+    };
+    const double speed = std::hypot(frame.vx, frame.vy);
+    return smooth(frame.x / (std::max(1.0, double(frame.vx)) * .25)) * smooth((speed - 3) / 9);
+}
+void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color hairLight, Color hairDark,
+                   double lift) {
     const auto at = [&](double forward, double up, double side = 0) {
         return head + basis.forward * forward + basis.up * up + basis.side * side;
     };
@@ -471,9 +483,21 @@ void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color 
         }
         emitEnd();
     }
-    Basis sweep{(basis.forward * .84 + basis.side * .54).normalized(), basis.up,
-                (basis.side * .84 - basis.forward * .54).normalized()};
-    ellipsoid(at(.072, .145, -.020), sweep, {.125, .045, .145}, hair, 14, 5);
+    const Vec3 sweptForward = (basis.forward * .84 + basis.side * .54).normalized();
+    const Vec3 sweptSide = (basis.side * .84 - basis.forward * .54).normalized();
+    const Vec3 vertical{0, 1, 0};
+    Vec3 hinge = cross(sweptForward, vertical);
+    hinge = hinge.length() > 1e-6 ? hinge.normalized() : sweptSide;
+    const double angle = lift * std::acos(clamp(dot(sweptForward, vertical), -1.0, 1.0));
+    const auto rotate = [&](Vec3 v) {
+        return v * std::cos(angle) + cross(hinge, v) * std::sin(angle) +
+               hinge * (dot(hinge, v) * (1 - std::cos(angle)));
+    };
+    // World up keeps the fringe vertical even with the head pitched forward
+    // in flight. Rotate the whole basis so the lock keeps its volume.
+    const Basis sweep{rotate(sweptForward), rotate(basis.up), rotate(sweptSide)};
+    // Keep the root in the scalp while the longer fringe pivots upright.
+    ellipsoid(at(.025, .145, -.020) + sweep.forward * .085, sweep, {.160, .045, .145}, hair, 14, 5);
 }
 constexpr std::array<double, 7> jacketHeights{0, .10, .27, .45, .64, .82, 1};
 struct JacketSection {
@@ -487,10 +511,15 @@ JacketSection jacketSection(size_t ring) {
             (.22 * (1 - t) + .235 * t + .075 * belly) * hem, .055 * belly};
 }
 void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Color white, Color lapel, Color tie) {
+    // Lower the full belly and hem without shrinking any cross-section. The
+    // shoulder stays anchored; the longer jacket retains all its original bulk.
+    const auto center = [&](double t) {
+        return hip + (shoulder - hip) * t - basis.up * (.13 * (1 - t));
+    };
     const auto point = [&](size_t ring, double angle) {
         const auto section = jacketSection(ring);
         const double c = std::cos(angle);
-        return hip + (shoulder - hip) * jacketHeights[ring] +
+        return center(jacketHeights[ring]) +
                basis.forward * (section.shift + c * (c >= 0 ? section.front : section.back)) +
                basis.side * (std::sin(angle) * section.width);
     };
@@ -507,7 +536,7 @@ void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Col
         emitBegin(gfx::TRIANGLE_FAN);
         const Vec3 normal = basis.up * (ring == 0 ? -1 : 1);
         emitNormal(normal.x, normal.y, normal.z);
-        vertex(hip + (shoulder - hip) * jacketHeights[ring]);
+        vertex(center(jacketHeights[ring]));
         for (int i = 0; i <= 16; ++i)
             vertex(point(ring, (ring == 0 ? i : -i) * PI / 8));
         emitEnd();
@@ -528,7 +557,7 @@ void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Col
         const size_t l = r ? r - 1 : 0;
         const double blend = r != l ? (t - jacketHeights[l]) / (jacketHeights[r] - jacketHeights[l]) : 0;
         const double depth = frontAt(l, side) * (1 - blend) + frontAt(r, side) * blend;
-        return hip + (shoulder - hip) * t + basis.forward * (depth + offset) + basis.side * side;
+        return center(t) + basis.forward * (depth + offset) + basis.side * side;
     };
     const auto patch = [&](double low, double leftLow, double rightLow, double high,
                            double leftHigh, double rightHigh, Color tint, double offset) {
@@ -558,7 +587,8 @@ void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Col
     patch(.36, -.031, .031, .78, -.012, .012, tie, .018);
     patch(.29, 0, 0, .36, -.031, .031, tie, .018);
 }
-void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance) {
+void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance,
+                         double hairLift = 0) {
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
     const float alpha = ghost ? .35f : 1;
     auto tint = [&](Color c) {
@@ -572,7 +602,7 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                 dark = tint({.055f, .13f, .19f}), white = tint({.91f, .95f, .95f}),
                 accent = tint({.23f, .82f, .75f}),
                 visor = tint({.22f, .69f, .82f}),
-                skin = tint(president ? Color{.91f, .64f, .46f} : Color{.77f, .56f, .43f});
+                skin = tint(president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f});
     const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
     const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
     const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
@@ -619,8 +649,8 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                     president ? white : dark);
     const Basis headBasis = segmentBasis(head - shoulder);
     if (president)
-        presidentHead(head, headBasis, skin, tint({.93f, .72f, .29f}), tint({1.f, .84f, .41f}),
-                      tint({.69f, .47f, .16f}));
+        presidentHead(head, headBasis, skin, tint({.95f, .81f, .53f}), tint({1.f, .90f, .67f}),
+                      tint({.74f, .59f, .32f}), hairLift);
     else
         helmet(head, headBasis, dark, white, visor, skin);
 }
@@ -647,7 +677,7 @@ Frame displayedAthleteFrame(const Hill &h, const Frame &f, JumperAppearance appe
     } scope(contact);
     // Measure the actual skin without GL calls; only ski ends get snow allowance.
     // One rigid translation preserves all joint angles, limb lengths and rolling.
-    drawAthleteGeometry(skeleton, false, appearance);
+    drawAthleteGeometry(skeleton, false, appearance, fringeLift(f));
     display.y = float(double(f.y) + contact.lift);
     return display;
 }
@@ -673,7 +703,7 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     sjp::gfx::lightfv(gfx::LIGHT0, gfx::SPECULAR, ghost ? noHighlights : specularLight);
     sjp::gfx::pushMatrix();
     sjp::gfx::translated(f.x, f.y, 0);
-    drawAthleteGeometry(skeleton, ghost, jumperAppearance);
+    drawAthleteGeometry(skeleton, ghost, jumperAppearance, fringeLift(f));
     sjp::gfx::popMatrix();
     sjp::gfx::popAttrib();
 }

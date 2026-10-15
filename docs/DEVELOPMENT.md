@@ -159,7 +159,11 @@ The main menu's Ski Jumper screen uses the existing panels, buttons and two nati
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
 President's older face has fuller jowls, heavy eyelids and fine forehead/cheek
 creases. A rounded jacket mesh adds a prominent belly and wider waist; shirt,
-lapels and tie follow its surface through the original poses.
+lapels and tie follow its surface through the original poses. The belly and hem
+hang below the hips without reducing the jacket's cross-sections. The longer
+fringe pivots upright just after takeoff and settles as outrun speed drops;
+its position comes directly from the displayed frame, so replay pause/seek is
+deterministic and the menu preview keeps the swept fringe.
 Both skins wrap the exact same original skeleton, including interpolated joints
 and fall poses; skis, bindings and boots retain their geometry. The appearance
 enum stays outside simulation, AI, input, scoring and replay physics. Native
