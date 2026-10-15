@@ -1,4 +1,5 @@
 #include "original_replay.h"
+#include "platform_file.h"
 #include <algorithm>
 #include <cstring>
 #include <ctime>
@@ -171,8 +172,8 @@ bool saveOriginalReplay(const std::string &path, const OriginalReplayData &data,
     if (!file) return failure(error,"Cannot create original replay file.");
     file.write(reinterpret_cast<const char *>(encoded.data()),encoded.size());file.close();
     if (!file) return failure(error,"Cannot write original replay file.");
-    std::error_code ec;std::filesystem::rename(path+".tmp",path,ec);
-    if (ec) return failure(error,"Cannot replace original replay file.");
+    if (!replaceSavedFile(std::filesystem::u8path(path+".tmp"),std::filesystem::u8path(path)))
+        return failure(error,"Cannot replace original replay file.");
     if (error) error->clear();
     return true;
 }

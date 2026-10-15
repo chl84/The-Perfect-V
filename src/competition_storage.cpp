@@ -1,4 +1,5 @@
 #include "competition.h"
+#include "platform_file.h"
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
@@ -106,8 +107,9 @@ bool saveCompetition(const std::string &path, const Competition &cup) {
     file.close();
     if (!file) return false;
     std::error_code ec;
-    std::filesystem::rename(temporary, path, ec);
-    if (ec) { std::filesystem::remove(temporary, ec); return false; }
+    if (!replaceSavedFile(std::filesystem::u8path(temporary), std::filesystem::u8path(path))) {
+        std::filesystem::remove(temporary, ec); return false;
+    }
     return true;
 }
 bool loadCompetition(const std::string &path, Competition &cup, std::string *error) {

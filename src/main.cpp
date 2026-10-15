@@ -26,7 +26,11 @@ uint32_t originalClockSeed() {
     const auto now = std::chrono::system_clock::now();
     auto seconds = std::chrono::system_clock::to_time_t(now);
     std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &seconds);
+#else
     localtime_r(&seconds, &local);
+#endif
     auto hundredths =
         (std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000) / 10;
     return originalWindSeedFromDosTime(uint8_t(local.tm_hour), uint8_t(local.tm_min), uint8_t(local.tm_sec),
@@ -2547,6 +2551,13 @@ int main(int argc, char **argv) {
         return app.run();
     } catch (const std::exception &e) {
         std::cerr << "The Perfect V: " << e.what() << '\n';
+#ifdef _WIN32
+        bool automated = false;
+        for (int i = 1; i < argc; ++i)
+            automated = automated || std::string(argv[i]) == "--smoke-test";
+        if (!automated)
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "The Perfect V", e.what(), nullptr);
+#endif
         return 1;
     }
 }

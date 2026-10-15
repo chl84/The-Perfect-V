@@ -1,0 +1,101 @@
+name: Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shaders:
+    name: Compile portable Vulkan shaders
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y glslang-tools
+      - name: Compile SPIR-V and embed as C++
+        run: |
+          mkdir -p shaders
+          for stage in vert frag; do
+            glslangValidator -V --target-env vulkan1.0 src/shaders/scene.$stage -o shaders/scene.$stage.spv
+            cmake -DSOURCE="$PWD/shaders/scene.$stage.spv" -DOUTPUT="$PWD/shaders/scene.$stage.inc" -P tools/embed_spirv.cmake
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Windows-shaders
+          path: shaders/*.inc
+
+  build:
+    name: Build Windows x86_64
+    needs: shaders
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: Windows-shaders
+          path: build-windows/shaders
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build, test and package
+        shell: pwsh
+        run: ./package-windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThePerfectV-windows-x86_64
+          path: |
+            dist/*-windows-x86_64.zip
+            dist/*-windows-x86_64.zip.sha256
+            dist/Windows-build.json
+          if-no-files-found: error
+          retention-days: 30
+
+  packaged:
+    name: Run packaged Windows game
+    needs: build
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ThePerfectV-windows-x86_64
+          path: dist
+      - name: Verify package and run with software Vulkan
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $zip = Get-Item dist/*-windows-x86_64.zip
+          $expected = (Get-Content "$($zip.FullName).sha256").Split(' ')[0]
+          if ((Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower() -ne $expected) { throw 'Checksum mismatch' }
+          $unpacked = "$env:RUNNER_TEMP/The Perfect V ÆØÅ"
+          Expand-Archive $zip.FullName $unpacked
+          $exe = "$unpacked/ThePerfectV/the-perfect-v.exe"
+          $chrome = Get-ChildItem 'C:/Program Files/Google/Chrome/Application' -Filter vk_swiftshader.dll -Recurse | Select-Object -First 1
+          if (!$chrome) { throw 'Chrome software Vulkan driver is missing' }
+          $driver = "$env:RUNNER_TEMP/vulkan-test"
+          New-Item -ItemType Directory $driver | Out-Null
+          Copy-Item $chrome.FullName $driver
+          Copy-Item (Join-Path $chrome.DirectoryName 'vulkan-1.dll') $driver
+          $icd = @{file_format_version='1.0.0'; ICD=@{library_path='./vk_swiftshader.dll'; api_version='1.3.0'}}
+          $icd | ConvertTo-Json | Set-Content "$driver/icd.json"
+          $env:VK_ICD_FILENAMES = "$driver/icd.json"
+          $env:SDL_AUDIODRIVER = 'dummy'
+          $env:PATH = "$driver;$env:SystemRoot/System32;$env:SystemRoot"
+          $save = "$env:RUNNER_TEMP/Windows saves ÆØÅ"
+          foreach ($arguments in @(@('--help'), @('--smoke-test', '--hidden', '--data-dir', "`"$save`""))) {
+            $process = Start-Process $exe -ArgumentList $arguments -Wait -PassThru -NoNewWindow `
+              -RedirectStandardOutput "$env:RUNNER_TEMP/game.log" -RedirectStandardError "$env:RUNNER_TEMP/game-error.log"
+            Get-Content "$env:RUNNER_TEMP/game.log"
+            Get-Content "$env:RUNNER_TEMP/game-error.log"
+            if ($process.ExitCode -ne 0) { throw "Packaged game failed: $($process.ExitCode)" }
+          }
