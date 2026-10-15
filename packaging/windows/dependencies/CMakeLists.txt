@@ -18,7 +18,10 @@ FetchContent_Declare(SDL
   URL_HASH SHA256=7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68
   DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/downloads" DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
 FetchContent_Declare(freetype
-  URL https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz
+  URL https://downloads.sourceforge.net/project/freetype/freetype2/2.14.1/freetype-2.14.1.tar.xz
+      https://download-mirror.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz
+      https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz
   URL_HASH SHA256=32427e8c471ac095853212a37aef816c60b42052d4d9e48230bab3bdf2936ccc
-  DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/downloads" DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
+  DOWNLOAD_DIR "${CMAKE_BINARY_DIR}/downloads" DOWNLOAD_EXTRACT_TIMESTAMP FALSE
+  TIMEOUT 60 INACTIVITY_TIMEOUT 15)
 FetchContent_MakeAvailable(SDL freetype)
