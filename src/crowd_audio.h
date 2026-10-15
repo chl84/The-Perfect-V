@@ -18,6 +18,13 @@ class CrowdPresentation {
     static constexpr int sampleRate = 48000;
     void begin(const Hill &, const std::vector<Frame> *recording = nullptr);
     void seek() { ++serial; }
+    void restore(const CrowdPresentation &saved) {
+        const uint32_t nextSerial = serial + 1;
+        *this = saved;
+        // A restored fall must seek the mixer even if its saved revision
+        // happens to match the replay that just finished.
+        serial = nextSerial;
+    }
     CrowdAudioState update(const Frame &, double dt, CrowdPlayback, float rate = 1);
     double proximity(const Frame &) const;
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "physics.h"
+#include "jumper_appearance.h"
 #include "draw_commands.h"
 #include "camera_path.h"
 #include "visual_environment.h"
@@ -14,7 +15,7 @@
 namespace sjp {
 // Fall contact correction is presentation only. Never feed this Frame to physics,
 // input, camera tracking, scoring or replay storage.
-Frame displayedAthleteFrame(const Hill &, const Frame &);
+Frame displayedAthleteFrame(const Hill &, const Frame &, JumperAppearance = JumperAppearance::Pro);
 struct Color {
     float r, g, b, a = 1;
 };
@@ -41,10 +42,12 @@ class Renderer {
     void pill(const std::string &, float x, float y, Color c = colors::teal);
     void countryFlag(const std::string &country, float x, float y, float w = 32, float h = 22);
     void windArrow(float x, float y, double speed, double angle);
+    void jumperPreview(JumperAppearance, float x, float y, float scale);
     void finish();
     void capture(const std::string &path);
     void resetCamera() { cameraInit = false; }
     void setHillRecord(double distance) { hillRecordDistance = distance; }
+    void setJumperAppearance(JumperAppearance appearance) { jumperAppearance = appearance; }
     void setJumpWeather(uint32_t seed, environment::Selection selection = {});
     void setEnvironment(environment::Conditions, bool restart = false);
     const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
@@ -94,6 +97,7 @@ class Renderer {
     void startSignalLenses(const Hill &, const Frame &);
     void scenery(const Hill &, const Frame &, double time);
     void athlete(const Hill &, const Frame &, bool ghost);
+    void jumperPreviewGeometry(JumperAppearance);
     void effects(const Hill &, const Frame &, double time, bool showWeather);
     bool snowfall = false;
     environment::Conditions sceneEnvironment;
@@ -108,5 +112,6 @@ class Renderer {
     std::string effectHill;
     bool effectsInitialized = false;
     bool synchronousRendering = false;
+    JumperAppearance jumperAppearance = JumperAppearance::Pro;
 };
 } // namespace sjp

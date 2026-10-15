@@ -1,5 +1,6 @@
 #pragma once
 #include "physics.h"
+#include "jumper_appearance.h"
 #include <string>
 
 namespace sjp {
@@ -9,6 +10,7 @@ struct Records {
     bool sound = true;
     double sensitivity = 1;
     environment::Selection environment;
+    JumperAppearance jumper = JumperAppearance::Pro;
 };
 bool updateHillRecord(Records &, int hill, const Result &, bool human);
 bool saveRecords(const std::string &, const Records &);

@@ -513,12 +513,12 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     double wx = 10 * s, wy = h.ground(wx) + 10;
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
-    const Frame display = displayedAthleteFrame(h, f);
+    const Frame display = displayedAthleteFrame(h, f, jumperAppearance);
     jumperShadow(h, display, lighting, lamps, inrun, sceneEnvironment.time);
     athlete(h, display, false);
     if (ghost && gf) {
         sjp::gfx::depthMask(sjp::gfx::FALSE);
-        athlete(h, displayedAthleteFrame(h, *gf), true);
+        athlete(h, displayedAthleteFrame(h, *gf, jumperAppearance), true);
         sjp::gfx::depthMask(sjp::gfx::TRUE);
     }
     effects(h, display, time, !panorama);

@@ -409,7 +409,156 @@ void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor,
         tailoredSegment(ear, chin, .011, .015, .011, .015, shade(shell, .66));
     }
 }
-void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
+void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color hairLight, Color hairDark) {
+    const auto at = [&](double forward, double up, double side = 0) {
+        return head + basis.forward * forward + basis.up * up + basis.side * side;
+    };
+    material(Finish::Skin);
+    ellipsoid(at(.012, -.025), basis, {.158, .188, .155}, skin, 14, 9);
+    ellipsoid(at(.030, -.123), basis, {.145, .080, .137}, shade(skin, .96), 12, 6);
+    ellipsoid(at(.166, -.020), basis, {.040, .045, .032}, shade(skin, 1.03), 10, 5);
+    for (double side : {-1.0, 1.0}) {
+        ellipsoid(at(0, -.025, side * .155), basis, {.028, .049, .023}, skin, 8, 5);
+        ellipsoid(at(.158, .020, side * .064), basis, {.008, .009, .026}, {.91f, .93f, .91f, skin.a}, 8, 4);
+        ellipsoid(at(.167, .020, side * .064), basis, {.005, .006, .009}, {.19f, .30f, .38f, skin.a}, 8, 4);
+        ellipsoid(at(.155, .035, side * .064), basis, {.014, .012, .035}, shade(skin, .95), 8, 4);
+        ellipsoid(at(.151, .001, side * .065), basis, {.013, .011, .034}, shade(skin, .88), 8, 4);
+        ellipsoid(at(.150, .060, side * .064), basis, {.010, .010, .036}, hairDark, 8, 4);
+    }
+    const auto face = [&](double up, double side) {
+        const double upper = 1 - std::pow((up + .025) / .188, 2) - std::pow(side / .155, 2);
+        const double lower = 1 - std::pow((up + .123) / .080, 2) - std::pow(side / .137, 2);
+        const double depth = std::max(.012 + .158 * std::sqrt(std::max(0.0, upper)),
+                                      .030 + .145 * std::sqrt(std::max(0.0, lower)));
+        return at(depth + .0025, up, side);
+    };
+    ellipsoid(face(-.112, 0), basis, {.008, .010, .043}, {.66f, .36f, .29f, skin.a}, 10, 4);
+    // Subtle forehead lines, eye folds and heavier jowls age the face without
+    // changing the head joint, neck length or animation.
+    const Color crease = shade(skin, .82);
+    for (double up : {.085, .109})
+        for (int i = 0; i < 6; ++i) {
+            const double a = -.079 + i * .158 / 6, b = a + .158 / 6;
+            tailoredSegment(face(up, a), face(up, b), .0018, .0018, .0018, .0018, crease);
+        }
+    for (double side : {-1.0, 1.0}) {
+        tailoredSegment(face(-.045, side * .048), face(-.080, side * .069),
+                        .0023, .0023, .0023, .0023, crease);
+        tailoredSegment(face(-.080, side * .069), face(-.117, side * .075),
+                        .0023, .0023, .0018, .0018, crease);
+    }
+    material(Finish::Fabric);
+    // An open forehead and low sides distinguish hair from a helmet. The
+    // asymmetric front locks form the broad, swept-over golden fringe.
+    constexpr int slices = 16, rings = 5;
+    for (int ring = 0; ring < rings; ++ring) {
+        emitBegin(gfx::QUAD_STRIP);
+        for (int slice = 0; slice <= slices; ++slice) {
+            const double angle = slice * 2 * PI / slices;
+            const double bottom = .08 + .57 * std::max(0.0, std::cos(angle)) -
+                                  .28 * std::max(0.0, -std::cos(angle));
+            for (int edge : {ring, ring + 1}) {
+                const double latitude = bottom + (PI * .5 - bottom) * edge / rings;
+                const Vec3 normal = basis.forward * (std::cos(latitude) * std::cos(angle)) +
+                                    basis.up * std::sin(latitude) +
+                                    basis.side * (std::cos(latitude) * std::sin(angle));
+                emitNormal(normal.x, normal.y, normal.z);
+                color(ring > 2 ? hairLight : hair);
+                vertex(at(.170 * std::cos(latitude) * std::cos(angle) + .028 * std::sin(latitude),
+                          .018 + .192 * std::sin(latitude),
+                          .151 * std::cos(latitude) * std::sin(angle) - .018 * std::sin(latitude)));
+            }
+        }
+        emitEnd();
+    }
+    Basis sweep{(basis.forward * .84 + basis.side * .54).normalized(), basis.up,
+                (basis.side * .84 - basis.forward * .54).normalized()};
+    ellipsoid(at(.072, .145, -.020), sweep, {.125, .045, .145}, hair, 14, 5);
+}
+constexpr std::array<double, 7> jacketHeights{0, .10, .27, .45, .64, .82, 1};
+struct JacketSection {
+    double front, back, width, shift;
+};
+JacketSection jacketSection(size_t ring) {
+    const double t = jacketHeights[ring], belly = std::sin(PI * clamp(t / .90, 0.0, 1.0));
+    const double hem = ring == 0 ? .90 : ring == jacketHeights.size() - 1 ? .76 : 1;
+    return {(.19 * (1 - t) + .15 * t + .12 * belly) * hem,
+            (.15 + .025 * belly) * hem,
+            (.22 * (1 - t) + .235 * t + .075 * belly) * hem, .055 * belly};
+}
+void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Color white, Color lapel, Color tie) {
+    const auto point = [&](size_t ring, double angle) {
+        const auto section = jacketSection(ring);
+        const double c = std::cos(angle);
+        return hip + (shoulder - hip) * jacketHeights[ring] +
+               basis.forward * (section.shift + c * (c >= 0 ? section.front : section.back)) +
+               basis.side * (std::sin(angle) * section.width);
+    };
+    emitBegin(gfx::QUADS);
+    for (size_t ring = 0; ring + 1 < jacketHeights.size(); ++ring)
+        for (int side = 0; side < 16; ++side) {
+            const double a = side * PI / 8, b = (side + 1) * PI / 8;
+            quad(point(ring, a), point(ring + 1, a), point(ring + 1, b), point(ring, b),
+                 shade(suit, side >= 7 && side <= 9 ? .90 : 1));
+        }
+    emitEnd();
+    for (size_t ring : {size_t(0), jacketHeights.size() - 1}) {
+        color(suit);
+        emitBegin(gfx::TRIANGLE_FAN);
+        const Vec3 normal = basis.up * (ring == 0 ? -1 : 1);
+        emitNormal(normal.x, normal.y, normal.z);
+        vertex(hip + (shoulder - hip) * jacketHeights[ring]);
+        for (int i = 0; i <= 16; ++i)
+            vertex(point(ring, (ring == 0 ? i : -i) * PI / 8));
+        emitEnd();
+    }
+    // Subdivide the shirt, lapels and tie at every belly ring so they follow
+    // the jacket surface in all poses instead of cutting through its middle.
+    const auto frontAt = [&](size_t ring, double side) {
+        const auto section = jacketSection(ring);
+        const double angle = std::asin(clamp(std::abs(side) / section.width, 0.0, 1.0));
+        const double a = std::floor(angle / (PI / 8)) * PI / 8, b = std::min(PI / 2, a + PI / 8);
+        const double blend = b > a ? (std::abs(side) / section.width - std::sin(a)) /
+                                        (std::sin(b) - std::sin(a)) : 0;
+        return section.shift + section.front * (std::cos(a) * (1 - blend) + std::cos(b) * blend);
+    };
+    const auto surface = [&](double t, double side, double offset) {
+        const auto upper = std::upper_bound(jacketHeights.begin(), jacketHeights.end(), t);
+        const size_t r = std::min(size_t(upper - jacketHeights.begin()), jacketHeights.size() - 1);
+        const size_t l = r ? r - 1 : 0;
+        const double blend = r != l ? (t - jacketHeights[l]) / (jacketHeights[r] - jacketHeights[l]) : 0;
+        const double depth = frontAt(l, side) * (1 - blend) + frontAt(r, side) * blend;
+        return hip + (shoulder - hip) * t + basis.forward * (depth + offset) + basis.side * side;
+    };
+    const auto patch = [&](double low, double leftLow, double rightLow, double high,
+                           double leftHigh, double rightHigh, Color tint, double offset) {
+        if (leftLow > rightLow)
+            std::swap(leftLow, rightLow);
+        if (leftHigh > rightHigh)
+            std::swap(leftHigh, rightHigh);
+        double previous = low;
+        for (double boundary : jacketHeights) {
+            const double next = std::min(high, boundary);
+            if (next <= previous)
+                continue;
+            const auto edge = [&](double t, double a, double b) {
+                return surface(t, a + (b - a) * ((t - low) / (high - low)), offset);
+            };
+            emitBegin(gfx::QUADS);
+            quad(edge(previous, leftLow, leftHigh), edge(next, leftLow, leftHigh),
+                 edge(next, rightLow, rightHigh), edge(previous, rightLow, rightHigh), tint);
+            emitEnd();
+            previous = next;
+        }
+    };
+    patch(.48, -.028, .028, .99, -.090, .090, white, .006);
+    for (double side : {-1.0, 1.0})
+        patch(.35, side * .014, side * .014, .99, side * .045, side * .13, lapel, .010);
+    patch(.78, -.012, .012, .88, -.024, .024, tie, .017);
+    patch(.36, -.031, .031, .78, -.012, .012, tie, .018);
+    patch(.29, 0, 0, .36, -.031, .031, tie, .018);
+}
+void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance) {
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
     const float alpha = ghost ? .35f : 1;
     auto tint = [&](Color c) {
@@ -418,9 +567,12 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
         c.a = alpha;
         return c;
     };
-    const Color suit = tint({.94f, .31f, .13f}), dark = tint({.055f, .13f, .19f}),
-                white = tint({.91f, .95f, .95f}), accent = tint({.23f, .82f, .75f}),
-                visor = tint({.22f, .69f, .82f}), skin = tint({.77f, .56f, .43f});
+    const bool president = appearance == JumperAppearance::President;
+    const Color suit = tint(president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
+                dark = tint({.055f, .13f, .19f}), white = tint({.91f, .95f, .95f}),
+                accent = tint({.23f, .82f, .75f}),
+                visor = tint({.22f, .69f, .82f}),
+                skin = tint(president ? Color{.91f, .64f, .46f} : Color{.77f, .56f, .43f});
     const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
     const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
     const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
@@ -435,17 +587,17 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
                    shoulder = point(shoulders[leg]), elbow = point(elbows[leg]), hand = point(hands[leg]);
         ski(point(rear[leg]), point(front[leg]), point(tips[leg]), ankle, dark, shade(dark, .75), accent);
         material(Finish::Fabric);
-        tailoredSegment(ankle, knee, .095, .09, .12, .11, dark);
+        tailoredSegment(ankle, knee, .095, .09, .12, .11, president ? suit : dark);
         tailoredSegment(knee, hip, .12, .115, .15, .13, suit);
         ellipsoid(knee, segmentBasis(hip - ankle), {.115, .13, .112}, suit, 8, 4);
         tailoredSegment(shoulder, elbow, .105, .105, .083, .086, suit);
         tailoredSegment(elbow, hand, .086, .084, .065, .068, suit);
         ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
         const Basis handBasis = segmentBasis(elbow - hand);
-        material(Finish::Rubber);
-        ellipsoid(hand, handBasis, {.077, .11, .075}, dark, 8, 5);
+        material(president ? Finish::Skin : Finish::Rubber);
+        ellipsoid(hand, handBasis, {.077, .11, .075}, president ? skin : dark, 8, 5);
         ellipsoid(hand + handBasis.forward * .05 + handBasis.side * (leg == 0 ? -.045 : .045), handBasis,
-                  {.044, .057, .038}, dark, 6, 4);
+                  {.044, .057, .038}, president ? skin : dark, 6, 4);
         tailoredSegment(hand + handBasis.up * .045, hand + handBasis.up * .1, .074, .074, .075, .075, white);
         const Basis boot = skiBasis(point(rear[leg]), point(front[leg]));
         ellipsoid(ankle + boot.forward * .055 + boot.up * .067, boot, {.19, .092, .098}, dark, 10, 5);
@@ -457,16 +609,24 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost) {
     const Vec3 hip = point(OriginalJoint::HipCenter), shoulder = point(OriginalJoint::ShoulderCenter),
                head = point(OriginalJoint::Head);
     material(Finish::Fabric);
-    tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
     const Basis torso = segmentBasis(shoulder - hip);
+    if (president)
+        presidentTorso(hip, shoulder, torso, suit, white, tint({.12f, .155f, .23f}), tint({.80f, .045f, .065f}));
+    else
+        tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
     tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
-    tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09, .075, .078, .075, .078, dark);
+    tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09, .075, .078, .075, .078,
+                    president ? white : dark);
     const Basis headBasis = segmentBasis(head - shoulder);
-    helmet(head, headBasis, dark, white, visor, skin);
+    if (president)
+        presidentHead(head, headBasis, skin, tint({.93f, .72f, .29f}), tint({1.f, .84f, .41f}),
+                      tint({.69f, .47f, .16f}));
+    else
+        helmet(head, headBasis, dark, white, visor, skin);
 }
 } // namespace
 
-Frame displayedAthleteFrame(const Hill &h, const Frame &f) {
+Frame displayedAthleteFrame(const Hill &h, const Frame &f, JumperAppearance appearance) {
     Frame display = f;
     if (!f.crashed || (Phase(f.phase) != Phase::Outrun && Phase(f.phase) != Phase::Finished))
         return display;
@@ -487,7 +647,7 @@ Frame displayedAthleteFrame(const Hill &h, const Frame &f) {
     } scope(contact);
     // Measure the actual skin without GL calls; only ski ends get snow allowance.
     // One rigid translation preserves all joint angles, limb lengths and rolling.
-    drawAthleteGeometry(skeleton, false);
+    drawAthleteGeometry(skeleton, false, appearance);
     display.y = float(double(f.y) + contact.lift);
     return display;
 }
@@ -513,8 +673,26 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     sjp::gfx::lightfv(gfx::LIGHT0, gfx::SPECULAR, ghost ? noHighlights : specularLight);
     sjp::gfx::pushMatrix();
     sjp::gfx::translated(f.x, f.y, 0);
-    drawAthleteGeometry(skeleton, ghost);
+    drawAthleteGeometry(skeleton, ghost, jumperAppearance);
     sjp::gfx::popMatrix();
     sjp::gfx::popAttrib();
 }
+
+void Renderer::jumperPreviewGeometry(JumperAppearance appearance) {
+    // The original standing pose is shared by both previews; only its skin
+    // changes. Preview lighting and transforms never touch the live simulation.
+    static const OriginalSkeleton standing = [] {
+        OriginalPose pose;
+        pose.reset(0);
+        pose.selectMode(7, 0);
+        for (int i = 0; i < 280; ++i)
+            pose.advance(ORIGINAL_TICK);
+        std::array<float, 22> values{};
+        std::copy(pose.angles.begin(), pose.angles.end(), values.begin());
+        std::copy(pose.offsets.begin(), pose.offsets.end(), values.begin() + 18);
+        return originalSkeleton(values, 0);
+    }();
+    drawAthleteGeometry(standing, false, appearance);
+}
+
 } // namespace sjp

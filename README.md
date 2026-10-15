@@ -41,6 +41,10 @@ a graphical desktop; no browser, network connection or DOS emulator is needed.
 Use **How to jump** in the game for a short guide. England K50 and Austria K70
 are small practice hills.
 
+**Ski Jumper** in the main menu selects Pro, the original athlete, or President,
+a suited jumper with a red tie and swept golden hair. The saved choice changes
+appearance only; both use the same skeleton, controls, physics and scoring.
+
 The renderer uses SDL3's GPU API with Vulkan selected explicitly. It retains
 the previous scene geometry, materials, cameras, interface and 4× antialiasing
 where supported. One frame may be in flight, with VSync and an independent

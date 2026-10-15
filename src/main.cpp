@@ -50,7 +50,8 @@ enum class Screen {
     Replay,
     CupSetup,
     JumpReady,
-    ReplayFiles
+    ReplayFiles,
+    SkiJumper
 };
 enum class Action {
     None,
@@ -106,7 +107,9 @@ enum class Action {
     ReplayFile,
     ReplayParent,
     ReplayExport,
-    ReplayExportNative
+    ReplayExportNative,
+    SkiJumper,
+    SelectJumper
 };
 struct Button {
     float x, y, w, h;
@@ -693,7 +696,8 @@ class App {
     void beginReplay() {
         if (!hasReplay)
             return;
-        replayReturn = screen;
+        if (screen != Screen::Replay)
+            replayReturn = screen;
         replayTime = 0;
         replaySpeed = 1;
         replayPlaying = true;
@@ -702,7 +706,7 @@ class App {
                                                         : visual::replayWeatherSeed(lastReplay));
         renderer->setEnvironment(replayEnvironment, true);
         renderer->resetCamera();
-        audio->beginJump(hills()[lastReplay.hill], &lastReplay.frames);
+        audio->beginReplay(hills()[lastReplay.hill], lastReplay.frames);
         changeScreen(Screen::Replay);
     }
     void seekReplay(double position) {
@@ -754,6 +758,16 @@ class App {
             setupTab = setupPage = 0;
             changeScreen(Screen::CupSetup);
             break;
+        case Action::SkiJumper:
+            changeScreen(Screen::SkiJumper);
+            break;
+        case Action::SelectJumper:
+            if (validJumperAppearance(JumperAppearance(value))) {
+                records.jumper = JumperAppearance(value);
+                if (!saveRecords(dataDir + "/records-dsj2.dat", records))
+                    storageError = true;
+            }
+            break;
         case Action::Hills:
             changeScreen(Screen::Hills);
             break;
@@ -774,6 +788,7 @@ class App {
             if (screen == Screen::Help) {
                 changeScreen(helpReturn);
             } else if (screen == Screen::Replay) {
+                audio->endReplay();
                 renderer->resetCamera();
                 changeScreen(replayReturn);
             } else {
@@ -1258,7 +1273,7 @@ class App {
         r.line(x + 27, y - 3, x + 43, y + 23, colors::white, 2);
         r.text("THE PERFECT V", x + 59, y - 2, 23, colors::white, true);
         constexpr float quitY = 809;
-        const float groupHeight = hasCupSave ? 360.f : 314.f;
+        const float groupHeight = hasCupSave ? 428.f : 382.f;
         // Balance the visible group against the logo and Quit text, excluding
         // the extra padding in the links' click targets.
         const float groupY = (y + 23 + quitY + 8 - groupHeight) / 2;
@@ -1271,12 +1286,31 @@ class App {
         buttons.push_back({x, groupY, 316, 46, Action::Hills});
         button("Practice", x, groupY + 74, 316, Action::Practice, 0, true, 54, 18);
         button("Cup", x, groupY + 142, 316, Action::Cup, 0, false, 54, 18);
-        button("Replays", x, groupY + 210, 316, Action::ReplayBrowse, 0, false, 54, 18);
-        textLink("Records", x, groupY + 291, 130, Action::Records);
-        textLink("Settings", x + 146, groupY + 291, 130, Action::Settings);
+        button("Ski Jumper", x, groupY + 210, 316, Action::SkiJumper, 0, false, 54, 18);
+        button("Replays", x, groupY + 278, 316, Action::ReplayBrowse, 0, false, 54, 18);
+        textLink("Records", x, groupY + 359, 130, Action::Records);
+        textLink("Settings", x + 146, groupY + 359, 130, Action::Settings);
         if (hasCupSave)
-            textLink("Resume cup", x, groupY + 337, 170, Action::CupResume);
+            textLink("Resume cup", x, groupY + 405, 170, Action::CupResume);
         textLink("Quit", x, quitY, 95, Action::Quit, 14);
+    }
+    void skiJumperUI() {
+        top("Ski Jumper", "Choose your ski jumper.");
+        auto &r = *renderer;
+        for (int i = 0; i < 2; ++i) {
+            const auto appearance = JumperAppearance(i);
+            const bool selected = records.jumper == appearance;
+            const float x = 64 + i * 666;
+            r.glassPanel(x, 247, 642, 525, 12, .94f);
+            if (selected)
+                r.rect(x + 28, 247, 58, 3, colors::teal, 1);
+            r.text(jumperAppearanceName(appearance), x + 28, 276, 27, colors::white, true);
+            r.text(i == 0 ? "Competition suit and helmet" : "Suit, red tie and signature golden hair",
+                   x + 28, 321, 14, colors::muted);
+            r.jumperPreview(appearance, x + 300, 674, 170);
+            button(selected ? "Selected" : "Select", x + 28, 714, 586,
+                   Action::SelectJumper, i, selected, 40, 14);
+        }
     }
     void hillPagination(float y) {
         auto &r = *renderer;
@@ -1720,7 +1754,7 @@ class App {
         bool panorama = screen == Screen::Menu || screen == Screen::Hills || screen == Screen::Help ||
                         screen == Screen::Settings || screen == Screen::Records ||
                         screen == Screen::Standings || screen == Screen::CupSetup ||
-                        screen == Screen::ReplayFiles;
+                        screen == Screen::ReplayFiles || screen == Screen::SkiJumper;
         Frame f = screen == Screen::Replay                                ? replayFrame(replayTime)
                   : screen == Screen::Playing || screen == Screen::Paused ? sim.renderFrame(accumulator)
                                                                           : sim.frame();
@@ -1742,6 +1776,7 @@ class App {
         else if (panorama)
             conditions = environment::resolve(records.environment, 0x7abc9013U);
         renderer->setEnvironment(conditions);
+        renderer->setJumperAppearance(records.jumper);
         renderer->setHillRecord(records.best[size_t(hi)]);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
         renderer->overlay();
@@ -1776,6 +1811,9 @@ class App {
             break;
         case Screen::CupSetup:
             cupSetupUI();
+            break;
+        case Screen::SkiJumper:
+            skiJumperUI();
             break;
         case Screen::JumpReady:
             jumpReadyUI();
@@ -1878,6 +1916,26 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/menu.ppm");
         renderer->finish();
+        clickButton(Action::SkiJumper);
+        if (screen != Screen::SkiJumper)
+            throw std::runtime_error("Home Ski Jumper button failed");
+        const Simulation appearanceBaseline = sim;
+        for (int choice : {1, 0, 1}) {
+            clickButton(Action::SelectJumper, choice);
+            if (int(records.jumper) != choice ||
+                int(loadRecords(dataDir + "/records-dsj2.dat").jumper) != choice ||
+                sim.x != appearanceBaseline.x || sim.y != appearanceBaseline.y ||
+                sim.vx != appearanceBaseline.vx || sim.vy != appearanceBaseline.vy ||
+                sim.pose.angles != appearanceBaseline.pose.angles ||
+                sim.originalCounter != appearanceBaseline.originalCounter ||
+                sim.initialRandomSeed() != appearanceBaseline.initialRandomSeed())
+                throw std::runtime_error("Jumper selection lost persistence or changed simulation");
+        }
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/ski-jumper.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
         clickButton(Action::Hills);
         if (screen != Screen::Hills)
             throw std::runtime_error("Home hill selector failed");
@@ -2044,6 +2102,38 @@ class App {
         renderer->finish();
         if (records.best != replayRecords)
             throw std::runtime_error("Replay changed hill records");
+        action(Action::Back);
+        auto dropReplay = [&](const std::string &path) {
+            SDL_Event drop{};
+            drop.type = SDL_EVENT_DROP_FILE;
+            drop.drop.windowID = SDL_GetWindowID(window);
+            drop.drop.data = path.c_str();
+            if (!SDL_PushEvent(&drop))
+                throw std::runtime_error("Could not queue replay file drop");
+            events();
+            if (screen != Screen::Replay)
+                throw std::runtime_error("Dropped native replay did not open");
+        };
+        for (Screen origin : {Screen::Result, Screen::Playing, Screen::ReplayFiles, Screen::Menu}) {
+            changeScreen(origin);
+            audio->beginJump(sim.hill(), &sim.frames);
+            const Screen expected = origin == Screen::Playing ? Screen::Paused : origin;
+            dropReplay(previousExport);
+            dropReplay(previousExport);
+            clickButton(Action::Back);
+            if (screen != expected)
+                throw std::runtime_error("Replacing a replay lost the Back destination");
+            dropReplay(previousExport);
+            dropReplay(previousExport);
+            SDL_Event escape{};
+            escape.type = SDL_EVENT_KEY_DOWN;
+            escape.key.key = SDLK_ESCAPE;
+            if (!SDL_PushEvent(&escape))
+                throw std::runtime_error("Could not queue replay Escape");
+            events();
+            if (screen != expected)
+                throw std::runtime_error("Replacing a replay lost the Escape destination");
+        }
         Simulation successfulJump = sim;
         sim.reset(0, 0);
         sim.setWind(0, 0);

@@ -209,4 +209,48 @@ void Renderer::finish() {
 void Renderer::capture(const std::string &path) {
     sjp::gfx::captureImage(path);
 }
+void Renderer::jumperPreview(JumperAppearance appearance, float x, float y, float scale) {
+    gfx::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::LIGHTING_BIT | gfx::TEXTURE_BIT |
+                    gfx::COLOR_BUFFER_BIT | gfx::DEPTH_BUFFER_BIT);
+    gfx::disable(gfx::TEXTURE_2D);
+    gfx::disable(gfx::FOG);
+    gfx::disable(gfx::CULL_FACE);
+    gfx::enable(gfx::DEPTH_TEST);
+    gfx::depthMask(true);
+    gfx::enable(gfx::LIGHTING);
+    gfx::enable(gfx::LIGHT0);
+    gfx::enable(gfx::LIGHT1);
+    gfx::enable(gfx::COLOR_MATERIAL);
+    gfx::enable(gfx::NORMALIZE);
+    gfx::matrixMode(gfx::PROJECTION);
+    gfx::pushMatrix();
+    gfx::loadIdentity();
+    gfx::ortho(0, width, height, 0, -2000, 2000);
+    gfx::matrixMode(gfx::MODELVIEW);
+    gfx::pushMatrix();
+    gfx::loadIdentity();
+    gfx::arenaLights({}, 0, 1, 1, 0, 1);
+    gfx::inrunLights({}, 0, 1, 1, 0, 1);
+    gfx::signalLight({{0, 0, 0, 1}, {}}, {}, 1);
+    const float ambient[]{.40f, .43f, .47f, 1}, diffuse[]{.78f, .76f, .70f, 1},
+        direction[]{-.4f, -.7f, 1, 0}, fill[]{.25f, .29f, .34f, 1},
+        fillDirection[]{.8f, .2f, 1, 0}, specular[]{.20f, .20f, .20f, 1};
+    gfx::lightModelfv(gfx::LIGHT_MODEL_AMBIENT, ambient);
+    gfx::lightfv(gfx::LIGHT0, gfx::DIFFUSE, diffuse);
+    gfx::lightfv(gfx::LIGHT0, gfx::POSITION, direction);
+    gfx::lightfv(gfx::LIGHT0, gfx::SPECULAR, specular);
+    gfx::lightfv(gfx::LIGHT1, gfx::DIFFUSE, fill);
+    gfx::lightfv(gfx::LIGHT1, gfx::POSITION, fillDirection);
+    gfx::translatef(offsetX + x * uiScale, offsetY + y * uiScale, 0);
+    gfx::scalef(scale * uiScale, -scale * uiScale, scale * uiScale);
+    constexpr float c = .57357644f, s = -.81915204f;
+    const float rotation[]{c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1};
+    gfx::multMatrixf(rotation);
+    jumperPreviewGeometry(appearance);
+    gfx::popMatrix();
+    gfx::matrixMode(gfx::PROJECTION);
+    gfx::popMatrix();
+    gfx::matrixMode(gfx::MODELVIEW);
+    gfx::popAttrib();
+}
 } // namespace sjp

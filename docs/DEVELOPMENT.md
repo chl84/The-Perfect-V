@@ -154,6 +154,22 @@ credits and the reproducible preparation script accompany the assets.
 
 ## Fall model visibility
 
+The main menu's Ski Jumper screen uses the existing panels, buttons and two native
+3D previews. Pro retains the original athlete mesh. President adds a navy suit,
+white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
+President's older face has fuller jowls, heavy eyelids and fine forehead/cheek
+creases. A rounded jacket mesh adds a prominent belly and wider waist; shirt,
+lapels and tie follow its surface through the original poses.
+Both skins wrap the exact same original skeleton, including interpolated joints
+and fall poses; skis, bindings and boots retain their geometry. The appearance
+enum stays outside simulation, AI, input, scoring and replay physics. Native
+replays and ghosts use the selected skin as a presentation preference.
+
+The optional `JUMPER 1` preferences tag preserves the choice while retaining the
+existing records format; older saves default to Pro. The fall-contact display
+correction measures the selected skin and only changes its temporary render copy.
+Preview lights and transforms are scoped to the menu draw and restored afterward.
+
 Crashed outrun/replay models receive a presentation-only vertical offset when
 the actual suit, helmet, gloves, boots or skis intersect the existing rendered
 snow triangles. Joint angles, equipment geometry, physical state and start
@@ -192,15 +208,18 @@ The explicitly invoked render probe reports cached/submitted/culled geometry
 and draw calls. `--no-culling` supplies an unculled reference using the same
 indexed meshes; it is a diagnostic option, not a gameplay setting.
 
-Each tree has one stable foliage tint from five closely related evergreen
-colors, with ±3% brightness variation. All bough tiers, including the animated
-top, share that tree's tint while retaining their existing face shading. Snow
-caps keep their original material. Cosmetic tree hashes select the tint without
+Each tree has one stable foliage tint from five evergreen colors: deep forest,
+green, blue-green, warm olive-green and lighter green, with ±6% brightness
+variation. The wider palette keeps neighboring trees distinguishable at normal
+playing distances under daylight and overcast lighting. All bough tiers, including
+the animated top, share that tree's tint and retain their existing face shading.
+Snow caps keep their original material. Cosmetic tree hashes select the tint without
 consuming gameplay/wind randomness. This uses existing vertex colors, adding no
 vertices, textures, shaders or draw calls.
-The palette was reviewed in 36 native 1920×1080 captures across three hills,
-three views and morning/day/evening/night. Environment and renderer command
-suites passed, including the existing protected snow-coordinate checks.
+The palette was reviewed in 18 native 1920×1080 captures across three hills,
+in panorama and flight views under sunny daylight, overcast daylight and night.
+The environment and renderer command suites cover the existing protected
+snow-coordinate checks.
 
 Distant mountains use a prepared, transparent CC0 photographic panorama on a
 world-direction background ring. Only the decorative ridgelines were replaced;
@@ -431,6 +450,9 @@ on K100 and larger hills (six/eight/ten masts total). Fewer columns spread over
 the same first/last positions rather than crowding short hills; height and
 fixture dimensions retain their existing scaling. Fixtures, contact patches,
 live illumination and the athlete's shadow all use the same placement.
+Each concrete mast foundation is 2.2 × 2.2 metres in plan and 1.2 metres deep.
+Its top stays 0.6 metres above the original ground anchor; doubling the depth
+extends the bottom downward to 0.6 metres below that anchor, into the snow.
 The row on the camera-1 side has a fixed minimum setback of 30 metres from the
 track centre; camera 1 stays at 26 metres. The whole fixture, including its
 foundation and lamp head, therefore stays outside the camera's travel corridor.

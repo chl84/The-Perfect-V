@@ -25,17 +25,18 @@ void unchangedFields(const sjp::Frame &a, const sjp::Frame &b) {
                     a.renderSkeleton[i].z == b.renderSkeleton[i].z,
                 "Presentation deformed the interpolated skeleton");
 }
-sjp::Frame check(const sjp::Hill &h, const sjp::Frame &f) {
+sjp::Frame check(const sjp::Hill &h, const sjp::Frame &f,
+                 sjp::JumperAppearance appearance = sjp::JumperAppearance::Pro) {
     std::array<unsigned char, sizeof(f)> bytes{};
     std::memcpy(bytes.data(), &f, sizeof(f));
-    const auto result = sjp::displayedAthleteFrame(h, f);
+    const auto result = sjp::displayedAthleteFrame(h, f, appearance);
     require(std::memcmp(bytes.data(), &f, sizeof(f)) == 0, "Presentation mutated its source Frame");
     require(drawCalls == 0, "Contact calculation issued drawing commands");
     unchangedFields(f, result);
     require(std::isfinite(result.y) && result.y >= f.y, "Invalid presentation lift");
-    const auto repeat = sjp::displayedAthleteFrame(h, f);
+    const auto repeat = sjp::displayedAthleteFrame(h, f, appearance);
     require(result.y == repeat.y, "Paused/repeated presentation is not deterministic");
-    const auto settled = sjp::displayedAthleteFrame(h, result);
+    const auto settled = sjp::displayedAthleteFrame(h, result, appearance);
     require(std::abs(double(settled.y) - result.y) < .0001, "Fall still needs contact correction");
     return result;
 }
@@ -180,6 +181,10 @@ int main() {
                     const auto interpolated = sjp::interpolateFrame(previous, frame, .5);
                     for (const auto &f : {frame, interpolated}) {
                         const auto display = check(sim.hill(), f);
+                        const auto president = check(sim.hill(), f, sjp::JumperAppearance::President);
+                        if (!f.crashed || f.phase == int(sjp::Phase::Inrun) ||
+                            f.phase == int(sjp::Phase::Flight))
+                            require(president.y == f.y, "President appearance moved a live jump");
                         maximumLift = std::max(maximumLift, double(display.y) - f.y);
                         if (!f.crashed || f.phase == int(sjp::Phase::Inrun) ||
                             f.phase == int(sjp::Phase::Flight))

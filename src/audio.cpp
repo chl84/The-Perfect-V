@@ -22,6 +22,23 @@ void Audio::publish(const CrowdAudioState &state) {
     crowdCommand = (uint64_t(state.serial) << 32) | uint32_t(state.reactionSample + 1);
 }
 void Audio::beginJump(const Hill &hill, const std::vector<Frame> *recording) {
+    liveCrowd.reset();
+    resetCrowd(hill, recording);
+}
+void Audio::beginReplay(const Hill &hill, const std::vector<Frame> &recording) {
+    // Replacing an open replay must retain the original live jump context.
+    if (!liveCrowd)
+        liveCrowd = crowd;
+    resetCrowd(hill, &recording);
+}
+void Audio::endReplay() {
+    if (!liveCrowd)
+        return;
+    crowd.restore(*liveCrowd);
+    liveCrowd.reset();
+    stop();
+}
+void Audio::resetCrowd(const Hill &hill, const std::vector<Frame> *recording) {
     crowd.begin(hill, recording);
     publish(crowd.update({}, 0, CrowdPlayback::Off));
     remaining = 0;

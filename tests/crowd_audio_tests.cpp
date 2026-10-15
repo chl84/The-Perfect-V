@@ -12,6 +12,18 @@ struct AudioTestAccess {
     }
     static void unfreeze(Audio &audio) { SDL_UnlockAudioStream(audio.stream); }
     static void generate(Audio &audio, float *out, int count) { audio.generate(out, count); }
+    static CrowdAudioState state(const Audio &audio) {
+        CrowdAudioState state;
+        state.murmur = audio.murmur.load();
+        state.cheer = audio.cheer.load();
+        state.reaction = audio.reaction.load();
+        state.rate = audio.playbackRate.load();
+        state.paused = audio.crowdPaused.load();
+        const uint64_t command = audio.crowdCommand.load();
+        state.serial = uint32_t(command >> 32);
+        state.reactionSample = int(uint32_t(command)) - 1;
+        return state;
+    }
 };
 struct AudioFreeze {
     Audio &audio;
@@ -221,6 +233,57 @@ int main() {
             AudioTestAccess::generate(audio, output.data(), int(output.size()));
             require(std::all_of(output.end() - 48000, output.end(), [](float s) { return s == 0; }),
                     "Menu audio retains a fall, cheer, or signal");
+
+            // Interrupt a live jump with replays of a different hill and
+            // different fall times. Restoring must retain the live timeline,
+            // including result-screen reaction progress, across replacements.
+            const auto &liveHill = hills().back();
+            const double liveX = visual::GrandstandLayout::center(liveHill, 4);
+            for (auto mode : {CrowdPlayback::Active, CrowdPlayback::Paused, CrowdPlayback::Result}) {
+                for (bool crashed : {false, true}) {
+                    audio.beginJump(liveHill);
+                    CrowdPresentation expected;
+                    expected.begin(liveHill);
+                    auto live = frame(liveHill, liveX, Phase::Flight, 4);
+                    audio.update(live, .016, CrowdPlayback::Active, true);
+                    expected.update(live, .016, CrowdPlayback::Active);
+                    if (crashed) {
+                        live = frame(liveHill, liveX, Phase::Outrun, 5, true);
+                        audio.update(live, .016, CrowdPlayback::Active, true);
+                        expected.update(live, .016, CrowdPlayback::Active);
+                        live.elapsed = 6;
+                    }
+                    audio.update(live, 1.25, mode, true);
+                    expected.update(live, 1.25, mode);
+                    audio.beginReplay(hill, replay);
+                    audio.update(replay.back(), .5, CrowdPlayback::Active, true, 2);
+                    audio.seekCrowd();
+                    audio.beginReplay(hills()[0], {});
+                    audio.update(replay.front(), .5, CrowdPlayback::Active, true, .25);
+                    const auto replayState = AudioTestAccess::state(audio);
+                    audio.endReplay();
+                    audio.update(live, .016, mode, true);
+                    const auto restored = AudioTestAccess::state(audio);
+                    const auto wanted = expected.update(live, .016, mode);
+                    require(restored.murmur == wanted.murmur && restored.cheer == wanted.cheer &&
+                                restored.reaction == wanted.reaction && restored.rate == wanted.rate &&
+                                restored.paused == wanted.paused &&
+                                restored.reactionSample == wanted.reactionSample,
+                            "Returning from replay lost the live hill, fall timing or result fade");
+                    require(restored.serial != replayState.serial,
+                            "Returning from replay failed to seek the audio mixer");
+                    audio.endReplay();
+                    require(AudioTestAccess::state(audio).serial == restored.serial,
+                            "Closing an already closed replay changed live audio");
+                }
+            }
+            audio.beginReplay(hill, replay);
+            audio.beginJump(liveHill);
+            audio.endReplay();
+            auto live = frame(liveHill, liveX, Phase::Flight, 4);
+            audio.update(live, .016, CrowdPlayback::Active, true);
+            require(AudioTestAccess::state(audio).murmur > .2,
+                    "Starting a new jump retained a stale replay audio context");
         }
         SDL_Quit();
         std::cout << "Crowd approach, flight intensity, distant/near falls, replay, fades and mute passed\n";

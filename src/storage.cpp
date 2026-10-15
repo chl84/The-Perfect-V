@@ -41,7 +41,7 @@ bool updateHillRecord(Records &records, int hill, const Result &result, bool hum
     return true;
 }
 bool saveRecords(const std::string &path, const Records &r) {
-    if (!environment::valid(r.environment))
+    if (!environment::valid(r.environment) || !validJumperAppearance(r.jumper))
         return false;
     for (size_t i = 0; i < r.best.size(); i++)
         if (hills()[i].id.empty() || !std::isfinite(r.best[i]) || r.best[i] < 0 || r.best[i] > 1000)
@@ -55,6 +55,7 @@ bool saveRecords(const std::string &path, const Records &r) {
         out << std::quoted(hills()[i].id) << ' ' << r.best[i] << '\n';
     out << r.camera << ' ' << r.sound << ' ' << r.sensitivity << '\n';
     out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << '\n';
+    out << "JUMPER 1 " << int(r.jumper) << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -95,11 +96,25 @@ Records loadRecords(const std::string &path) {
     if (oldPhysics)
         r.best.fill(0);
     std::string tag;
-    int version, time, weather;
-    if (in >> tag >> version >> time >> weather) {
-        const environment::Selection selection{environment::TimeOfDay(time), environment::Weather(weather)};
-        if (tag == "ENV" && version == 1 && environment::valid(selection))
-            r.environment = selection;
+    while (in >> tag) {
+        int version;
+        if (tag == "ENV") {
+            int time, weather;
+            if (!(in >> version >> time >> weather))
+                break;
+            const environment::Selection selection{environment::TimeOfDay(time), environment::Weather(weather)};
+            if (version == 1 && environment::valid(selection))
+                r.environment = selection;
+        } else if (tag == "JUMPER") {
+            int value;
+            if (!(in >> version >> value))
+                break;
+            if (version == 1 && validJumperAppearance(JumperAppearance(value)))
+                r.jumper = JumperAppearance(value);
+        } else {
+            std::string ignored;
+            std::getline(in, ignored);
+        }
     }
     return r;
 }

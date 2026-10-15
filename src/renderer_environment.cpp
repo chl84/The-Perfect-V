@@ -439,14 +439,15 @@ Tree treeAt(const Hill &h, int i) {
     tree.base = {x, terrainY(h, x, z), z};
     tree.height = (3.5 + hash(i * 7.6) * 7.6) * std::sqrt(scale);
     tree.seed = i * 2.7 + 17;
-    // A stable, narrow evergreen palette per tree. All boughs, including the
-    // animated top, share that tint; this cosmetic hash never consumes wind RNG.
+    // Distinct dark, green, blue-green and warmer evergreen tones per tree.
+    // All boughs, including animated tops, share the tint; this cosmetic hash
+    // never consumes wind RNG.
     constexpr std::array<Color, 5> palette{{
-        {.099f, .250f, .237f, 1}, {.103f, .257f, .241f, 1}, {.095f, .248f, .242f, 1},
-        {.105f, .254f, .228f, 1}, {.094f, .257f, .250f, 1}
+        {.065f, .175f, .145f, 1}, {.095f, .255f, .195f, 1}, {.105f, .265f, .285f, 1},
+        {.170f, .305f, .195f, 1}, {.145f, .340f, .260f, 1}
     }};
     tree.needles = shade(palette[size_t(hash(tree.seed + 83.71) * palette.size())],
-                         .97 + .06 * hash(tree.seed + 231.7));
+                         .94 + .12 * hash(tree.seed + 231.7));
     tree.tiers = 4 + int(hash(i * 11.71) * 3);
     tree.animated = i % 26 == 0;
     return tree;
@@ -845,7 +846,9 @@ void flag(Vec3 poleBase, double size, double time, double seed) {
 }
 void floodlight(const Hill &h, double x, double z, double size) {
     const double y = terrainY(h, x, z), height = 18 * size + 2;
-    box({x, y + .30, z}, {1.1, .60, 1.1}, {.48f, .54f, .56f, 1});
+    // Double all foundation dimensions, keeping the original top at y + .60.
+    // The added depth extends downward to y - .60, into the snow.
+    box({x, y, z}, {2.2, 1.20, 2.2}, {.48f, .54f, .56f, 1});
     beam({x, y + .3, z}, {x, y + height, z}, .13, {.40f, .48f, .53f, 1});
     beam({x, y + height - 1, z}, {x + 1.4, y + height, z}, .08, {.36f, .43f, .48f, 1});
     box({x, y + height, z}, {3.4, 1.25, .60}, {.12f, .20f, .25f, 1});

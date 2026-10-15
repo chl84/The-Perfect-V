@@ -96,6 +96,28 @@ int main() {
                             [](double d) { return d == 0; }),
                 "Duplicate IDs should reject a corrupted catalogue");
 
+        require(loadRecords(oldPath.string()).jumper == JumperAppearance::Pro,
+                "Old preferences must default to the original Pro jumper");
+        Records appearanceRecords = migrated;
+        appearanceRecords.jumper = JumperAppearance::President;
+        appearanceRecords.environment = {environment::TimeOfDay::Night, environment::Weather::Fog};
+        require(saveRecords(newPath.string(), appearanceRecords), "Save President appearance");
+        const auto appearanceFile = contents(newPath);
+        const auto appearanceRestored = loadRecords(newPath.string());
+        require(appearanceRestored.jumper == JumperAppearance::President &&
+                    appearanceRestored.best == migrated.best &&
+                    appearanceRestored.environment.time == environment::TimeOfDay::Night &&
+                    appearanceRestored.environment.weather == environment::Weather::Fog,
+                "Appearance persistence changed records or environment preferences");
+        const auto withoutAppearance = appearanceFile.substr(0, appearanceFile.find("JUMPER "));
+        write(newPath, withoutAppearance);
+        require(loadRecords(newPath.string()).jumper == JumperAppearance::Pro,
+                "Existing current-format saves must remain compatible");
+        write(newPath, withoutAppearance + "JUMPER 1 99\n");
+        require(loadRecords(newPath.string()).jumper == JumperAppearance::Pro &&
+                    loadRecords(newPath.string()).best == migrated.best,
+                "An unknown appearance must fall back without losing hill records");
+
         Replay replay;
         replay.hill = int(hills().size() - 1);
         replay.wind = 2;

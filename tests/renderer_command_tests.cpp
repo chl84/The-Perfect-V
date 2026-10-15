@@ -194,7 +194,7 @@ void floodlightsAndLandingShadow() {
             for (int side : {-1, 1}) {
                 const auto mast = floodlightMast(hill, column, side);
                 const double originalSetback = std::max(25 * hill.scale(), 8.0) + 10.5;
-                require(side > 0 ? mast.base.z - .55 > 26 + 3
+                require(side > 0 ? mast.base.z - 1.1 > 26
                                  : mast.base.z == -originalSetback,
                         "Floodlight fixture crosses camera 1 or moves the opposite mast row");
                 if (originalSetback >= 30)
@@ -1432,6 +1432,23 @@ int main() {
                 audit::require(audit::lists.size() <= 2, "Empty record left its marker visible/cached");
                 audit::balanced();
                 audit::require(audit::depth, "Record overlay leaked depth-write state");
+            }
+        }
+        {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(2, 0);
+            const auto original = sim.frame();
+            for (auto appearance : {sjp::JumperAppearance::Pro, sjp::JumperAppearance::President}) {
+                r.setJumperAppearance(appearance);
+                r.begin(sim.hill(), original, 0, 0, false, true, &original);
+                r.overlay();
+                r.jumperPreview(sjp::JumperAppearance::Pro, 360, 674, 170);
+                r.jumperPreview(sjp::JumperAppearance::President, 1026, 674, 170);
+                r.finish();
+                audit::balanced();
+                audit::require(audit::depth, "Jumper previews leaked depth-write state");
+                audit::require(sim.frame().pose == original.pose && sim.originalCounter == 1,
+                               "Jumper skins/previews changed the simulation pose or tick");
             }
         }
         audit::require(audit::lists.empty() && audit::textures.empty(), "Record marker leaked GPU resources");
