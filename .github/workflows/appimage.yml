@@ -42,8 +42,9 @@ jobs:
         env:
           SDL_AUDIODRIVER: dummy
           SDL_VIDEODRIVER: x11
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: |
+          export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)
+          test -f "$VK_ICD_FILENAMES"
           image=$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)
           "$image" --appimage-extract-and-run --help
           "$image" --appimage-extract-and-run --export-source "$RUNNER_TEMP/source.tar.gz"
@@ -85,8 +86,9 @@ jobs:
         env:
           SDL_AUDIODRIVER: dummy
           SDL_VIDEODRIVER: x11
-          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
         run: |
+          export VK_ICD_FILENAMES=$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' -print -quit)
+          test -f "$VK_ICD_FILENAMES"
           cd dist
           sha256sum --check ./*.AppImage.sha256
           chmod +x ./*.AppImage
