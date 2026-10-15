@@ -360,6 +360,7 @@ bool signalMaterial = false, captureSignal = false;
 bool textureEnabled = false, captureSnow = false;
 sjp::gfx::Id boundTexture = 0, protectedTexture = 0;
 uint64_t snowHash = 1469598103934665603ULL;
+uint64_t portableSnowHash = 1469598103934665603ULL;
 size_t snowVertices = 0;
 struct SnowVertex {
     sjp::Vec3 position, normal;
@@ -427,8 +428,51 @@ void protectedSnow(int hill) {
         {52236, 11485110930087622931ULL},
         {52368, 11331550327366158445ULL},
     }};
-    if (snowVertices != frozen[size_t(hill)].first || snowHash != frozen[size_t(hill)].second)
-        throw std::runtime_error("Protected terrain/track changed on " + sjp::hills()[size_t(hill)].name);
+    // Different CRT trigonometric implementations can differ in the last bits.
+    // The portable snapshot compares the same vertices at 0.1 mm resolution;
+    // Linux additionally retains its original bit-for-bit regression baseline.
+    static const std::array<uint64_t, sjp::HILL_COUNT> portable{{
+        16410948978715020856ULL,
+        12147850203029739695ULL,
+        9965119677148511654ULL,
+        1601929013770449108ULL,
+        7184451969848903411ULL,
+        14095122461980488565ULL,
+        139391288926217785ULL,
+        10284364573143670914ULL,
+        14354666242797840021ULL,
+        18360325503214719519ULL,
+        14328893241915900718ULL,
+        757553506729415774ULL,
+        11936073085036567321ULL,
+        16507322509314791118ULL,
+        1003033639534485452ULL,
+        273103672006086742ULL,
+        8258878063574308966ULL,
+        12464365750364648497ULL,
+        13907912896749450359ULL,
+        9160457119029802041ULL,
+        13644606824215427258ULL,
+        15655009457801941446ULL,
+        5443135025366403817ULL,
+        1839736569155908401ULL,
+        1077818679102927524ULL,
+        14848798517484309426ULL,
+        3230060819586849787ULL,
+        5469604649851427510ULL,
+        12829906376846216826ULL,
+        12469243151323574419ULL,
+        10110787086686065376ULL,
+        12569981723246716970ULL
+    }};
+    bool unchanged = snowVertices == frozen[size_t(hill)].first &&
+                     portableSnowHash == portable[size_t(hill)];
+#ifndef _WIN32
+    unchanged = unchanged && snowHash == frozen[size_t(hill)].second;
+#endif
+    if (!unchanged)
+        throw std::runtime_error("Protected terrain/track changed on " + sjp::hills()[size_t(hill)].name +
+            ": vertices=" + std::to_string(snowVertices) + ", portable hash=" + std::to_string(portableSnowHash));
 }
 size_t signalVertices = 0;
 std::array<sjp::Vec3, 2> signalCenters;
@@ -509,6 +553,7 @@ void position(double x, double y, double z) {
             uint64_t bits;
             std::memcpy(&bits, &value, sizeof(bits));
             snowHash = (snowHash ^ bits) * 1099511628211ULL;
+            portableSnowHash = (portableSnowHash ^ uint64_t(std::llround(value * 10000))) * 1099511628211ULL;
         }
     }
     if (captureSignal && !compiling && signalMaterial) {
@@ -1134,6 +1179,7 @@ int main() {
                 audit::captureSnow = true;
                 audit::snowHill = &s.hill();
                 audit::snowHash = 1469598103934665603ULL;
+                audit::portableSnowHash = 1469598103934665603ULL;
                 audit::snowVertices = 0;
                 audit::snowLighting.clear();
                 r.begin(s.hill(), s.frame(), 4, 0, true);

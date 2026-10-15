@@ -18,7 +18,8 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 cmake --install "$build/game" --config Release --prefix $stage
 Copy-Item "$prefix/bin/SDL3.dll" $stage
 $vswhere = "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe"
-$dumpbin = & $vswhere -latest -products '*' -find 'VC/Tools/MSVC/**/bin/Hostx64/x64/dumpbin.exe' | Select-Object -Last 1
+$dumpbin = & $vswhere -latest -products '*' -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -Last 1
+if (!$dumpbin) { throw "Visual Studio dumpbin was not found" }
 foreach ($binary in @("$stage/the-perfect-v.exe", "$stage/SDL3.dll")) {
     $imports = & $dumpbin /DEPENDENTS $binary
     $imports | Write-Output
