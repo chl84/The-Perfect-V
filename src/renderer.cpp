@@ -484,7 +484,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::DIFFUSE, fill);
     sjp::gfx::lightfv(sjp::gfx::LIGHT1, sjp::gfx::POSITION, fillPosition);
     const visual::FloodlightField lamps(h, sceneEnvironment.time);
-    sjp::gfx::arenaLights(lamps.lights, float(lamps.firstX), float(lamps.spacing), float(lamps.strength),
+    sjp::gfx::arenaLights(lamps.lights, float(lamps.firstX), float(lamps.spacing), lamps.columns, float(lamps.strength),
                           float(lamps.attenuationDistance));
     size_t venue = 0;
     for (size_t i = 0; i < hills().size(); ++i)

@@ -26,7 +26,7 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 spotDirectionCone[10];
     vec4 arenaAxis;       // world X plane in eye coordinates
     vec4 arenaParameters; // first X, inverse spacing, inverse attenuation distance squared, strength
-    vec4 arenaColor;
+    vec4 arenaColor;      // color, active paired mast columns
     vec4 worldZAxis;
     vec4 inrunPositionRange[10];
     vec4 inrunDirectionCone[10];
@@ -49,7 +49,8 @@ vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
         return vec3(0.0);
     float coordinate = (worldX - state.arenaParameters.x) * state.arenaParameters.y;
-    if (coordinate <= -1.0 || coordinate >= 5.0)
+    int count = int(state.arenaColor.w);
+    if (coordinate <= -1.0 || coordinate >= float(count))
         return vec3(0.0);
     int left = int(floor(coordinate));
     float intensity = 0.0;
@@ -57,7 +58,7 @@ vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     // longitudinal weighting reaches zero before a source leaves the set.
     for (int offset = 0; offset < 2; ++offset) {
         int column = left + offset;
-        if (column < 0 || column >= 5)
+        if (column < 0 || column >= count)
             continue;
         float longitudinal = smoothstep(0.0, 1.0, 1.0 - abs(coordinate - float(column)));
         for (int side = 0; side < 2; ++side) {
@@ -125,14 +126,15 @@ vec3 localDiffuse(vec3 eye, vec3 n) {
     if (state.arenaParameters.w == 0.0 && state.inrunColor.w == 0.0 && state.signalColor.w == 0.0)
         return vec3(0.0);
     float worldX = dot(state.arenaAxis, vec4(eye, 1.0));
-    // Inrun sources end at x=-2.5 with a 14 m range; arena sources begin
-    // beyond x=12.9 on the smallest hill. Only one local-light field runs.
+    // Inrun sources end at x=-2.5 with a 14 m range. The wider-spaced
+    // short-hill arena sources can overlap their light near the takeoff.
     if (worldX < 12.0) {
         // Every inrun source is at |z|=3.28 with a 14 m finite range. Far
-        // terrain/forest vertices therefore skip both light evaluations.
-        if (abs(dot(state.worldZAxis, vec4(eye, 1.0))) > 17.3)
-            return vec3(0.0);
-        return inrunDiffuse(eye, n, worldX) + signalDiffuse(eye, n, worldX);
+        // terrain/forest vertices therefore skip the inrun lights.
+        vec3 diffuse = vec3(0.0);
+        if (abs(dot(state.worldZAxis, vec4(eye, 1.0))) <= 17.3)
+            diffuse = inrunDiffuse(eye, n, worldX) + signalDiffuse(eye, n, worldX);
+        return diffuse + arenaDiffuse(eye, n, worldX);
     }
     return arenaDiffuse(eye, n, worldX);
 }

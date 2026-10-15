@@ -383,8 +383,22 @@ Four compact lighting presets set sun/moon direction, sky gradient, ambient and
 directional light, fog color and visibility. Overcast, snow and fog reduce direct
 light and soften the single silhouette shadow. Shadow projection uses the light
 field and the local receiver tangent, retaining diffuse near-snow visibility.
-Each of the ten floodlight masts supplies one aggregate spotlight from its lamp
-faces, aimed at the landing snow. Vertex lighting evaluates at most four local
+Arena floodlights use three paired columns on K50–K60, four on K70–K95 and five
+on K100 and larger hills (six/eight/ten masts total). Fewer columns spread over
+the same first/last positions rather than crowding short hills; height and
+fixture dimensions retain their existing scaling. Fixtures, contact patches,
+live illumination and the athlete's shadow all use the same placement.
+The row on the camera-1 side has a fixed minimum setback of 30 metres from the
+track centre; camera 1 stays at 26 metres. The whole fixture, including its
+foundation and lamp head, therefore stays outside the camera's travel corridor.
+Only this row is moved where the old setback was smaller; the opposite row and
+rows already farther out keep their placement. The rule is part of the cached
+layout, independent of the active camera, with no fading or per-frame sight tests.
+Inactive source slots are zeroed, and the shader receives the active column count in an
+existing uniform component. Wider short-hill beams can overlap the inrun light
+near the takeoff instead of being cut off by the old fixed field boundary.
+Each mast supplies one aggregate spotlight from its lamp faces, aimed at the
+landing snow. Arena vertex lighting evaluates at most four local
 sources (the two adjacent mast columns on both sides), with smooth longitudinal,
 cone and finite-range attenuation. Source selection uses world coordinates,
 including translated athlete geometry, and fades continuously between columns.
@@ -396,6 +410,19 @@ background primitives when in view; clouds suppress them. All lighting and fog
 share the existing rendering pass, without shadow maps, volumetric
 clouds or new textures. Time and weather do not alter terrain, camera rails or
 collision geometry, and changes reuse the cached terrain meshes.
+
+The reduced mast layout was validated on 2026-10-15 with all 13 standalone
+suites, including unchanged protected snow hashes on all 32 hills, actual
+fixture counts, inactive source slots, short-hill coverage and shadow continuity.
+84 native 1920×1080, 4× MSAA captures covered seven hills, four views and
+day/evening/night; full-game Vulkan validation passed all venues, replay and
+a 64-jump cup. No terrain/profile, start or physics change is involved.
+
+The subsequent camera-side setback correction passed all 13 suites and the full
+Vulkan smoke test. A 192-run sightline probe (all 32 hills, normal jumps/falls and
+headwind/calm/tailwind) found no mast obstruction. 56 native 1920×1080 captures
+checked the four identified problem venues on day/night and all three cameras,
+including the exact flight moments that had been obscured before the correction.
 
 The start signal uses green/red tinted glass with fixed electrical emission
 and a small specular reflection. Its warning blink sets emission to zero in the

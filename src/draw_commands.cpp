@@ -583,7 +583,7 @@ void lightModelfv(Enum name, const float *v) {
     apply([=](Context &c) { c.state.ambient = value; });
 }
 void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX, float spacing,
-                 float strength, float attenuationDistance) {
+                 int columns, float strength, float attenuationDistance) {
     apply([=](Context &c) {
         auto &s = c.state;
         // Express world X as an eye-space plane once. This remains valid for
@@ -596,7 +596,7 @@ void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float f
         s.worldZAxis[3] =
             -(s.worldZAxis[0] * origin[0] + s.worldZAxis[1] * origin[1] + s.worldZAxis[2] * origin[2]);
         s.arenaParameters = {firstX, 1 / spacing, 1 / (attenuationDistance * attenuationDistance), strength};
-        s.arenaColor = {1, .95f, .84f, 0};
+        s.arenaColor = {1, .95f, .84f, float(columns)};
         for (size_t i = 0; i < lights.size(); ++i) {
             const auto &light = lights[i];
             auto position = light.positionRange, direction = light.directionCone;

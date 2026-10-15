@@ -13,10 +13,21 @@ struct FloodlightMast {
     Vec3 base, lamp;
     double size;
 };
+inline int floodlightColumns(const Hill &h) {
+    return h.k <= 60 ? 3 : h.k < 100 ? 4 : gfx::ARENA_LIGHT_COLUMNS;
+}
+inline double floodlightSpacing(const Hill &h) {
+    // Keep the first/last fixtures and illuminated stretch, spreading fewer
+    // columns over that same stretch on short hills.
+    return (29.0 * (gfx::ARENA_LIGHT_COLUMNS - 1) / (floodlightColumns(h) - 1)) * h.scale();
+}
 inline FloodlightMast floodlightMast(const Hill &h, int column, int side) {
     const double s = h.scale(), size = std::sqrt(s);
-    const double x = (60 + column * 29) * s;
-    const double z = side * (std::max(25 * s, 8.0) + 10.5);
+    const double x = (60 + column * 116.0 / (floodlightColumns(h) - 1)) * s;
+    const double setback = std::max(25 * s, 8.0) + 10.5;
+    // Camera 1 follows at z=26. Keep the whole camera-side fixture outside
+    // that corridor, including its foundation/head, without moving the camera.
+    const double z = side > 0 ? std::max(setback, 30.0) : -setback;
     const double y = arenaGround(h, x, z);
     return {{x, y, z}, {x, y + 18 * size + 2, z + (z > 0 ? -.345 : .345)}, size};
 }
@@ -33,13 +44,14 @@ inline double smoothUnit(double x) {
     return x * x * (3 - 2 * x);
 }
 struct FloodlightField {
-    std::array<gfx::SpotLight, gfx::ARENA_LIGHT_COUNT> lights;
+    std::array<gfx::SpotLight, gfx::ARENA_LIGHT_COUNT> lights{};
+    int columns;
     double firstX, spacing, strength, attenuationDistance;
     FloodlightField(const Hill &h, environment::TimeOfDay time)
-        : firstX(60 * h.scale()), spacing(29 * h.scale()), strength(floodlightStrength(time)),
+        : columns(floodlightColumns(h)), firstX(60 * h.scale()), spacing(floodlightSpacing(h)), strength(floodlightStrength(time)),
           attenuationDistance(45 * std::sqrt(h.scale())) {
         const double range = 100 * std::sqrt(h.scale()) + 10;
-        for (int column = 0; column < gfx::ARENA_LIGHT_COLUMNS; ++column)
+        for (int column = 0; column < columns; ++column)
             for (int side = 0; side < 2; ++side) {
                 const auto mast = floodlightMast(h, column, side ? 1 : -1);
                 const Vec3 aim = (Vec3{mast.lamp.x, h.ground(mast.lamp.x), 0} - mast.lamp).normalized();
@@ -60,11 +72,11 @@ struct FloodlightField {
         if (strength == 0)
             return result;
         const double coordinate = (p.x - firstX) / spacing;
-        if (coordinate <= -1 || coordinate >= gfx::ARENA_LIGHT_COLUMNS)
+        if (coordinate <= -1 || coordinate >= columns)
             return result;
         const int left = int(std::floor(coordinate));
         for (int column = left; column <= left + 1; ++column) {
-            if (column < 0 || column >= gfx::ARENA_LIGHT_COLUMNS)
+            if (column < 0 || column >= columns)
                 continue;
             const double longitudinal = smoothUnit(1 - std::abs(coordinate - column));
             for (int side = 0; side < 2; ++side) {

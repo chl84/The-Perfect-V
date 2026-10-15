@@ -909,8 +909,10 @@ void Renderer::terrain(const Hill &h) {
             const double x = (79 + section * 6.2) * s;
             contactShadow(h, {x, 0, front + side * 3}, 5.8 * s * .76, 4.3, .18f);
         }
-        for (int mast = 0; mast < 5; ++mast)
-            contactShadow(h, {(60 + mast * 29) * s, 0, side * (near + 10.5)}, 1.5, 1.5, .19f);
+        for (int mast = 0; mast < visual::floodlightColumns(h); ++mast) {
+            const auto fixture = visual::floodlightMast(h, mast, side);
+            contactShadow(h, fixture.base, 1.5, 1.5, .19f);
+        }
     }
     sjp::visual::popAttrib();
     for (int i = 0; i < 420; ++i) {
@@ -1099,7 +1101,7 @@ void Renderer::terrain(const Hill &h) {
                 for (int person = 0; person < 4; ++person)
                     spectatorBody(spectatorAt(stands, side, section, row, person));
         }
-        for (int mast = 0; mast < gfx::ARENA_LIGHT_COLUMNS; ++mast) {
+        for (int mast = 0; mast < visual::floodlightColumns(h); ++mast) {
             const auto fixture = visual::floodlightMast(h, mast, side);
             floodlight(h, fixture.base.x, fixture.base.z, fixture.size);
         }

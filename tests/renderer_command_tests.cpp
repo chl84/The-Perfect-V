@@ -112,19 +112,41 @@ void floodlightsAndLandingShadow() {
     using namespace sjp::environment;
     for (const auto &hill : hills()) {
         FloodlightField field(hill, TimeOfDay::Night), day(hill, TimeOfDay::Day);
-        for (int column = 0; column < gfx::ARENA_LIGHT_COLUMNS; ++column) {
+        const int expectedColumns = hill.k <= 60 ? 3 : hill.k < 100 ? 4 : 5;
+        require(field.columns == expectedColumns && field.spacing >= 22,
+                "Short hills retain too many or closely packed floodlight masts");
+        require(std::abs(field.firstX - 60 * hill.scale()) < 1e-10 &&
+                    std::abs(field.firstX + (field.columns - 1) * field.spacing - 176 * hill.scale()) < 1e-10,
+                "Reduced floodlights no longer cover the original arena stretch");
+        for (int i = field.columns * 2; i < gfx::ARENA_LIGHT_COUNT; ++i)
+            require(field.lights[size_t(i)].positionRange == std::array<float, 4>{} &&
+                        field.lights[size_t(i)].directionCone == std::array<float, 4>{},
+                    "Removed mast retains a ghost light source");
+        for (int step = 0; hill.k < 100 && step <= 200; ++step) {
+            const double x = field.firstX + (field.columns - 1) * field.spacing * step / 200;
+            require(field.sample({x, hill.ground(x), 0}).intensity > .5,
+                    "Reduced mast count leaves a dark gap in the landing illumination");
+        }
+        for (int column = 0; column < field.columns; ++column) {
             const double x = field.firstX + column * field.spacing;
             const Vec3 snow{x, hill.ground(x), 0};
             require(field.sample(snow).intensity > .3, "Floodlights do not reach the landing snow");
             require(day.sample(snow).intensity == 0, "Daylight runs the spotlight calculations");
             for (int side : {-1, 1}) {
                 const auto mast = floodlightMast(hill, column, side);
+                const double originalSetback = std::max(25 * hill.scale(), 8.0) + 10.5;
+                require(side > 0 ? mast.base.z - .55 > 26 + 3
+                                 : mast.base.z == -originalSetback,
+                        "Floodlight fixture crosses camera 1 or moves the opposite mast row");
+                if (originalSetback >= 30)
+                    require(mast.base.z == side * originalSetback,
+                            "Mast row with existing camera clearance moved unnecessarily");
                 const double edge = std::max(0.0, std::abs(mast.base.z) - 19 * hill.scale());
                 require(std::abs(mast.base.x - x) < 1e-10 &&
                             std::abs(mast.base.y - (hill.ground(x) - edge * .08 +
                                        std::sin(x * .017 + mast.base.z * .013) * edge * .018)) < 1e-10 &&
                             std::abs(mast.lamp.y - (mast.base.y + 18 * std::sqrt(hill.scale()) + 2)) < 1e-10,
-                        "Lighting changed mast positions or the existing valley profile");
+                        "Mast light position does not match its fixture or original valley profile");
                 const Vec3 aim = (snow - mast.lamp).normalized();
                 auto isolated = field;
                 const int index = column * 2 + (side > 0 ? 1 : 0);
@@ -348,10 +370,12 @@ void command(const char *name, bool allowed = false) {
 }
 uint64_t positionHash = 1469598103934665603ULL, particlePositionHash = 1469598103934665603ULL;
 size_t particleVertices = 0;
+size_t floodlightGlassVertices = 0;
 size_t completedFrames = 0;
 std::array<float, 3> primaryLight{}, globalAmbient{};
 std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> spotLights{};
 float spotStrength = 0;
+int spotColumns = 0;
 std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> inrunSpots{};
 float inrunStrength = 0;
 int inrunColumns = 0;
@@ -362,6 +386,9 @@ sjp::Vec3 cameraEye;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 std::vector<sjp::Vec3> standTops, spectatorSoles;
 void position(double x, double y, double z) {
+    if (captureBoards && compiling &&
+        currentEmission == std::array<float, 4>{.28f, .27f, .22f, 1})
+        ++floodlightGlassVertices;
     if (captureRecordList && compiling == captureRecordList)
         recordVertices.push_back({x, y, z});
     if (captureSnow && compiling && textureEnabled &&
@@ -695,7 +722,7 @@ void sjp::gfx::lightModelfv(sjp::gfx::Enum pname, const float *params) {
         std::copy_n(params, 3, audit::globalAmbient.begin());
 }
 void sjp::gfx::arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX,
-                         float spacing, float strength, float attenuationDistance) {
+                         float spacing, int columns, float strength, float attenuationDistance) {
     audit::command("arenaLights inside a primitive", false);
     for (const auto &light : lights)
         for (const auto &values : {light.positionRange, light.directionCone})
@@ -703,10 +730,12 @@ void sjp::gfx::arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &light
                 audit::finite(value);
     for (float value : {firstX, spacing, strength, attenuationDistance})
         audit::finite(value);
-    audit::require(spacing > 0 && attenuationDistance > 0 && strength >= 0,
+    audit::require(columns >= 1 && columns <= ARENA_LIGHT_COLUMNS &&
+                       spacing > 0 && attenuationDistance > 0 && strength >= 0,
                    "Invalid arena light field");
     audit::spotLights = lights;
     audit::spotStrength = strength;
+    audit::spotColumns = columns;
 }
 void sjp::gfx::inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &lights, float firstX,
                          float spacing, int columns, float strength, float attenuationDistance) {
@@ -996,6 +1025,7 @@ int main() {
                     faces.clear();
                 audit::standTops.clear();
                 audit::spectatorSoles.clear();
+                audit::floodlightGlassVertices = 0;
                 audit::captureBoards = true;
                 audit::captureSnow = true;
                 audit::snowHill = &s.hill();
@@ -1010,6 +1040,9 @@ int main() {
                 audit::captureBoards = false;
                 audit::rectangularBoards(s.hill());
                 audit::flatGrandstands();
+                audit::require(audit::floodlightGlassVertices ==
+                                   size_t(sjp::visual::floodlightColumns(s.hill()) * 2 * 6 * 6),
+                               "Drawn floodlight fixtures do not match the active light sources");
                 r.overlay();
                 r.finish();
                 audit::balanced();
@@ -1270,7 +1303,12 @@ int main() {
                                                 sjp::visual::InrunLayout::strength(conditions.time)) < 1e-6,
                                    "Inrun lights ignore the hill, cached geometry or time of day");
                     audit::require(std::abs(audit::spotStrength - expectedSpots.strength) < 1e-6 &&
-                                       audit::spotLights[4].positionRange == expectedSpots.lights[4].positionRange,
+                                       audit::spotColumns == expectedSpots.columns &&
+                                       std::equal(audit::spotLights.begin(), audit::spotLights.end(),
+                                                  expectedSpots.lights.begin(), [](const auto &a, const auto &b) {
+                                                      return a.positionRange == b.positionRange &&
+                                                             a.directionCone == b.directionCone;
+                                                  }),
                                    "Cached hill uses stale floodlights after changing conditions");
                     audit::require(r.environmentConditions() == conditions && audit::nextList == cached,
                                    "Changing atmosphere rebuilt hill geometry or reselected conditions");

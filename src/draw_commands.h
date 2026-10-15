@@ -13,7 +13,7 @@ using Enum = uint32_t;
 using Flags = uint32_t;
 using Id = uint32_t;
 
-// Five paired mast columns. Only the two adjacent columns illuminate a vertex.
+// Up to five paired mast columns. Only the two adjacent columns illuminate a vertex.
 inline constexpr int ARENA_LIGHT_COLUMNS = 5;
 inline constexpr int ARENA_LIGHT_COUNT = ARENA_LIGHT_COLUMNS * 2;
 struct SpotLight {
@@ -21,7 +21,7 @@ struct SpotLight {
     std::array<float, 4> directionCone{}; // unit aim direction, outer cone cosine
 };
 void arenaLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
-                 float strength, float attenuationDistance);
+                 int columns, float strength, float attenuationDistance);
 void inrunLights(const std::array<SpotLight, ARENA_LIGHT_COUNT> &, float firstX, float spacing,
                  int columns, float strength, float attenuationDistance);
 void signalLight(const SpotLight &, const std::array<float, 4> &color, float attenuationDistance);
