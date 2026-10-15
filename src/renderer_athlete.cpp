@@ -726,6 +726,226 @@ void presidentTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color suit, Col
     patch(.36, -.031, .031, .78, -.012, .012, tie, .018);
     patch(.29, 0, 0, .36, -.031, .031, tie, .018);
 }
+void actorHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color gold, Color lens, Color white) {
+    const auto at = [&](double forward, double up, double side = 0) {
+        return head + basis.forward * forward + basis.up * up + basis.side * side;
+    };
+    material(Finish::Skin);
+    ellipsoid(at(.006, -.018), basis, {.139, .194, .143}, skin, 16, 12);
+    const auto face = [&](double up, double side, double offset = .002) {
+        const double surface = 1 - std::pow((up + .018) / .194, 2) - std::pow(side / .143, 2);
+        return at(.006 + .139 * std::sqrt(std::max(0.0, surface)) + offset, up, side);
+    };
+    for (double side : {-1.0, 1.0})
+        ellipsoid(at(-.006, -.026, side * .141), basis, {.024, .045, .020}, skin, 8, 5);
+    ellipsoid(at(.142, -.004), basis, {.023, .052, .024}, skin, 10, 6);
+    ellipsoid(at(.166, -.042), basis, {.029, .023, .031}, skin, 10, 6);
+    // Broad smile and thick, downward-tipped moustache are visible below the glasses.
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 12; ++i) {
+        const double a = -1 + i / 6.0, b = a + 1.0 / 6;
+        quad(face(-.124 + .020 * a * a, a * .069), face(-.092 + .004 * a * a, a * .069),
+             face(-.092 + .004 * b * b, b * .069), face(-.124 + .020 * b * b, b * .069), shade(skin, .53));
+        quad(face(-.110 + .011 * a * a, a * .058, .0035), face(-.099 + .008 * a * a, a * .058, .0035),
+             face(-.099 + .008 * b * b, b * .058, .0035), face(-.110 + .011 * b * b, b * .058, .0035), white);
+    }
+    emitEnd();
+    material(Finish::Fabric);
+    for (double side : {-1.0, 1.0}) {
+        ellipsoid(face(-.073, side * .030, .009), basis, {.010, .017, .039}, hair, 10, 5);
+        ellipsoid(face(-.084, side * .060, .006), basis, {.007, .019, .013}, hair, 8, 4);
+        ellipsoid(face(.071, side * .063, .005), basis, {.009, .010, .039}, hair, 8, 4);
+    }
+    // Wavy cap plus a small number of coarse curls keeps the silhouette curly
+    // without creating hundreds of individual hair spheres.
+    const auto hairBottom = [](double angle) {
+        return -.08 + .65 * std::max(0.0, std::cos(angle)) - .20 * std::max(0.0, -std::cos(angle));
+    };
+    const auto hairPoint = [&](double latitude, double angle) {
+        const double bottom = hairBottom(angle);
+        const double growth = clamp((latitude - bottom) / (PI / 2 - bottom), 0.0, 1.0);
+        const double c = std::cos(latitude), s = std::sin(latitude);
+        const double volume = 1 + .45 * std::sqrt(growth);
+        const double wave = 1 + .045 * std::sin(angle * 7 + latitude * 17);
+        // Grow away from the existing hairline, keeping the roots on the scalp.
+        return at(.151 * c * std::cos(angle) * wave * volume,
+                  .010 + .207 * s + .075 * growth + .005 * c * std::sin(angle * 9),
+                  .153 * c * std::sin(angle) * wave * volume);
+    };
+    constexpr int slices = 20, rings = 6;
+    for (int ring = 0; ring < rings; ++ring) {
+        color(hair);
+        emitBegin(gfx::QUAD_STRIP);
+        for (int slice = 0; slice <= slices; ++slice) {
+            const double angle = slice * 2 * PI / slices;
+            const double bottom = hairBottom(angle);
+            for (int edge : {ring, ring + 1}) {
+                const double latitude = bottom + (PI / 2 - bottom) * edge / rings;
+                const double c = std::cos(latitude), s = std::sin(latitude);
+                const Vec3 normal = basis.forward * (c * std::cos(angle)) + basis.up * s +
+                                    basis.side * (c * std::sin(angle));
+                emitNormal(normal.x, normal.y, normal.z);
+                vertex(hairPoint(latitude, angle));
+            }
+        }
+        emitEnd();
+    }
+    for (int i = 0; i < 12; ++i) {
+        const double angle = i * 2 * PI / 12, latitude = .58 + .09 * std::sin(i * 2.3);
+        ellipsoid(hairPoint(latitude, angle), basis, {.027, .030, .027},
+                  shade(hair, i % 3 == 0 ? 1.13 : .96), 6, 4);
+    }
+    for (int i = 0; i < 8; ++i) {
+        const double angle = i * PI / 4, latitude = 1.12 + .04 * std::sin(i * 1.9);
+        ellipsoid(hairPoint(latitude, angle), basis, {.029, .029, .029},
+                  shade(hair, i % 2 ? .97 : 1.10), 6, 4);
+    }
+    ellipsoid(hairPoint(PI / 2, 0), basis, {.031, .026, .030}, hair, 6, 4);
+    // Golden aviator frames, brown lenses, nose bridge and arms to the ears.
+    constexpr std::array<std::array<double, 2>, 12> contour{{
+        {-1, .28}, {-.82, .82}, {-.32, 1}, {.28, .96}, {.80, .65}, {1, .15},
+        {.90, -.45}, {.50, -.92}, {-.10, -1}, {-.62, -.75}, {-.94, -.26}, {-1, .04}}};
+    for (double side : {-1.0, 1.0}) {
+        const auto framePoint = [&](size_t index, double scale) {
+            const auto &p = contour[index % contour.size()];
+            return at(.155, .024 + p[1] * .036 * scale, side * (.064 + p[0] * .050 * scale));
+        };
+        material(Finish::Metal);
+        emitBegin(gfx::QUADS);
+        for (size_t i = 0; i < contour.size(); ++i) {
+            if (side > 0)
+                quad(framePoint(i, 1), framePoint(i + 1, 1), framePoint(i + 1, .94), framePoint(i, .94), gold);
+            else
+                quad(framePoint(i, .94), framePoint(i + 1, .94), framePoint(i + 1, 1), framePoint(i, 1), gold);
+        }
+        emitEnd();
+        tailoredSegment(at(.148, .038, side * .108), at(-.010, .025, side * .143),
+                        .003, .003, .003, .003, gold);
+        material(Finish::Glass);
+        color(lens);
+        emitBegin(gfx::TRIANGLE_FAN);
+        emitNormal(basis.forward.x, basis.forward.y, basis.forward.z);
+        vertex(at(.155, .024, side * .064));
+        for (size_t i = 0; i <= contour.size(); ++i)
+            vertex(framePoint(side > 0 ? i : contour.size() - i, .94));
+        emitEnd();
+    }
+    material(Finish::Metal);
+    tailoredSegment(at(.169, .039, -.017), at(.169, .039, .017), .003, .003, .003, .003, gold);
+}
+
+void actorLimbHair(Vec3 a, Vec3 b, double frontA, double sideA, double frontB, double sideB, Color hair) {
+    const Basis basis = segmentBasis(b - a);
+    const auto surface = [&](double t, double angle) {
+        return a + (b - a) * t + basis.forward * ((frontA + (frontB - frontA) * t + .0015) * std::cos(angle)) +
+               basis.side * ((sideA + (sideB - sideA) * t + .0015) * std::sin(angle));
+    };
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 18; ++i) {
+        const double t = .20 + (i % 6) * .115, angle = -.85 + (i / 6) * .78 + .09 * std::sin(i * 2.1);
+        quad(surface(t, angle - .008), surface(t + .021, angle + .025),
+             surface(t + .021, angle + .041), surface(t, angle + .008), hair);
+    }
+    emitEnd();
+}
+
+void actorTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color skin, Color swimwear, Color hair) {
+    constexpr std::array<double, 6> heights{0, .18, .38, .60, .82, 1};
+    constexpr std::array<double, 6> widths{.158, .155, .173, .205, .226, .208};
+    constexpr std::array<double, 6> fronts{.108, .105, .119, .137, .144, .124};
+    const auto section = [&](double t, const auto &values) {
+        size_t r = 1;
+        while (r + 1 < heights.size() && heights[r] < t)
+            ++r;
+        const double u = clamp((t - heights[r - 1]) / (heights[r] - heights[r - 1]), 0.0, 1.0);
+        return values[r - 1] + (values[r] - values[r - 1]) * u;
+    };
+    const auto surface = [&](double t, double side, bool back, double offset) {
+        const double w = section(t, widths), depth = back ? .115 : section(t, fronts);
+        const double x = depth * std::sqrt(std::max(0.0, 1 - side * side / (w * w))) + offset;
+        return hip + (shoulder - hip) * t + basis.side * side + basis.forward * (back ? -x : x);
+    };
+    material(Finish::Skin);
+    ellipsoid(hip - basis.up * .005, basis, {.125, .125, .168}, skin, 14, 7);
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < heights.size(); ++r)
+        for (int i = 0; i < 20; ++i) {
+            const auto point = [&](size_t row, int slice) {
+                const double angle = slice * 2 * PI / 20, c = std::cos(angle);
+                return hip + (shoulder - hip) * heights[row] + basis.side * (widths[row] * std::sin(angle)) +
+                       basis.forward * ((c >= 0 ? fronts[row] : .115) * c);
+            };
+            quad(point(r, i), point(r + 1, i), point(r + 1, i + 1), point(r, i + 1), skin);
+        }
+    emitEnd();
+    color(skin);
+    emitBegin(gfx::TRIANGLE_FAN);
+    emitNormal(basis.up.x, basis.up.y, basis.up.z);
+    vertex(shoulder);
+    for (int i = 0; i <= 20; ++i) {
+        const double angle = -i * PI / 10, c = std::cos(angle);
+        vertex(shoulder + basis.side * (widths.back() * std::sin(angle)) +
+               basis.forward * ((c >= 0 ? fronts.back() : .115) * c));
+    }
+    emitEnd();
+    // Deterministic short ribbons suggest the reference's chest/abdominal hair.
+    // They follow the same surface in live play, ghosts, falls and replay seeks.
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 450; ++i) {
+        const auto fraction = [](double v) { return v - std::floor(v); };
+        const double scatter = fraction(i * .618033989);
+        const double t = i < 300 ? .08 + scatter * .84 : .38 + scatter * .54;
+        const double extent = .047 + .115 * std::sin(t * PI);
+        const double side = extent * (-.94 + 1.88 * fraction(i * .754877666));
+        const double bend = .0035 * std::sin(i * 1.7), length = .022 + .014 * fraction(i * .414213562);
+        quad(surface(t, side - .0011, false, .0025), surface(t + length, side + bend - .0011, false, .0025),
+             surface(t + length, side + bend + .0011, false, .0025), surface(t, side + .0011, false, .0025), hair);
+    }
+    emitEnd();
+    material(Finish::Fabric);
+    // Opaque front/back coverage at the pelvis; there is no genital geometry.
+    constexpr std::array<double, 5> bottomHeights{-.172, -.125, -.060, .015, .085};
+    constexpr std::array<double, 5> bottomWidths{.016, .058, .086, .082, .065};
+    constexpr std::array<double, 5> frontDepths{.165, .220, .215, .157, .119};
+    constexpr std::array<double, 5> backDepths{.100, .153, .160, .145, .119};
+    const auto bottom = [&](size_t row, double side, bool back) {
+        const double up = bottomHeights[row];
+        const double depth = (back ? backDepths[row] : frontDepths[row]) -
+                             .015 * std::pow(side / bottomWidths[row], 2);
+        return hip + basis.up * up + basis.side * side + basis.forward * (back ? -depth : depth);
+    };
+    emitBegin(gfx::QUADS);
+    for (bool back : {false, true}) {
+        for (size_t r = 0; r + 1 < bottomHeights.size(); ++r)
+            for (int i = 0; i < 8; ++i) {
+                const double a = -1 + i / 4.0, b = a + .25;
+                if (back)
+                    quad(bottom(r, a * bottomWidths[r], true), bottom(r, b * bottomWidths[r], true),
+                         bottom(r + 1, b * bottomWidths[r + 1], true), bottom(r + 1, a * bottomWidths[r + 1], true), swimwear);
+                else
+                    quad(bottom(r, a * bottomWidths[r], false), bottom(r + 1, a * bottomWidths[r + 1], false),
+                         bottom(r + 1, b * bottomWidths[r + 1], false), bottom(r, b * bottomWidths[r], false), swimwear);
+            }
+        for (double sign : {-1.0, 1.0}) {
+            const auto edge = [&](double t, double across) {
+                return surface(t, sign * (.050 + .120 * t) + across * .013, back, .005);
+            };
+            for (size_t r = 0; r + 1 < heights.size(); ++r) {
+                const double a = heights[r], b = heights[r + 1];
+                if (back)
+                    quad(edge(a, -1), edge(a, 1), edge(b, 1), edge(b, -1), swimwear);
+                else
+                    quad(edge(a, -1), edge(b, -1), edge(b, 1), edge(a, 1), swimwear);
+            }
+        }
+    }
+    for (double sign : {-1.0, 1.0})
+        quad(surface(1, sign * .170 - .013, false, .005), surface(1, sign * .170 + .013, false, .005),
+             surface(1, sign * .170 + .013, true, .005), surface(1, sign * .170 - .013, true, .005), swimwear);
+    quad(bottom(0, -.016, false), bottom(0, .016, false), bottom(0, .016, true), bottom(0, -.016, true), swimwear);
+    emitEnd();
+}
+
 void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance,
                          double hairLift = 0) {
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
@@ -736,14 +956,16 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
         c.a = alpha;
         return c;
     };
-    const bool president = appearance == JumperAppearance::President;
+    const bool president = appearance == JumperAppearance::President, actor = appearance == JumperAppearance::Actor;
     const Color suit = tint(president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
                 dark = tint({.055f, .13f, .19f}), white = tint({.91f, .95f, .95f}),
                 accent = tint({.23f, .82f, .75f}),
                 visor = tint({.22f, .69f, .82f}),
                 bootShell = tint({.86f, .88f, .85f}), bootSole = tint({.065f, .075f, .085f}),
                 bootStrap = tint({.78f, .13f, .09f}), bootBuckle = tint({.62f, .66f, .68f}),
-                skin = tint(president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f});
+                skin = tint(actor ? Color{.79f, .57f, .43f} : president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f}),
+                actorHair = tint({.13f, .105f, .080f}), bodyHair = tint({.29f, .19f, .13f}),
+                swimwear = tint({.53f, .96f, .10f});
     const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
     const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
     const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
@@ -757,37 +979,65 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
         const Vec3 ankle = point(ankles[leg]), knee = point(knees[leg]), hip = point(hips[leg]),
                    shoulder = point(shoulders[leg]), elbow = point(elbows[leg]), hand = point(hands[leg]);
         ski(point(rear[leg]), point(front[leg]), point(tips[leg]), ankle, dark, shade(dark, .75), accent);
-        material(Finish::Fabric);
+        material(actor ? Finish::Skin : Finish::Fabric);
         // Tuck the trouser hem into the cuff instead of drawing a dark tube
         // through the entire light boot. All skeleton joints stay untouched.
         const Vec3 trouserHem = ankle + (knee - ankle).normalized() * .215;
-        tailoredSegment(trouserHem, knee, .095, .09, .12, .11, president ? suit : dark);
-        tailoredSegment(knee, hip, .12, .115, .15, .13, suit);
-        ellipsoid(knee, segmentBasis(hip - ankle), {.115, .13, .112}, suit, 8, 4);
-        tailoredSegment(shoulder, elbow, .105, .105, .083, .086, suit);
-        tailoredSegment(elbow, hand, .086, .084, .065, .068, suit);
-        ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
+        if (actor) {
+            tailoredSegment(trouserHem, knee, .075, .075, .100, .095, skin);
+            tailoredSegment(knee, hip, .100, .095, .135, .125, skin);
+            ellipsoid(knee, segmentBasis(hip - ankle), {.097, .115, .096}, skin, 8, 4);
+            ellipsoid(shoulder, segmentBasis(elbow - shoulder), {.105, .110, .105}, skin, 8, 4);
+            tailoredSegment(shoulder, elbow, .095, .095, .073, .076, skin);
+            tailoredSegment(elbow, hand, .076, .074, .055, .058, skin);
+            ellipsoid(elbow, segmentBasis(shoulder - hand), {.073, .080, .075}, skin, 8, 4);
+            actorLimbHair(trouserHem, knee, .075, .075, .100, .095, bodyHair);
+            actorLimbHair(knee, hip, .100, .095, .135, .125, bodyHair);
+            actorLimbHair(shoulder, elbow, .095, .095, .073, .076, bodyHair);
+            actorLimbHair(elbow, hand, .076, .074, .055, .058, bodyHair);
+        } else {
+            tailoredSegment(trouserHem, knee, .095, .09, .12, .11, president ? suit : dark);
+            tailoredSegment(knee, hip, .12, .115, .15, .13, suit);
+            ellipsoid(knee, segmentBasis(hip - ankle), {.115, .13, .112}, suit, 8, 4);
+            tailoredSegment(shoulder, elbow, .105, .105, .083, .086, suit);
+            tailoredSegment(elbow, hand, .086, .084, .065, .068, suit);
+            ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
+        }
         const Basis handBasis = segmentBasis(elbow - hand);
-        material(president ? Finish::Skin : Finish::Rubber);
-        ellipsoid(hand, handBasis, {.077, .11, .075}, president ? skin : dark, 8, 5);
+        material(president || actor ? Finish::Skin : Finish::Rubber);
+        ellipsoid(hand, handBasis, {.077, .11, .075}, president || actor ? skin : dark, 8, 5);
         ellipsoid(hand + handBasis.forward * .05 + handBasis.side * (leg == 0 ? -.045 : .045), handBasis,
-                  {.044, .057, .038}, president ? skin : dark, 6, 4);
-        tailoredSegment(hand + handBasis.up * .045, hand + handBasis.up * .1, .074, .074, .075, .075, white);
+                  {.044, .057, .038}, president || actor ? skin : dark, 6, 4);
+        if (!actor)
+            tailoredSegment(hand + handBasis.up * .045, hand + handBasis.up * .1, .074, .074, .075, .075, white);
+        else if (leg == 0) {
+            material(Finish::Rubber);
+            tailoredSegment(hand + handBasis.up * .055, hand + handBasis.up * .085,
+                            .070, .070, .070, .070, actorHair);
+            orientedBox(hand + handBasis.up * .070 + handBasis.forward * .071,
+                        handBasis, {.016, .032, .040}, bootBuckle);
+        }
         skiBoot(ankle, knee, skiBasis(point(rear[leg]), point(front[leg])), bootShell, bootSole, bootStrap, bootBuckle);
     }
     const Vec3 hip = point(OriginalJoint::HipCenter), shoulder = point(OriginalJoint::ShoulderCenter),
                head = point(OriginalJoint::Head);
     material(Finish::Fabric);
     const Basis torso = segmentBasis(shoulder - hip);
-    if (president)
+    if (actor)
+        actorTorso(hip, shoulder, torso, skin, swimwear, bodyHair);
+    else if (president)
         presidentTorso(hip, shoulder, torso, suit, white, tint({.12f, .155f, .23f}), tint({.80f, .045f, .065f}));
     else
         tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
-    tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
+    if (!actor)
+        tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
+    material(actor ? Finish::Skin : Finish::Fabric);
     tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09, .075, .078, .075, .078,
-                    president ? white : dark);
+                    actor ? skin : president ? white : dark);
     const Basis headBasis = segmentBasis(head - shoulder);
-    if (president)
+    if (actor)
+        actorHead(head, headBasis, skin, actorHair, tint({.76f, .68f, .49f}), tint({.20f, .12f, .065f}), white);
+    else if (president)
         presidentHead(head, headBasis, skin, tint({.95f, .81f, .53f}), tint({1.f, .90f, .67f}), hairLift);
     else
         helmet(head, headBasis, dark, white, visor, skin);

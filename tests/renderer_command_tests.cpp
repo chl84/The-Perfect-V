@@ -1438,12 +1438,12 @@ int main() {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
             const auto original = sim.frame();
-            for (auto appearance : {sjp::JumperAppearance::Pro, sjp::JumperAppearance::President}) {
+            for (auto appearance : sjp::JUMPER_APPEARANCES) {
                 r.setJumperAppearance(appearance);
                 r.begin(sim.hill(), original, 0, 0, false, true, &original);
                 r.overlay();
-                r.jumperPreview(sjp::JumperAppearance::Pro, 360, 674, 170);
-                r.jumperPreview(sjp::JumperAppearance::President, 1026, 674, 170);
+                for (size_t i = 0; i < sjp::JUMPER_APPEARANCES.size(); ++i)
+                    r.jumperPreview(sjp::JUMPER_APPEARANCES[i], 275 + i * 444, 674, 170);
                 r.finish();
                 audit::balanced();
                 audit::require(audit::depth, "Jumper previews leaked depth-write state");

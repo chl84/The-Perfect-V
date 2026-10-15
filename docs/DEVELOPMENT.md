@@ -154,7 +154,7 @@ credits and the reproducible preparation script accompany the assets.
 
 ## Fall model visibility
 
-The main menu's Ski Jumper screen uses the existing panels, buttons and two native
+The main menu's Ski Jumper screen uses the existing panels, buttons and three native
 3D previews. Pro keeps its competition suit and helmet. President adds a navy suit,
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
 President's reference-based face uses a continuous cheek/jaw mesh, a tapering
@@ -167,8 +167,14 @@ hang below the hips without reducing the jacket's cross-sections. The longer
 fringe pivots upright just after takeoff and settles as outrun speed drops;
 its position comes directly from the displayed frame, so replay pause/seek is
 deterministic and the menu preview keeps the swept fringe.
-Both skins wrap the exact same original skeleton, including interpolated joints
-and fall poses; skis and bindings retain their geometry. Both wear the same
+Actor adds a lean bare torso/limbs, short body-hair ribbons, a bright green
+one-piece swimsuit, a dark curly cap, thick moustache, smile, golden aviator
+sunglasses and a wristwatch. The opaque swimsuit covers the pelvis and wraps
+over both shoulders; its straps and body hair follow the original poses.
+The hairstyle uses a wavy shell and a few coarse curls instead of individual hairs.
+
+All skins wrap the exact same original skeleton, including interpolated joints
+and fall poses; skis and bindings retain their geometry. All wear the same
 light boot shells with red closures, metal buckles and dark flat soles, making
 the boots distinct from the trousers and turquoise bindings. Boot cuffs follow
 the lower legs, with trouser hems tucked inside instead of covering the shells.

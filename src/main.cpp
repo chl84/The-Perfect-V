@@ -1295,21 +1295,19 @@ class App {
         textLink("Quit", x, quitY, 95, Action::Quit, 14);
     }
     void skiJumperUI() {
-        top("Ski Jumper", "Choose your ski jumper.");
+        top("Ski Jumper");
         auto &r = *renderer;
-        for (int i = 0; i < 2; ++i) {
-            const auto appearance = JumperAppearance(i);
+        for (size_t i = 0; i < JUMPER_APPEARANCES.size(); ++i) {
+            const auto appearance = JUMPER_APPEARANCES[i];
             const bool selected = records.jumper == appearance;
-            const float x = 64 + i * 666;
-            r.glassPanel(x, 247, 642, 525, 12, .94f);
+            const float x = 64 + i * 444;
+            r.glassPanel(x, 214, 422, 566, 12, .94f);
             if (selected)
-                r.rect(x + 28, 247, 58, 3, colors::teal, 1);
-            r.text(jumperAppearanceName(appearance), x + 28, 276, 27, colors::white, true);
-            r.text(i == 0 ? "Competition suit and helmet" : "Suit, red tie and signature golden hair",
-                   x + 28, 321, 14, colors::muted);
-            r.jumperPreview(appearance, x + 300, 674, 170);
-            button(selected ? "Selected" : "Select", x + 28, 714, 586,
-                   Action::SelectJumper, i, selected, 40, 14);
+                r.rect(x + 28, 214, 58, 3, colors::teal, 1);
+            r.text(jumperAppearanceName(appearance), x + 28, 244, 27, colors::white, true);
+            r.jumperPreview(appearance, x + 191, 678, 185);
+            button(selected ? "Selected" : "Select", x + 28, 720, 366,
+                   Action::SelectJumper, int(appearance), selected, 40, 14);
         }
     }
     void hillPagination(float y) {
@@ -1920,7 +1918,7 @@ class App {
         if (screen != Screen::SkiJumper)
             throw std::runtime_error("Home Ski Jumper button failed");
         const Simulation appearanceBaseline = sim;
-        for (int choice : {1, 0, 1}) {
+        for (int choice : {1, 2, 0, 2}) {
             clickButton(Action::SelectJumper, choice);
             if (int(records.jumper) != choice ||
                 int(loadRecords(dataDir + "/records-dsj2.dat").jumper) != choice ||

@@ -180,19 +180,17 @@ int main() {
                 if (tick % 47 == 0 || sim.phase == sjp::Phase::Finished) {
                     const auto interpolated = sjp::interpolateFrame(previous, frame, .5);
                     for (const auto &f : {frame, interpolated}) {
-                        const auto display = check(sim.hill(), f);
-                        const auto president = check(sim.hill(), f, sjp::JumperAppearance::President);
-                        if (!f.crashed || f.phase == int(sjp::Phase::Inrun) ||
-                            f.phase == int(sjp::Phase::Flight))
-                            require(president.y == f.y, "President appearance moved a live jump");
-                        maximumLift = std::max(maximumLift, double(display.y) - f.y);
-                        if (!f.crashed || f.phase == int(sjp::Phase::Inrun) ||
-                            f.phase == int(sjp::Phase::Flight))
-                            require(display.y == f.y, "Standing or flying jumper moved");
-                        auto airborne = f;
-                        airborne.y += 100;
-                        require(check(sim.hill(), airborne).y == airborne.y,
-                                "Airborne fall moved despite no snow penetration");
+                        for (auto appearance : sjp::JUMPER_APPEARANCES) {
+                            const auto display = check(sim.hill(), f, appearance);
+                            maximumLift = std::max(maximumLift, double(display.y) - f.y);
+                            if (!f.crashed || f.phase == int(sjp::Phase::Inrun) ||
+                                f.phase == int(sjp::Phase::Flight))
+                                require(display.y == f.y, "Jumper appearance moved a live jump");
+                            auto airborne = f;
+                            airborne.y += 100;
+                            require(check(sim.hill(), airborne, appearance).y == airborne.y,
+                                    "Airborne fall moved despite no snow penetration");
+                        }
                         ++samples;
                     }
                 }
