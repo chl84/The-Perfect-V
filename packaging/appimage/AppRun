@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+appdir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export LD_LIBRARY_PATH="$appdir/usr/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+case "${1:-}" in
+    --export-source)
+        if [ "$#" -ne 2 ]; then
+            printf 'Usage: %s --export-source OUTPUT.tar.gz\n' "$0" >&2
+            exit 2
+        fi
+        cp -- "$appdir/usr/share/doc/the-perfect-v/source.tar.gz" "$2"
+        printf 'Source saved to %s\n' "$2"
+        exit 0
+        ;;
+    --license)
+        cat "$appdir/usr/share/the-perfect-v/LICENSE"
+        exit 0
+        ;;
+    --help)
+        "$appdir/usr/bin/the-perfect-v" --help
+        printf '\nAppImage options:\n  --export-source FILE  save the matching source archive\n  --license             show GPL-3.0 license\n'
+        exit 0
+        ;;
+esac
+exec "$appdir/usr/bin/the-perfect-v" "$@"

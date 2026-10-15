@@ -15,21 +15,28 @@ jumpers. Built with C++17, SDL3 and Vulkan.
 
 ## Get started
 
-The game needs a graphical Linux desktop, a Vulkan-capable GPU and driver, SDL3
-3.4 or newer, and FreeType.
+The AppImage targets **x86_64 Linux with glibc 2.35 or newer**, including Ubuntu
+22.04 and newer. A graphical desktop, a working Vulkan loader and a compatible
+GPU driver are required. SDL3, FreeType and the window-system libraries are
+bundled; system graphics drivers and audio services stay on the host.
 
-### From a game package
+### Run the AppImage
 
-Extract `ThePerfectV-linux-x86_64.tar.gz`, enter the extracted folder and run:
+Download the AppImage from a successful **Actions → AppImage** build, then:
 
 ```sh
-./play.sh
+chmod +x ./ThePerfectV-*.AppImage
+./ThePerfectV-*.AppImage
 ```
+
+The runtime does not require a separate libfuse2 installation. If FUSE mounting
+is unavailable, start with `--appimage-extract-and-run` instead. The game uses
+the same save folder as a native installation.
 
 ### Build from source
 
 Install a C++17 compiler, CMake 3.16 or newer, pkg-config, the SDL3 and FreeType
-development packages, and `glslc` from shaderc. Then:
+development packages, and either `glslc` (shaderc) or `glslangValidator`. Then:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
@@ -73,7 +80,7 @@ Replays support pause, timeline seeking, three cameras and 0.25×–2× playback
 **RPL** files can also be opened, and exported when the recording supports it.
 Hover over the export buttons for a short explanation. Open a replay through
 **Replays**, drop it onto the window, or use `./play-vulkan.sh --replay FILE`
-(`./play.sh --replay FILE` in the packaged game).
+or pass `--replay FILE` to the AppImage.
 
 ![Cartoon flying through falling snow under the floodlights in Slovenia](docs/screenshots/night-jump.webp)
 
@@ -86,13 +93,19 @@ a separate save folder. Personal saves and replays are excluded from Git.
 
 ```sh
 ctest --test-dir build-vulkan --output-on-failure
-./package.sh
 ```
 
-Packaging requires a Git checkout and creates `dist/ThePerfectV-linux-x86_64.tar.gz`
-with the game, resources, documentation, license and matching `source.tar.gz`.
-See [development notes](docs/DEVELOPMENT.md) for diagnostics, rendering options,
-full-game checks and the source layout.
+**GitHub Actions** builds the AppImage on Ubuntu 22.04 with GCC 11, runs the test
+suites and the packaged game's Vulkan smoke test, and checks startup on clean
+Ubuntu 22.04 and 24.04 runners. Successful builds provide the AppImage, SHA-256
+checksum and a dependency/baseline report. No release is published automatically.
+The pinned build recipe is in [package-appimage.sh](package-appimage.sh);
+`package.sh` runs the same recipe on a suitably prepared Ubuntu 22.04 system.
+There is no separate tar/zip game package.
+
+The matching project source and SDL source are embedded in the AppImage. Export
+the project source with `./ThePerfectV-*.AppImage --export-source source.tar.gz`.
+See [development notes](docs/DEVELOPMENT.md) for diagnostics and build details.
 
 ## License and credits
 
