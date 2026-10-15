@@ -146,7 +146,7 @@ float CrowdMixer::next() {
     constexpr int sampleRate = CrowdPresentation::sampleRate;
     constexpr float rise = 1.f / (sampleRate * .20f), release = 1.f / (sampleRate * .35f);
     constexpr float hush = 1.f / (sampleRate * .025f);
-    auto follow = [](float &gain, float goal, float down) {
+    auto follow = [rise](float &gain, float goal, float down) {
         gain += (goal - gain) * (goal > gain ? rise : down);
     };
     follow(murmurGain, target.murmur, target.paused ? hush : release);
