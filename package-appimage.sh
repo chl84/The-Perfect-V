@@ -9,7 +9,7 @@ fi
 build_root="$game_dir/build-appimage"
 mkdir -p "$build_root/downloads" "$game_dir/dist"
 export CC="${CC:-gcc-11}" CXX="${CXX:-g++-11}"
-for tool in "$CC" "$CXX" cmake ninja pkg-config glslc patchelf mksquashfs desktop-file-validate python3 curl; do
+for tool in "$CC" "$CXX" cmake ninja pkg-config glslangValidator patchelf mksquashfs desktop-file-validate python3 curl; do
   command -v "$tool" >/dev/null || { printf 'Missing build tool: %s (use the GitHub Actions build)\n' "$tool" >&2; exit 1; }
 done
 python3 - "$game_dir/packaging/appimage/dependencies.json" "$build_root/downloads" <<'PY'

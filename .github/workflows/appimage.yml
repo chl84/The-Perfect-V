@@ -29,7 +29,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-11 g++-11 cmake ninja-build pkg-config glslc \
+          sudo apt-get install -y gcc-11 g++-11 cmake ninja-build pkg-config glslang-tools \
             libfreetype6-dev libasound2-dev libpulse-dev libx11-dev libxext-dev \
             libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
             libwayland-dev libxkbcommon-dev libegl1-mesa-dev libdrm-dev libgbm-dev \

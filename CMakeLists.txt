@@ -6,18 +6,35 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3>=3.4.0)
 find_program(GLSLC glslc)
 if(NOT GLSLC)
-  message(FATAL_ERROR "glslc (shaderc) is required to compile the Vulkan shaders.")
+  find_program(GLSLANG_VALIDATOR glslangValidator)
+  if(NOT GLSLANG_VALIDATOR)
+    message(FATAL_ERROR "Install glslc (shaderc) or glslangValidator to compile the Vulkan shaders.")
+  endif()
 endif()
 find_package(Freetype REQUIRED)
 set(TPV_SHADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated-shaders")
 foreach(stage vert frag)
-  add_custom_command(OUTPUT "${TPV_SHADER_DIR}/scene.${stage}.inc"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "${TPV_SHADER_DIR}"
-    COMMAND "${GLSLC}" -mfmt=c --target-env=vulkan1.0
-      "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
-      -o "${TPV_SHADER_DIR}/scene.${stage}.inc"
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
-    VERBATIM)
+  if(GLSLC)
+    add_custom_command(OUTPUT "${TPV_SHADER_DIR}/scene.${stage}.inc"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${TPV_SHADER_DIR}"
+      COMMAND "${GLSLC}" -mfmt=c --target-env=vulkan1.0
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+        -o "${TPV_SHADER_DIR}/scene.${stage}.inc"
+      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+      VERBATIM)
+  else()
+    add_custom_command(OUTPUT "${TPV_SHADER_DIR}/scene.${stage}.inc"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${TPV_SHADER_DIR}"
+      COMMAND "${GLSLANG_VALIDATOR}" -V --target-env vulkan1.0
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+        -o "${TPV_SHADER_DIR}/scene.${stage}.spv"
+      COMMAND "${CMAKE_COMMAND}" "-DSOURCE=${TPV_SHADER_DIR}/scene.${stage}.spv"
+        "-DOUTPUT=${TPV_SHADER_DIR}/scene.${stage}.inc"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_spirv.cmake"
+      DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/scene.${stage}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/embed_spirv.cmake"
+      VERBATIM)
+  endif()
 endforeach()
 add_custom_target(tpv-shaders DEPENDS
   "${TPV_SHADER_DIR}/scene.vert.inc" "${TPV_SHADER_DIR}/scene.frag.inc")

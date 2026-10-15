@@ -2,7 +2,7 @@
 
 ## Standalone source checkout
 
-The game requires CMake, a C++17 compiler, pkg-config, SDL3 3.4+, FreeType and glslc.
+The game requires CMake, a C++17 compiler, pkg-config, SDL3 3.4+, FreeType and either glslc or glslangValidator.
 The runtime requires a Vulkan driver. Compiled SPIR-V shaders are embedded in the executable.
 The compiled hill and pose tables are included in `src/`; gameplay does not read
 external reference data or analysis captures.

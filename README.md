@@ -36,7 +36,7 @@ the same save folder as a native installation.
 ### Build from source
 
 Install a C++17 compiler, CMake 3.16 or newer, pkg-config, the SDL3 and FreeType
-development packages, and `glslc` from shaderc. Then:
+development packages, and either `glslc` (shaderc) or `glslangValidator`. Then:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
