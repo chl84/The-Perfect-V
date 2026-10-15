@@ -155,17 +155,24 @@ credits and the reproducible preparation script accompany the assets.
 ## Fall model visibility
 
 The main menu's Ski Jumper screen uses the existing panels, buttons and two native
-3D previews. Pro retains the original athlete mesh. President adds a navy suit,
+3D previews. Pro keeps its competition suit and helmet. President adds a navy suit,
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
-President's older face has fuller jowls, heavy eyelids and fine forehead/cheek
-creases. A rounded jacket mesh adds a prominent belly and wider waist; shirt,
+President's reference-based face uses a continuous cheek/jaw mesh, a tapering
+chin, narrow blue-grey eyes, heavy lids, pale brows and an integrated broad nose.
+Thin closed lips form a restrained asymmetric smile; surface ribbons add fine
+forehead/cheek folds without floating cylindrical strokes.
+A rounded jacket mesh adds a prominent belly and wider waist; shirt,
 lapels and tie follow its surface through the original poses. The belly and hem
 hang below the hips without reducing the jacket's cross-sections. The longer
 fringe pivots upright just after takeoff and settles as outrun speed drops;
 its position comes directly from the displayed frame, so replay pause/seek is
 deterministic and the menu preview keeps the swept fringe.
 Both skins wrap the exact same original skeleton, including interpolated joints
-and fall poses; skis, bindings and boots retain their geometry. The appearance
+and fall poses; skis and bindings retain their geometry. Both wear the same
+light boot shells with red closures, metal buckles and dark flat soles, making
+the boots distinct from the trousers and turquoise bindings. Boot cuffs follow
+the lower legs, with trouser hems tucked inside instead of covering the shells.
+The appearance
 enum stays outside simulation, AI, input, scoring and replay physics. Native
 replays and ghosts use the selected skin as a presentation preference.
 
