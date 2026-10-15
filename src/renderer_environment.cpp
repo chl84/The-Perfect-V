@@ -3,6 +3,7 @@
 #include "visual_weather.h"
 #include "visual_floodlights.h"
 #include "visual_mountains.h"
+#include "visual_contact_shadow.h"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -239,6 +240,16 @@ sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int heigh
     sjp::visual::popAttrib();
     return texture;
 }
+sjp::gfx::Id makeContactShadowTexture() {
+    const auto mask = visual::contactShadowMask();
+    const auto texture = makeMarkerTexture({mask.begin(), mask.end()}, visual::contactShadowTextureSize,
+                                          visual::contactShadowTextureSize);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::CLAMP_TO_EDGE);
+    sjp::visual::popAttrib();
+    return texture;
+}
 sjp::gfx::Id makeSpruceMarkerTexture() {
     int width = 128, height = 64;
     std::vector<uint8_t> pixels(width * height, 0);
@@ -367,31 +378,18 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
         a = b;
     }
 }
-double groundReceiverY(const Hill &h, double x, double z) {
-    const double step = 3 * h.scale(), zStep = 10 * h.scale();
-    const double first = std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale());
-    const double x0 = first + std::floor((x - first) / step) * step;
-    const double z0 = -200 * h.scale() + std::floor((z + 200 * h.scale()) / zStep) * zStep;
-    const double u = (x - x0) / step, v = (z - z0) / zStep;
-    const double a = terrainY(h, x0, z0), b = terrainY(h, x0, z0 + zStep),
-                 c = terrainY(h, x0 + step, z0 + zStep), d = terrainY(h, x0 + step, z0);
-    return v >= u ? a * (1 - v) + b * (v - u) + c * u : a * (1 - u) + c * v + d * (u - v);
-}
-void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity, bool foundation = false) {
-    constexpr int sides = 16, rings = 4;
-    for (int ring = 0; ring < rings; ++ring) {
-        const double inner = ring / double(rings), outer = (ring + 1) / double(rings);
-        sjp::visual::begin(sjp::gfx::QUAD_STRIP);
-        for (int i = 0; i <= sides; ++i) {
-            const double angle = i * 2 * PI / sides;
-            for (double radius : {outer, inner}) {
-                const double x = p.x + std::cos(angle) * rx * radius, z = p.z + std::sin(angle) * rz * radius;
-                col({.12f, .22f, .31f, float(opacity * (1 - radius) * (1 - radius))});
-                vertex({x, (foundation ? groundReceiverY(h, x, z) : terrainY(h, x, z)) + .018, z});
-            }
+void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
+    col({.12f, .22f, .31f, opacity});
+    sjp::visual::begin(sjp::gfx::TRIANGLES);
+    visual::contactShadowTriangles(h, p, rx, rz, [&](double x, double z) { return terrainY(h, x, z); },
+                                   [&](Vec3 a, Vec3 b, Vec3 c) {
+        for (Vec3 v : {a, b, c}) {
+            sjp::visual::texCoord(clamp((v.x - p.x + rx) / (2 * rx), 0.0, 1.0),
+                                 clamp((v.z - p.z + rz) / (2 * rz), 0.0, 1.0));
+            vertex(v + Vec3{0, .018, 0});
         }
-        sjp::visual::end();
-    }
+    });
+    sjp::visual::end();
 }
 struct Tree {
     Vec3 base;
@@ -829,6 +827,8 @@ void Renderer::terrain(const Hill &h) {
         spruceMarkerTexture = makeSpruceMarkerTexture();
     if (!sprayMarkerTexture)
         sprayMarkerTexture = makeSprayMarkerTexture();
+    if (!contactShadowTexture)
+        contactShadowTexture = makeContactShadowTexture();
     // Keep the current and most recently visited venue. The full 32-venue
     // cache retained millions of unused vertices between jumps.
     size_t count = 0, oldest = index;
@@ -881,9 +881,10 @@ void Renderer::terrain(const Hill &h) {
     // valley and its descending decorative continuation.
     // All soft ground contacts share one state pass, instead of switching
     // depth/blend/lighting hundreds of times between individual trees.
-    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT);
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::TEXTURE_BIT);
     sjp::visual::disable(sjp::gfx::LIGHTING);
-    sjp::visual::disable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::enable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, contactShadowTexture);
     sjp::visual::enable(sjp::gfx::BLEND);
     sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
     sjp::visual::depthMask(sjp::gfx::FALSE);
@@ -900,7 +901,7 @@ void Renderer::terrain(const Hill &h) {
         if (!support.exposed())
             continue;
         for (int side : {-1, 1})
-            contactShadow(h, {support.x, 0, side * visual::inrunColumnZ}, 1.15, 1.05, .24f, true);
+            contactShadow(h, {support.x, 0, side * visual::inrunColumnZ}, 1.15, 1.05, .24f);
         visual::flush();
     }
     for (int side : {-1, 1}) {

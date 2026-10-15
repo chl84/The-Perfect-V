@@ -7,6 +7,8 @@
 #include "visual_weather.h"
 #include "visual_shadow.h"
 #include "visual_start_signal.h"
+#include "visual_contact_shadow.h"
+#include "visual_mountains.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,6 +23,63 @@ namespace audit {
 void require(bool ok, const char *message) {
     if (!ok)
         throw std::runtime_error(message);
+}
+void contactShadowDecals() {
+    using namespace sjp;
+    const auto mask = visual::contactShadowMask();
+    constexpr int size = visual::contactShadowTextureSize;
+    double coverage = 0;
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const auto value = mask[size_t(y * size + x)];
+            coverage += value / 255.0;
+            if (x == 0 || y == 0 || x == size - 1 || y == size - 1)
+                require(value == 0, "Contact shadow texture has a visible rectangular edge");
+            require(value == mask[size_t(y * size + size - 1 - x)] &&
+                        value == mask[size_t((size - 1 - y) * size + x)],
+                    "Contact shadow texture is asymmetric");
+        }
+    require(coverage / mask.size() > .123 && coverage / mask.size() < .133,
+            "Contact shadow texture changes the soft footprint's integrated opacity");
+    for (const auto &hill : hills()) {
+        const double scale = hill.scale();
+        for (const Vec3 center : {Vec3{-73 * scale, 0, 3.28}, Vec3{93 * scale, 0, 30},
+                                 Vec3{310 * scale, 0, 173 * scale}}) {
+            const double rx = 2.71 * std::sqrt(scale), rz = 1.93 * std::sqrt(scale);
+            std::vector<std::array<Vec3, 3>> triangles;
+            visual::contactShadowTriangles(hill, center, rx, rz,
+                [&](double x, double z) { return visual::backdropGround(hill, x, z); },
+                [&](Vec3 a, Vec3 b, Vec3 c) { triangles.push_back({a, b, c}); });
+            double area = 0;
+            for (const auto &t : triangles) {
+                const auto normal = cross(t[1] - t[0], t[2] - t[0]);
+                require(normal.y > 0, "Contact decal has a reversed or degenerate receiver triangle");
+                area += normal.y / 2;
+                // Check vertices and interior points, so a broad flat decal
+                // cannot bridge a snow-grid diagonal or intersect curved snow.
+                for (const auto p : {t[0], t[1], t[2], (t[0] + t[1] + t[2]) * (1.0 / 3)}) {
+                    const double step = 3 * scale, zStep = 10 * scale;
+                    const double start = std::min(-170 * scale, hill.inrunStart() - 60 * scale);
+                    const double x0 = start + std::floor((p.x - start) / step) * step;
+                    const double z0 = -200 * scale + std::floor((p.z + 200 * scale) / zStep) * zStep;
+                    const double u = (p.x - x0) / step, v = (p.z - z0) / zStep;
+                    const double a = visual::backdropGround(hill, x0, z0);
+                    const double b = visual::backdropGround(hill, x0, z0 + zStep);
+                    const double c = visual::backdropGround(hill, x0 + step, z0 + zStep);
+                    const double d = visual::backdropGround(hill, x0 + step, z0);
+                    const double expected = v >= u ? a * (1 - v) + b * (v - u) + c * u
+                                                   : a * (1 - u) + c * v + d * (u - v);
+                    require(std::abs(p.y - expected) < 1e-8 &&
+                                std::abs(p.x - center.x) <= rx + 1e-8 &&
+                                std::abs(p.z - center.z) <= rz + 1e-8,
+                            "Contact decal leaves its original snow receiver or footprint");
+                }
+            }
+            require(!triangles.empty() && triangles.size() < 128 &&
+                        std::abs(area - 3 * rx * rz) < 1e-8,
+                    "Contact decal loses coverage or fails to reduce geometry");
+        }
+    }
 }
 void singleShadow() {
     using sjp::visual::ShadowCapsule;
@@ -967,6 +1026,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 
 int main() {
     try {
+        audit::contactShadowDecals();
         audit::startSignalLighting();
         audit::singleShadow();
         audit::floodlightsAndLandingShadow();

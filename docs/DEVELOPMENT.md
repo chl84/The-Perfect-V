@@ -231,6 +231,29 @@ small cached contact patches on the existing ground receiver. Athlete fabric,
 rubber, ski coating, helmet, visor and fittings have separate inexpensive vertex
 materials. Highlights follow the existing direct light and are restored after
 drawing the athlete; geometry and fall-contact measurements remain unchanged.
+Static contacts under trees, supports, stands and light masts share one 64×64
+alpha mask with averaged mip levels (about 21 KiB of RGBA texels before driver
+overhead). The mask retains the quadratic soft falloff; a 12-sided footprint
+avoids spending fragment work on a rectangle's transparent corners. Receiver
+triangles are clipped to that footprint while compiling the cached scenery,
+so the decal follows the existing snow cells and their diagonals without
+changing terrain or adding per-frame projection work. The existing blended
+contact pass, colors, opacity and depth settings are retained; no new shader or
+offscreen pass is needed. The athlete's moving silhouette is unchanged.
+On 2026-10-15, 70 before/final native 1920×1080, 4× MSAA images were compared
+across five hills and seven scenes. All 13 standalone suites and the full-game
+Vulkan smoke test passed; receiver clipping, soft-mask coverage and the original
+snow hashes are checked. Contact-only triangles fell from 57,856 to 16,773 on
+K50, 59,136 to 11,868 on K120, and 58,880 to 9,384 on K250 (71–84%).
+Controlled Iris Xe benchmarks used 15 scenes, 40 warmup frames and 240 measured
+frames per scene, with three runs per variant in before/after/after/before/before/
+after order. Median daylight camera-1 flight times were 10.636→10.373 ms on K50,
+8.083→7.787 ms on K120 and 6.469→6.458 ms on K250. The sum of the 15 scene medians
+fell 3.6%; K250 was mostly unchanged. These are CPU command/submission plus
+explicit GPU-completion wall times in hidden windows, excluding desktop/VSync
+pacing; they do not establish a sustained gameplay FPS gain. Local detailed
+results and method are in `captures/contact-shadow-review/benchmark-summary.csv`
+and `benchmark-method.json` in that directory.
 The sky combines its gradient and two soft cloud scales in one 32 by 20 mesh.
 World-space directions and a cosmetic seed keep clouds stable through cameras,
 pause and replay seeking, with no textures, extra render passes or per-pixel noise.
