@@ -20,7 +20,7 @@ Development builds are also available under **Actions**.
 
 ### Windows
 
-The portable ZIP targets **Windows 10/11, 64-bit**. Extract the entire archive and
+The portable ZIP targets **Windows 10 (1903+) and Windows 11, 64-bit**. Extract the entire archive and
 start `ThePerfectV/the-perfect-v.exe`. Keep the included assets and SDL3.dll beside
 the executable. A working Vulkan graphics driver is required; no separate SDL,
 FreeType or Visual C++ runtime installation is needed.
