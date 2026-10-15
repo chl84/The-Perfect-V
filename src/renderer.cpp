@@ -405,6 +405,8 @@ Renderer::~Renderer() {
         sjp::gfx::deleteTextures(1, &naturalSnowTexture);
     if (contactShadowTexture)
         sjp::gfx::deleteTextures(1, &contactShadowTexture);
+    if (concreteTexture)
+        sjp::gfx::deleteTextures(1, &concreteTexture);
     if (spruceMarkerTexture)
         sjp::gfx::deleteTextures(1, &spruceMarkerTexture);
     if (sprayMarkerTexture)

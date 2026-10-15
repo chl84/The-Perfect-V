@@ -119,6 +119,16 @@ same cached landing and keep both shoe soles inside its wooden surface.
 Adult heights vary from 1.60 to 1.90 m while preserving shoe width and crowd
 density. The command suite checks actual floor and shoe vertices on all venues.
 
+Concrete uses one shared 128×128 luminance texture with mipmaps (about 85 KiB
+of GPU texels), providing restrained pores, mottling, runoff and formwork joints.
+Stable cosmetic hashes add slight differences between slabs; vertex colors
+darken their lower portions. All concrete is grouped by material, with section
+boundaries retained for culling, rather than switching textures per seat row.
+This adds a texture sample on concrete but no triangles, extra surface layers
+or changes to landing/spectator positions. Terrain and physics remain unchanged.
+Native Vulkan captures cover five hill sizes in day, snowfall, night and evening
+at 1920×1080/MSAA4; the environment and renderer command suites pass.
+
 ## Crowd audio
 
 The spectator bed and cheering loop follow the athlete's proximity to the actual

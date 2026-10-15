@@ -204,7 +204,8 @@ sjp::gfx::Id makeSnowTexture(bool groomed) {
     sjp::visual::popAttrib();
     return texture;
 }
-sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int height) {
+sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int height,
+                               sjp::gfx::Enum format = sjp::gfx::ALPHA) {
     sjp::gfx::Id texture = 0;
     sjp::gfx::genTextures(1, &texture);
     sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
@@ -213,8 +214,8 @@ sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int heigh
     sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
     for (int level = 0;; ++level) {
-        sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, level, sjp::gfx::ALPHA, width, height, 0,
-                           sjp::gfx::ALPHA, sjp::gfx::UNSIGNED_BYTE, pixels.data());
+        sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, level, format, width, height, 0,
+                           format, sjp::gfx::UNSIGNED_BYTE, pixels.data());
         if (width == 1 && height == 1)
             break;
         const int nextWidth = std::max(1, width / 2), nextHeight = std::max(1, height / 2);
@@ -237,6 +238,38 @@ sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int heigh
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::CLAMP_TO_EDGE);
     sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, oldAlignment);
+    sjp::visual::popAttrib();
+    return texture;
+}
+sjp::gfx::Id makeConcreteTexture() {
+    constexpr int size = 128;
+    std::vector<uint8_t> pixels(size * size);
+    auto noise = [](double x, double y) {
+        const double row = std::floor(y), t = y - row, blend = t * t * (3 - 2 * t);
+        // Broad weathering repeats seamlessly along the wall's vertical UV.
+        return smoothNoise(x, std::fmod(row, 4.0) * 37.13 + 211) * (1 - blend) +
+               smoothNoise(x, std::fmod(row + 1, 4.0) * 37.13 + 211) * blend;
+    };
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const double mottling = (noise(x / 24.0, y * 4.0 / size) - .5) * .055;
+            const double grain = (hash(x * 13.71 + y * 8.17 + 61) - .5) * .035;
+            const double pores = hash(x * 91.3 + y * 37.7 + 9) > .988 ? .055 : 0;
+            const double streak = .030 * std::pow(std::max(0.0, (smoothNoise(x / 8.0, 89) - .55) / .45), 2) *
+                                  (.5 + .5 * noise(x / 30.0, y * 4.0 / size));
+            // Narrow, subdued joints follow each terrace bay; horizontal
+            // formwork marks are weaker than the material's broad variations.
+            const double edge = std::min(x, size - 1 - x);
+            const double joint = .035 * (1 - smoothRange(0, 1.5, edge));
+            const double board = .008 * (1 - smoothRange(0, 1.0, std::abs(std::remainder(double(y), 32.0))));
+            pixels[size_t(y * size + x)] = uint8_t(std::lround(255 * clamp(
+                .975 + mottling + grain - pores - streak - joint - board, 0.0, 1.0)));
+        }
+    const auto texture = makeMarkerTexture(std::move(pixels), size, size, sjp::gfx::LUMINANCE);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::CLAMP_TO_EDGE);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::REPEAT);
     sjp::visual::popAttrib();
     return texture;
 }
@@ -453,12 +486,28 @@ void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double
     const Vec3 a{x0, top, z0}, b{x0, top, z1}, d{x1, top, z0}, e{x1, top, z1};
     const Vec3 aa{x0, snow.height(x0, z0) - .16, z0}, bb{x0, snow.height(x0, z1) - .16, z1},
                dd{x1, snow.height(x1, z0) - .16, z0}, ee{x1, snow.height(x1, z1) - .16, z1};
-    quad(a, b, e, d, c);
-    quad(aa, dd, ee, bb, c);
-    quad(aa, a, d, dd, shade(c, .88));
-    quad(bb, ee, e, b, shade(c, .88));
-    quad(aa, bb, b, a, shade(c, .94));
-    quad(dd, d, e, ee, shade(c, .94));
+    const double bottom = std::min({aa.y, bb.y, dd.y, ee.y});
+    const Color tint = shade(c, .98 + .04 * hash(x0 * 1.13 + z0 * .79 + 17));
+    auto face = [&](Vec3 p, Vec3 q, Vec3 r, Vec3 s, double brightness) {
+        const Vec3 normal = cross(q - p, r - p).normalized();
+        sjp::visual::begin(sjp::gfx::QUADS);
+        sjp::visual::normal(normal.x, normal.y, normal.z);
+        for (Vec3 v : {p, q, r, s}) {
+            const double dry = clamp((v.y - bottom) / (top - bottom), 0.0, 1.0);
+            col(shade(tint, brightness * (.94 + .06 * dry)));
+            const double u = std::abs(normal.x) > .5 ? (v.z - z0) / (z1 - z0) : (v.x - x0) / (x1 - x0);
+            const double vv = std::abs(normal.y) > .5 ? (v.z - z0) * .70 : v.y * .70;
+            sjp::visual::texCoord(u, vv);
+            vertex(v);
+        }
+        sjp::visual::end();
+    };
+    face(a, b, e, d, 1);
+    face(aa, dd, ee, bb, 1);
+    face(aa, a, d, dd, .88);
+    face(bb, ee, e, b, .88);
+    face(aa, bb, b, a, .94);
+    face(dd, d, e, ee, .94);
 }
 void standGuard(Vec3 a, Vec3 b) {
     const Color post{.44f, .54f, .58f, 1}, rail{.55f, .64f, .68f, 1};
@@ -837,6 +886,8 @@ void Renderer::terrain(const Hill &h) {
         sprayMarkerTexture = makeSprayMarkerTexture();
     if (!contactShadowTexture)
         contactShadowTexture = makeContactShadowTexture();
+    if (!concreteTexture)
+        concreteTexture = makeConcreteTexture();
     // Keep the current and most recently visited venue. The full 32-venue
     // cache retained millions of unused vertices between jumps.
     size_t count = 0, oldest = index;
@@ -1071,6 +1122,22 @@ void Renderer::terrain(const Hill &h) {
     const auto &stands = grandstandLayouts[index];
     const visual::CameraSurface arenaSnow(h);
     const double arenaNear = stands.near;
+    // One opaque material group for all concrete, rather than texture switches
+    // around every timber seat. Coordinates and triangle counts stay identical.
+    sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::CURRENT_BIT);
+    sjp::visual::enable(sjp::gfx::TEXTURE_2D);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, concreteTexture);
+    for (int side : {-1, 1})
+        for (int section = 0; section < visual::GrandstandLayout::sectionCount; ++section) {
+            for (const auto &t : stands.section(side, section).terraces)
+                for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row) {
+                    const double za = side * (arenaNear + 1.35 + row * 1.2), zb = za + side * 1.2;
+                    terraceSlab(arenaSnow, t.x0, t.x1, std::min(za, zb), std::max(za, zb), t.floor(row),
+                                {.43f, .49f, .52f, 1});
+                }
+            visual::flush();
+        }
+    sjp::visual::popAttrib();
     for (int side : {-1, 1}) {
         const double front = side * (arenaNear - 1.0);
         for (int section = 0; section < visual::GrandstandLayout::sectionCount; ++section) {
@@ -1088,7 +1155,6 @@ void Renderer::terrain(const Hill &h) {
                 for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row) {
                     const double za = side * (arenaNear + 1.35 + row * 1.2), zb = za + side * 1.2;
                     const double z0 = std::min(za, zb), z1 = std::max(za, zb), floor = t.floor(row);
-                    terraceSlab(arenaSnow, t.x0, t.x1, z0, z1, floor, {.43f, .49f, .52f, 1});
                     box({(t.x0 + t.x1) * .5, floor + .09, (z0 + z1) * .5},
                         {t.x1 - t.x0 - .16, .08, .60}, {.40f, .32f, .26f, 1});
                 }
