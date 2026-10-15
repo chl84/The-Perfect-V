@@ -182,6 +182,16 @@ The explicitly invoked render probe reports cached/submitted/culled geometry
 and draw calls. `--no-culling` supplies an unculled reference using the same
 indexed meshes; it is a diagnostic option, not a gameplay setting.
 
+Each tree has one stable foliage tint from five closely related evergreen
+colors, with ±3% brightness variation. All bough tiers, including the animated
+top, share that tree's tint while retaining their existing face shading. Snow
+caps keep their original material. Cosmetic tree hashes select the tint without
+consuming gameplay/wind randomness. This uses existing vertex colors, adding no
+vertices, textures, shaders or draw calls.
+The palette was reviewed in 36 native 1920×1080 captures across three hills,
+three views and morning/day/evening/night. Environment and renderer command
+suites passed, including the existing protected snow-coordinate checks.
+
 Distant mountains use a prepared, transparent CC0 photographic panorama on a
 world-direction background ring. Only the decorative ridgelines were replaced;
 playable valley vertices, hill/inrun profiles, starts, physics and camera paths

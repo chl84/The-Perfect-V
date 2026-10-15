@@ -394,6 +394,7 @@ void contactShadow(const Hill &h, Vec3 p, double rx, double rz, float opacity) {
 struct Tree {
     Vec3 base;
     double height = 1, seed = 0;
+    Color needles;
     int tiers = 4;
     bool animated = false;
 };
@@ -405,6 +406,14 @@ Tree treeAt(const Hill &h, int i) {
     tree.base = {x, terrainY(h, x, z), z};
     tree.height = (3.5 + hash(i * 7.6) * 7.6) * std::sqrt(scale);
     tree.seed = i * 2.7 + 17;
+    // A stable, narrow evergreen palette per tree. All boughs, including the
+    // animated top, share that tint; this cosmetic hash never consumes wind RNG.
+    constexpr std::array<Color, 5> palette{{
+        {.099f, .250f, .237f, 1}, {.103f, .257f, .241f, 1}, {.095f, .248f, .242f, 1},
+        {.105f, .254f, .228f, 1}, {.094f, .257f, .250f, 1}
+    }};
+    tree.needles = shade(palette[size_t(hash(tree.seed + 83.71) * palette.size())],
+                         .97 + .06 * hash(tree.seed + 231.7));
     tree.tiers = 4 + int(hash(i * 11.71) * 3);
     tree.animated = i % 26 == 0;
     return tree;
@@ -413,7 +422,7 @@ bool visibleTree(const Hill &h, const Tree &tree) {
     const double s = h.scale();
     return !(tree.base.x > 74 * s && tree.base.x < 242 * s && std::abs(tree.base.z) < std::max(47 * s, 18.0));
 }
-void branch(Vec3 p, double radius, double height, double seed, Vec3 sway = {}) {
+void branch(Vec3 p, double radius, double height, double seed, Color needles, Vec3 sway = {}) {
     constexpr int count = 7;
     const Vec3 tip = p + Vec3{0, height, 0} + sway;
     std::array<Vec3, count + 1> bases{}, snow{};
@@ -427,8 +436,6 @@ void branch(Vec3 p, double radius, double height, double seed, Vec3 sway = {}) {
     }
     bases[count] = bases[0];
     snow[count] = snow[0];
-    const Color needles{float(.085 + hash(seed + 1) * .032), float(.23 + hash(seed + 2) * .06),
-                        float(.235 + hash(seed + 3) * .045), 1};
     const Color cap{.82f, .9f, .94f, 1};
     for (int i = 0; i < count; ++i) {
         quad(bases[i], snow[i], snow[i + 1], bases[i + 1], shade(needles, .94 + hash(seed + i * 4.39) * .12));
@@ -438,7 +445,8 @@ void branch(Vec3 p, double radius, double height, double seed, Vec3 sway = {}) {
 void treeBranch(const Tree &tree, int tier, Vec3 sway = {}) {
     const double t = tier / double(tree.tiers - 1);
     const Vec3 p = tree.base + Vec3{0, tree.height * (.12 + .53 * t), 0};
-    branch(p, tree.height * (.31 - .238 * t), tree.height * (.43 - .12 * t), tree.seed + tier * 29.7, sway);
+    branch(p, tree.height * (.31 - .238 * t), tree.height * (.43 - .12 * t), tree.seed + tier * 29.7,
+           tree.needles, sway);
 }
 void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double z0, double z1,
                  double top, Color c) {
