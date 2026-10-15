@@ -20,6 +20,7 @@ host_libraries = re.compile(r"^(ld-linux.*|lib(c|m|dl|pthread|rt|resolv|util|gcc
 window_libraries = [
     "libX11.so.6", "libXext.so.6", "libXrandr.so.2", "libXcursor.so.1",
     "libXi.so.6", "libXfixes.so.3", "libXrender.so.1", "libXss.so.1",
+    "libXtst.so.6", "libXinerama.so.1",
     "libwayland-client.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1",
     "libxkbcommon.so.0",
 ]
