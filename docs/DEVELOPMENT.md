@@ -60,7 +60,14 @@ mouse-capture test has not been run. See [migration status](vulkan-sdl3-migratio
 ## Packaging
 
 `./package.sh` builds Release and assembles a fresh Linux archive with the game,
-launcher, fonts, icon, README and these development notes. Original files, analysis
+launcher, fonts, icon, README, GPL-3.0 license and these development notes. The
+installed game also includes LICENSE and README in its data root, with development
+notes and the three README screenshots under `docs/`. Third-party
+notices remain with their assets. The package contains `source.tar.gz` with the
+corresponding source, assets and build scripts from the working files used by
+that build, including uncommitted changes. Packaging runs from a Git checkout;
+its source file list excludes ignored local material and unrelated documents.
+Recipients can build the extracted source with CMake without Git. Original files, analysis
 captures, local desktop shortcuts and personal saves are excluded. The runtime
 libraries come from the destination Linux installation.
 

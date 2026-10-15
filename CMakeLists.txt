@@ -167,3 +167,7 @@ endif()
 install(TARGETS the-perfect-v RUNTIME DESTINATION bin)
 # Runtime owns share/the-perfect-v/saves; installation updates assets only.
 install(DIRECTORY assets DESTINATION share/the-perfect-v)
+
+install(FILES LICENSE README.md DESTINATION share/the-perfect-v)
+install(FILES docs/DEVELOPMENT.md docs/vulkan-sdl3-migration.md DESTINATION share/the-perfect-v/docs)
+install(DIRECTORY docs/screenshots DESTINATION share/the-perfect-v/docs)

@@ -1,31 +1,35 @@
 # The Perfect V
 
-A native Linux 3D ski jumping game built with C++17, SDL3, Vulkan and FreeType.
-It has 32 distinct hill profiles, a 70 Hz simulation, local World Cup and Team
-Cup competitions, CPU opponents, saved records and replay playback. The scenery,
-athlete, snow effects and sports interface use a modern stylized presentation.
-The compact HUD keeps the venue, wind, speed and distance at the screen edges,
-leaving the jumper clear of coaching text and progress meters.
-Settings include morning, day, evening and night, with sunny, overcast, snowfall
-and fog conditions. Day and sun are the defaults; time and weather are cosmetic.
-Random choices stay fixed per practice jump and throughout each cup event.
-Crowd audio fades in near the stands and grows with flight distance. Falls hush
-the cheers and trigger gasps and concerned voices at the same distance-dependent
-volume, including in replays. Recordings and credits are in [assets/audio](assets/audio/CREDITS.md).
+A native Linux ski jumping game with 32 hills, local competitions and four distinct
+jumpers. Built with C++17, SDL3 and Vulkan.
 
-The project reconstructs hill geometry and gameplay rules from Deluxe Ski Jump
-2.10. The original game's executable, data, reference recordings and analysis
-captures are not distributed in this repository and are not needed to play.
+![Pro in flight above a snowy valley in daylight](docs/screenshots/daylight-flight.webp)
 
-Vulkan/SDL3 is now the version on `main`. The standalone test suites and
-the full-game Vulkan smoke test passed on Intel Iris Xe; long-session stability
-and other GPUs remain unverified. See [migration notes](docs/vulkan-sdl3-migration.md).
+## Features
 
-## Build and play
+- **32 hills**, from small practice venues to ski flying.
+- **Practice, World Cup and Team Cup**, with local players and CPU opponents.
+- **Four jumpers:** Pro, President, Actor and Cartoon. Different looks, identical physics.
+- **Changing conditions:** morning, day, evening and night, with clear skies, clouds, snow or fog.
+- **Replays, personal records and resumable cups.**
 
-Install a C++17 compiler, CMake 3.16 or newer, pkg-config and the development
-packages for SDL3 3.4 or newer and FreeType, Vulkan drivers and `glslc` (shaderc).
-Then run:
+## Get started
+
+The game needs a graphical Linux desktop, a Vulkan-capable GPU and driver, SDL3
+3.4 or newer, and FreeType.
+
+### From a game package
+
+Extract `ThePerfectV-linux-x86_64.tar.gz`, enter the extracted folder and run:
+
+```sh
+./play.sh
+```
+
+### Build from source
+
+Install a C++17 compiler, CMake 3.16 or newer, pkg-config, the SDL3 and FreeType
+development packages, and `glslc` from shaderc. Then:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
@@ -35,122 +39,69 @@ cmake --build build-vulkan --parallel 4
 ./play-vulkan.sh
 ```
 
-The Vulkan launcher builds into `build-vulkan` if its executable is missing,
-preserving any previous executable in `build`. Normal play requires
-a graphical desktop; no browser, network connection or DOS emulator is needed.
-Use **How to jump** in the game for a short guide. England K50 and Austria K70
-are small practice hills.
+## How to jump
 
-**Ski Jumper** in the main menu selects Pro, the original athlete, or President,
-a suited jumper with a red tie and swept golden hair. The saved choice changes
-appearance only; both use the same skeleton, controls, physics and scoring.
-
-The renderer uses SDL3's GPU API with Vulkan selected explicitly. It retains
-the previous scene geometry, materials, cameras, interface and 4× antialiasing
-where supported. One frame may be in flight, with VSync and an independent
-60 FPS cap in normal play. To wait for each submitted frame immediately:
-
-```sh
-./play-vulkan.sh --graphics-compat
-```
-
-`--sync-rendering` enables the same frame wait. `--no-msaa` disables antialiasing;
-`--gpu-validation` explicitly enables SDL GPU/Vulkan validation. Startup output
-reports the GPU, SDL version, MSAA, synchronization and submission limits.
-
-## Controls
-
-Open **Settings > Controls** for the in-game control reference.
+Start with **Practice** on England K50 or Austria K70. The in-game guide is under
+**Settings → Controls**.
 
 | Action | Mouse | Keyboard |
 | --- | --- | --- |
 | Leave the gate | Hold left button | Space |
 | Take off | Hold both buttons near the board, then release | Space |
 | Adjust flying position | Gentle vertical movement | Up / Down or W / S |
-| Prepare telemark | One button, then the other before contact | T |
-| Prepare two-foot landing | Both buttons together | B or Space in flight |
-| Pause / resume | Pause menu | Esc |
-| Change camera | Settings | C |
-| Toggle ghost | Settings | G |
-| Toggle sound | Settings | M |
-| Toggle fullscreen | — | F11 |
-| Watch replay | Results or Replays | R |
+| Telemark landing | One button, then the other before contact | T |
+| Two-foot landing | Both buttons together | B or Space in flight |
+| Pause / resume | — | Esc |
 
-Release the start button during the inrun. Hold both buttons near the board to
-extend through takeoff, and release both afterward to enable landing preparation.
-Use small mouse movements in flight. A wider telemark improves style but increases
-the risk of falling.
+Release the start button during the inrun. Time the takeoff near the end of the
+ramp, then release both buttons before preparing your landing.
 
-Replays support pause, timeline seeking, camera changes and 0.25×–2× speed.
-Native `.PVR` recordings preserve the selected ski jumper, time of day and weather.
-The replay library reads `.PVR` and original DSJ `.RPL` recordings. Drop a
-replay onto the window or use `./play.sh --replay FILE`. Original replay export
-is available when the recorded input sequence fits that format. Hover over either
-export button for a short explanation of its format.
+**Shortcuts:** C changes camera, G toggles the ghost during a jump, M toggles sound,
+F11 toggles fullscreen, and R opens the replay from the menu or results.
 
-## Competitions and saves
+## Choose your jumper
 
-Practice supports unlimited retries. World Cup accepts 1–16 human/CPU entrants;
-Team Cup accepts 1–4 teams of four. CPU entrants receive random nationalities and
-country-specific first/last names; CPU teams share one randomly selected nationality.
-Names and countries stay fixed through the cup and save/resume. Flags replace country
-codes in the interface; click a flag in cup setup to edit the nationality.
+Select **Ski Jumper** from the main menu. Each character has its own appearance
+and ski design; your choice never changes jump performance or scoring.
 
-Select hills, seasons, CPU levels and whether
-to watch CPU jumps. Local players share the machine, and interrupted competitions
-can be resumed from checkpoints. Standing human jumps in practice and cups can set all-time hill records. The blue
-spray line marks the saved record on each hill; CPU jumps and replays cannot update it.
+![Pro, President, Actor and Cartoon on the Ski Jumper selection screen](docs/screenshots/ski-jumpers.webp)
 
-On a local Linux installation, game data is grouped under
-`~/.local/share/the-perfect-v/`: `assets/` contains installed resources and
-`saves/` contains preferences, records, cups and replays. Saves respect
-`XDG_DATA_HOME`; `--prefix` controls where resources are installed. Resource
-installation never writes to `saves/`. The first default launch imports missing
-files from the previous save directory once, preferring the most recent namespace
-and retaining originals and existing destination files. The launcher prints the
-active save location as `Saves:`.
-Use `--data-dir PATH` to select another location without importing old saves.
-Personal saves and replays are excluded from Git.
+## Replays and saves
 
-## Tests and packaging
+Replays support pause, timeline seeking, three cameras and 0.25×–2× playback.
+**PVR** preserves the jump, character, time of day and weather. Original DSJ
+**RPL** files can also be opened, and exported when the recording supports it.
+Hover over the export buttons for a short explanation. Open a replay through
+**Replays**, drop it onto the window, or use `./play-vulkan.sh --replay FILE`
+(`./play.sh --replay FILE` in the packaged game).
+
+![Cartoon flying through falling snow under the floodlights in Slovenia](docs/screenshots/night-jump.webp)
+
+The default save folder is `~/.local/share/the-perfect-v/saves/`, respecting
+`XDG_DATA_HOME`. It holds settings, records, cups and replays. Interrupted cups
+can be resumed; resource updates leave saves intact. Use `--data-dir PATH` for
+a separate save folder. Personal saves and replays are excluded from Git.
+
+## Development
 
 ```sh
 ctest --test-dir build-vulkan --output-on-failure
 ./package.sh
 ```
 
-A standalone checkout includes tests for simulation/render interpolation, physics
-and storage, save migration, fall presentation and CPU rendering commands.
-Additional fidelity tests require private local fixtures and are enabled
-automatically when those fixtures are available. See
-[development notes](docs/DEVELOPMENT.md).
+Packaging requires a Git checkout and creates `dist/ThePerfectV-linux-x86_64.tar.gz`
+with the game, resources, documentation, license and matching `source.tar.gz`.
+See [development notes](docs/DEVELOPMENT.md) for diagnostics, rendering options,
+full-game checks and the source layout.
 
-`package.sh` creates `dist/ThePerfectV-linux-x86_64.tar.gz`. Extract it and run
-`./play.sh`. The package includes the executable, fonts, icon and documentation;
-it uses the host's SDL3, Vulkan driver, FreeType and C++ runtime libraries.
-Shaders are embedded in the executable; `glslc` is required only when building.
+## License and credits
 
-For an automated full-game check, use an isolated save directory:
+Copyright (C) 2026 chl84 and contributors. Original code, documentation and
+resources are licensed under [GPL-3.0-only](LICENSE), without warranty.
+Third-party resources retain their own terms:
+[fonts](assets/fonts/LICENSE-DejaVu.txt), [audio](assets/audio/CREDITS.md),
+[mountain panorama](assets/environment/CREDITS.md) and [flags](assets/flags/CREDITS.md).
 
-```sh
-SDL_AUDIODRIVER=dummy ./build-vulkan/the-perfect-v --smoke-test \
-  --data-dir /tmp/tpv-test-saves
-```
-
-Run this from a graphical desktop. `--capture-dir PATH` optionally saves test
-screenshots. The original demo replay import check runs only when its local
-fixture is present; native replay, cup and all 32 hill checks remain available
-without it.
-
-## Source layout
-
-- `src/`: simulation, hill tables, controls, competition, storage, replay,
-  athlete geometry, rendering, interface and generated audio.
-- `assets/`: game icon and fonts.
-- `tests/`: standalone and optional fidelity tests.
-- `tools/`: native trajectory/replay probes and comparison utilities.
-- `docs/DEVELOPMENT.md`: build and verification details.
-
-Fonts are DejaVu Sans, distributed with their
-[license](assets/fonts/LICENSE-DejaVu.txt). Deluxe Ski Jump remains the work of
-its original author; its program and resources are not included here.
+The hills and gameplay rules are reconstructed from Deluxe Ski Jump 2.10.
+Original game files are neither included nor required. Deluxe Ski Jump belongs
+to its original author; this project's license grants no rights to that game.
