@@ -57,19 +57,43 @@ relative mouse mode and Ready/Next button hit testing. The standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
 
-## Packaging
+## AppImage builds
 
-`./package.sh` builds Release and assembles a fresh Linux archive with the game,
-launcher, fonts, icon, README, GPL-3.0 license and these development notes. The
-installed game also includes LICENSE and README in its data root, with development
-notes and the three README screenshots under `docs/`. Third-party
-notices remain with their assets. The package contains `source.tar.gz` with the
-corresponding source, assets and build scripts from the working files used by
-that build, including uncommitted changes. Packaging runs from a Git checkout;
-its source file list excludes ignored local material and unrelated documents.
-Recipients can build the extracted source with CMake without Git. Original files, analysis
-captures, local desktop shortcuts and personal saves are excluded. The runtime
-libraries come from the destination Linux installation.
+The distributable is a single x86_64 AppImage. GitHub Actions
+(`.github/workflows/appimage.yml`) builds on Ubuntu 22.04 with GCC 11, runs the
+standalone suites and the packaged game's full Vulkan smoke test, then runs the
+AppImage on fresh Ubuntu 22.04 and 24.04 runners. GPU tests use Xvfb and Mesa
+Lavapipe. These verify packaging and software Vulkan; hardware/Wayland driver
+coverage still requires testing on actual desktops. Workflow dispatch, pull
+requests, main-branch pushes and `v*` tags can build artifacts; none publish a
+GitHub release automatically.
+
+The workflow installs build prerequisites and calls `./package-appimage.sh`
+(`./package.sh` is an alias). It builds pinned SDL 3.4.16 from source and uses
+appimagetool 1.9.1 with the static 20251108 type-2 runtime. Download URLs and SHA-256
+checksums are in `packaging/appimage/dependencies.json`. The builder verifies all
+downloads, packages SDL/FreeType and X11/Wayland client libraries with their
+transitive dependencies and license notices, and rejects ELF symbol requirements
+above glibc 2.35 or GLIBCXX 3.4.29. Host glibc, the GCC C++ runtime, Vulkan
+loader/GPU drivers and audio services are used rather than shipping host-specific
+drivers. X11 and Wayland are enabled; SDL libdecor is disabled to avoid tying
+window decorations to a bundled GTK stack.
+
+Outputs in `dist/` are `ThePerfectV-<version>-x86_64.AppImage`, its SHA-256 checksum,
+and `AppImage-build.json` (actual compiler, required symbol versions and bundled
+libraries). `APP_VERSION` overrides the default Git description. Actions uploads
+these files for 30 days. There is no separate tar/zip game distribution.
+
+`AppRun` resolves assets inside the image and preserves `--data-dir` and the normal
+`the-perfect-v/saves` location. The runtime supports `--appimage-extract-and-run`
+for systems where FUSE mounting is unavailable. `--license` shows GPL-3.0;
+`--export-source FILE` copies the matching project source archive out of the image.
+The SDL source archive and third-party license notices are embedded beside it.
+The source snapshot includes working-tree changes and the build/workflow recipes;
+ignored reference data, captures, credentials and personal saves are excluded.
+
+The normal CMake installation remains available and installs the license, README
+and screenshots alongside the resources. It leaves saves intact.
 
 ## Repository scope
 

@@ -1,0 +1,95 @@
+name: AppImage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appimage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build on Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      CC: gcc-11
+      CXX: g++-11
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-11 g++-11 cmake ninja-build pkg-config glslc \
+            libfreetype6-dev libasound2-dev libpulse-dev libx11-dev libxext-dev \
+            libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev \
+            libwayland-dev libxkbcommon-dev libegl1-mesa-dev libdrm-dev libgbm-dev \
+            libudev-dev wayland-protocols patchelf squashfs-tools desktop-file-utils \
+            curl ca-certificates xvfb xauth libvulkan1 mesa-vulkan-drivers
+      - name: Build AppImage and run standalone tests
+        run: ./package-appimage.sh
+      - name: Run packaged game with software Vulkan
+        env:
+          SDL_AUDIODRIVER: dummy
+          SDL_VIDEODRIVER: x11
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          image=$(find dist -maxdepth 1 -name '*.AppImage' -print -quit)
+          "$image" --appimage-extract-and-run --help
+          "$image" --appimage-extract-and-run --export-source "$RUNNER_TEMP/source.tar.gz"
+          tar -tzf "$RUNNER_TEMP/source.tar.gz" | sort > "$RUNNER_TEMP/source-files.txt"
+          grep -Fx 'LICENSE' "$RUNNER_TEMP/source-files.txt"
+          grep -Fx 'packaging/appimage/dependencies.json' "$RUNNER_TEMP/source-files.txt"
+          xvfb-run -a "$image" --appimage-extract-and-run --smoke-test --hidden \
+            --data-dir "$RUNNER_TEMP/tpv-appimage-saves"
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: ThePerfectV-x86_64-AppImage
+          path: |
+            dist/*.AppImage
+            dist/*.AppImage.sha256
+            dist/AppImage-build.json
+          if-no-files-found: error
+          retention-days: 30
+
+  compatibility:
+    name: Start on ${{ matrix.os }}
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ThePerfectV-x86_64-AppImage
+          path: dist
+      - name: Install graphics test runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xauth libvulkan1 mesa-vulkan-drivers
+      - name: Verify checksum and run packaged game
+        env:
+          SDL_AUDIODRIVER: dummy
+          SDL_VIDEODRIVER: x11
+          VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+        run: |
+          cd dist
+          sha256sum --check ./*.AppImage.sha256
+          chmod +x ./*.AppImage
+          image=$(find "$PWD" -maxdepth 1 -name '*.AppImage' -print -quit)
+          "$image" --appimage-extract-and-run --help
+          xvfb-run -a "$image" --appimage-extract-and-run --smoke-test --hidden \
+            --data-dir "$RUNNER_TEMP/tpv-compat-saves"
