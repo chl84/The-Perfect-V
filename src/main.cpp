@@ -37,6 +37,12 @@ std::string number(double n, int digits = 1) {
     o << std::fixed << std::setprecision(digits) << n;
     return o.str();
 }
+// Coordinates share the overlay's 1440 x 900 reference canvas.
+struct ReplayLayout {
+    static constexpr float left = 38, right = 1402, top = 35, bottom = 865;
+    static constexpr float controlsHeight = 58, controlsTop = bottom - controlsHeight;
+    static constexpr float seekX = 270, seekWidth = 930;
+};
 enum class Screen {
     Menu,
     Hills,
@@ -194,7 +200,7 @@ class App {
                              "validation\n  --hidden         hidden window (use with --smoke-test)\n  "
                              "--capture-dir P  write menu, flight and result images (PPM)\n  --data-dir P    "
                              " use a separate records and replay directory\n  --replay FILE     open an "
-                             "original .RPL or native .sjr replay\n"
+                             "original .RPL or native .pvr replay\n"
                              "  --smoke-mouse-capture  fullscreen test of mouse capture and cup clicks\n"
                              "  --graphics-compat  wait for each submitted Vulkan frame\n"
                              "  --sync-rendering   wait for each submitted frame\n"
@@ -252,11 +258,19 @@ class App {
         renderer->setSynchronousRendering(synchronousRendering);
         audio = std::make_unique<Audio>(assets);
         if (dataDir.empty()) {
-            // Retain the legacy namespace so the rename keeps existing saves.
-            char *pref = SDL_GetPrefPath("SkiJumpPro", "SkiJumpPro");
+            char *pref = SDL_GetPrefPath("", "the-perfect-v");
             if (pref) {
-                dataDir = pref;
+                dataDir = (std::filesystem::path(pref) / "saves").string();
                 SDL_free(pref);
+                const auto shareDirectory = std::filesystem::path(dataDir).parent_path().parent_path();
+                // Prefer the most recent namespace; never merge an older checkpoint
+                // back into a save set where the player may have deleted it.
+                auto legacyDirectory = shareDirectory / "ThePerfectV" / "ThePerfectV";
+                if (!std::filesystem::exists(legacyDirectory))
+                    legacyDirectory = shareDirectory / "SkiJumpPro" / "SkiJumpPro";
+                std::string error;
+                if (!importLegacySaves(legacyDirectory.string(), dataDir, &error))
+                    throw std::runtime_error("Could not import previous saves: " + error);
             } else
                 dataDir = (executableDir / "saves").string();
         }
@@ -290,7 +304,7 @@ class App {
             }
         replayDirectory = dataDir;
         SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
-        hasReplay = loadReplay(dataDir + "/latest-dsj2.sjr", lastReplay);
+        hasReplay = loadReplay(dataDir + "/latest-dsj2.pvr", lastReplay);
         if (hasReplay && !lastReplay.originalRpl.empty())
             canExportOriginal =
                 decodeOriginalReplay(lastReplay.originalRpl, originalReplayData, &replayExportError);
@@ -547,6 +561,7 @@ class App {
         }
         if (sim.frames.size() > 2) {
             lastReplay = sim.replay();
+            lastReplay.jumper = records.jumper;
             lastReplay.hasEnvironment = true;
             lastReplay.environment = activeEnvironment;
             hasReplay = true;
@@ -556,7 +571,7 @@ class App {
                 canExportOriginal =
                     encodeOriginalReplay(originalReplayData, lastReplay.originalRpl, &replayExportError);
             }
-            if (!saveReplay(dataDir + "/latest-dsj2.sjr", lastReplay))
+            if (!saveReplay(dataDir + "/latest-dsj2.pvr", lastReplay))
                 storageError = true;
         }
         if (competition) {
@@ -629,7 +644,7 @@ class App {
             std::string ext = entry.path().extension().string();
             for (char &c : ext)
                 c = char(std::tolower(static_cast<unsigned char>(c)));
-            if (entry.is_directory(error) || ext == ".sjr" || ext == ".rpl")
+            if (entry.is_directory(error) || ext == ".pvr" || ext == ".rpl")
                 replayFiles.push_back(entry.path());
         }
         std::sort(replayFiles.begin(), replayFiles.end(), [](const auto &a, const auto &b) {
@@ -648,6 +663,10 @@ class App {
             c = char(std::tolower(static_cast<unsigned char>(c)));
         OriginalReplayData data;
         bool original = ext == ".rpl";
+        if (!original && ext != ".pvr") {
+            message = "Unsupported replay format. Choose a .PVR or .RPL file.";
+            return false;
+        }
         if (original) {
             if (!readOriginalReplay(path, data, &error) ||
                 !reconstructOriginalReplay(data, loaded, nullptr, &error)) {
@@ -656,6 +675,8 @@ class App {
             }
             if (!encodeOriginalReplay(data, loaded.originalRpl, &error))
                 return false;
+            // Original recordings have no character metadata; use the current selection on import.
+            loaded.jumper = records.jumper;
         } else if (!loadReplay(path, loaded)) {
             message = "Replay file is invalid or uses an unsupported format.";
             return false;
@@ -683,10 +704,10 @@ class App {
                                    std::chrono::system_clock::now().time_since_epoch()).count();
         const std::string stem = dataDir + "/replay-" + hills()[exported.hill].id + "-" +
                                  std::to_string(timestamp);
-        std::string path = stem + ".sjr";
+        std::string path = stem + ".pvr";
         std::error_code error;
         for (unsigned suffix = 1; std::filesystem::exists(path, error); ++suffix)
-            path = stem + "-" + std::to_string(suffix) + ".sjr";
+            path = stem + "-" + std::to_string(suffix) + ".pvr";
         if (error || !saveReplay(path, exported)) {
             message = "Replay could not be saved. Check the save directory.";
             return;
@@ -983,7 +1004,7 @@ class App {
             replaySpeed = std::min(2.0, replaySpeed * 2);
             break;
         case Action::ReplaySeek:
-            seekReplay((mouseX - 290) / 860 * replayDuration());
+            seekReplay((mouseX - ReplayLayout::seekX) / ReplayLayout::seekWidth * replayDuration());
             break;
         case Action::Camera:
             camera = (camera + 1) % 3;
@@ -1300,13 +1321,13 @@ class App {
         for (size_t i = 0; i < JUMPER_APPEARANCES.size(); ++i) {
             const auto appearance = JUMPER_APPEARANCES[i];
             const bool selected = records.jumper == appearance;
-            const float x = 64 + i * 444;
-            r.glassPanel(x, 214, 422, 566, 12, .94f);
+            const float x = 64 + i * 334;
+            r.glassPanel(x, 214, 310, 566, 12, .94f);
             if (selected)
-                r.rect(x + 28, 214, 58, 3, colors::teal, 1);
-            r.text(jumperAppearanceName(appearance), x + 28, 244, 27, colors::white, true);
-            r.jumperPreview(appearance, x + 191, 678, 185);
-            button(selected ? "Selected" : "Select", x + 28, 720, 366,
+                r.rect(x + 22, 214, 58, 3, colors::teal, 1);
+            r.text(jumperAppearanceName(appearance), x + 22, 244, 27, colors::white, true);
+            r.jumperPreview(appearance, x + 132, 618, 145);
+            button(selected ? "Selected" : "Select", x + 22, 720, 266,
                    Action::SelectJumper, int(appearance), selected, 40, 14);
         }
     }
@@ -1719,33 +1740,73 @@ class App {
     }
     void replayUI() {
         auto &r = *renderer;
-        r.glassPanel(38, 35, 394, canExportOriginal ? 142 : 114, 12, .86f);
-        r.pill("REPLAY", 57, 49);
-        r.text(hills()[lastReplay.hill].name + " / " + number(lastReplay.result.distance) + " m", 58, 87, 15,
-               colors::white, true);
+        constexpr float left = ReplayLayout::left, right = ReplayLayout::right,
+                        top = ReplayLayout::top, padding = 20, buttonWidth = 142;
+        const std::string title = hills()[lastReplay.hill].name + " / " + number(lastReplay.result.distance) + " m";
+        const std::string metadata = canExportOriginal
+            ? originalReplayData.athleteName + " / " + originalReplayData.date + " / " + originalReplayData.author
+            : std::string{};
+        const std::string weather = environment::description(replayEnvironment);
+        const float titleWidth = std::clamp(r.textWidth(title, 15, true), 210.f, 440.f),
+                    detailWidth = std::clamp(std::max(r.textWidth(metadata, 10), r.textWidth(weather, 11)),
+                                             200.f, 520.f),
+                    detailX = left + padding + titleWidth + 28;
+        r.glassPanel(left, top, detailX + detailWidth + padding - left, 88, 12, .86f);
+        r.pill("REPLAY", left + padding, top + 14);
+        r.text(title, left + padding, top + 52,
+               std::min(15.f, titleWidth / std::max(1.f, r.textWidth(title, 1, true))), colors::white, true);
         if (canExportOriginal)
-            r.text(originalReplayData.athleteName + " / " + originalReplayData.date + " / " +
-                       originalReplayData.author,
-                   58, 119, 10, colors::muted);
-        r.text(environment::description(replayEnvironment), 58, canExportOriginal ? 148 : 119, 11,
-               colors::muted);
-        smallButton("Back", 1268, 39, 126, Action::Back);
-        smallButton("Export .SJR", canExportOriginal ? 952 : 1110, 39, 142, Action::ReplayExportNative);
+            r.text(metadata, detailX, top + 22,
+                   std::min(10.f, detailWidth / std::max(1.f, r.textWidth(metadata, 1))), colors::muted);
+        r.text(weather, detailX, top + (canExportOriginal ? 54 : 37), 11, colors::muted);
+
+        smallButton("Back", right - buttonWidth, top, buttonWidth, Action::Back);
+        smallButton("Camera " + std::to_string(camera + 1), right - buttonWidth, top + 45,
+                    buttonWidth, Action::Camera);
+        smallButton("Export .PVR", right - buttonWidth, top + 90, buttonWidth, Action::ReplayExportNative);
         if (canExportOriginal)
-            smallButton("Export .RPL", 1110, 39, 142, Action::ReplayExport);
-        r.glassPanel(180, 752, 1080, 102, 14, .9f);
-        smallButton(replayPlaying && replayTime < replayDuration() ? "Pause" : "Play", 202, 775, 74,
-                    Action::ReplayPlay);
-        r.rect(290, 792, 860, 7, {.02f, .06f, .09f, 1}, 4);
-        r.rect(290, 793, float(860 * replayTime / std::max(.01, replayDuration())), 5, colors::teal, 3);
-        r.rect(float(290 + 860 * replayTime / std::max(.01, replayDuration())) - 4, 788, 8, 15, colors::white,
-               4);
-        buttons.push_back({290, 778, 860, 31, Action::ReplaySeek});
-        r.text(number(replayTime) + " / " + number(replayDuration()) + " s", 290, 817, 11, colors::muted);
-        r.textRight(number(replaySpeed, 2) + "x", 1241, 811, 13, colors::teal, true);
-        smallButton("-", 1170, 768, 33, Action::ReplaySlow);
-        smallButton("+", 1212, 768, 33, Action::ReplayFast);
-        smallButton("Camera " + std::to_string(camera + 1), 1268, 84, 126, Action::Camera);
+            smallButton("Export .RPL", right - buttonWidth, top + 135, buttonWidth, Action::ReplayExport);
+
+        constexpr float panelHeight = ReplayLayout::controlsHeight, panelY = ReplayLayout::controlsTop,
+                        controlsY = panelY + (panelHeight - 35) / 2,
+                        trackY = panelY + (panelHeight - 7) / 2;
+        r.glassPanel(left, panelY, right - left, panelHeight, 12, .9f);
+        smallButton(replayPlaying && replayTime < replayDuration() ? "Pause" : "Play",
+                    left + 18, controlsY, 74, Action::ReplayPlay);
+        const std::string timing = number(replayTime) + " / " + number(replayDuration()) + " s";
+        r.text(timing, left + 108, panelY + 21,
+               std::min(11.f, 108.f / std::max(1.f, r.textWidth(timing, 1))), colors::muted);
+        const float playedWidth = float(ReplayLayout::seekWidth * replayTime / std::max(.01, replayDuration()));
+        r.rect(ReplayLayout::seekX, trackY, ReplayLayout::seekWidth, 7, {.02f, .06f, .09f, 1}, 4);
+        r.rect(ReplayLayout::seekX, trackY + 1, playedWidth, 5, colors::teal, 3);
+        r.rect(ReplayLayout::seekX + playedWidth - 4, trackY - 4, 8, 15, colors::white, 4);
+        buttons.push_back({ReplayLayout::seekX, controlsY, ReplayLayout::seekWidth, 35, Action::ReplaySeek});
+        smallButton("-", right - 184, controlsY, 33, Action::ReplaySlow);
+        const std::string speed = number(replaySpeed, 2) + "x";
+        r.text(speed, right - 102 - r.textWidth(speed, 13, true) / 2, panelY + 19, 13, colors::teal, true);
+        smallButton("+", right - 53, controlsY, 33, Action::ReplayFast);
+
+        // Draw after all replay controls; the hint never participates in hit testing.
+        for (const auto &b : buttons) {
+            if ((b.action != Action::ReplayExportNative && b.action != Action::ReplayExport) ||
+                mouseX < b.x || mouseX > b.x + b.w || mouseY < b.y || mouseY > b.y + b.h)
+                continue;
+            const bool native = b.action == Action::ReplayExportNative;
+            const std::string heading = native ? "The Perfect V replay (.PVR)" : "Deluxe Ski Jump 2 replay (.RPL)";
+            const std::array<const char *, 2> lines = native
+                ? std::array<const char *, 2>{"Preserves the jumper, time of day and weather.",
+                                             "Open it again in The Perfect V."}
+                : std::array<const char *, 2>{"For use in the original Deluxe Ski Jump 2.",
+                                             "Time of day and weather are not included."};
+            const float width = std::max({r.textWidth(heading, 14, true), r.textWidth(lines[0], 13),
+                                          r.textWidth(lines[1], 13)}) + 32,
+                        x = b.x - width - 14;
+            r.glassPanel(x, b.y, width, 94, 10, .98f);
+            r.text(heading, x + 16, b.y + 14, 14, colors::white, true);
+            r.text(lines[0], x + 16, b.y + 42, 13, colors::muted);
+            r.text(lines[1], x + 16, b.y + 63, 13, colors::muted);
+            break;
+        }
     }
     void render() {
         buttons.clear();
@@ -1774,7 +1835,7 @@ class App {
         else if (panorama)
             conditions = environment::resolve(records.environment, 0x7abc9013U);
         renderer->setEnvironment(conditions);
-        renderer->setJumperAppearance(records.jumper);
+        renderer->setJumperAppearance(screen == Screen::Replay ? lastReplay.jumper : records.jumper);
         renderer->setHillRecord(records.best[size_t(hi)]);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
         renderer->overlay();
@@ -1824,8 +1885,10 @@ class App {
             break;
         }
         if (!message.empty()) {
-            renderer->rect(38, 852, 1360, 40, colors::panel, 5);
-            renderer->text(message.substr(0, 160), 50, 864, 12, colors::white);
+            const float messageY = screen == Screen::Replay ? ReplayLayout::controlsTop - 52 : 852;
+            renderer->rect(38, messageY, screen == Screen::Replay ? ReplayLayout::right - ReplayLayout::left : 1360,
+                           40, colors::panel, 5);
+            renderer->text(message.substr(0, 160), 50, messageY + 12, 12, colors::white);
         }
         if (editingName != -1) {
             renderer->rect(330, 290, 780, 215, colors::panel, 12);
@@ -1918,7 +1981,7 @@ class App {
         if (screen != Screen::SkiJumper)
             throw std::runtime_error("Home Ski Jumper button failed");
         const Simulation appearanceBaseline = sim;
-        for (int choice : {1, 2, 0, 2}) {
+        for (int choice : {1, 2, 3, 0, 3}) {
             clickButton(Action::SelectJumper, choice);
             if (int(records.jumper) != choice ||
                 int(loadRecords(dataDir + "/records-dsj2.dat").jumper) != choice ||
@@ -2071,6 +2134,11 @@ class App {
             loadRecords(dataDir + "/records-dsj2.dat").best != records.best)
             throw std::runtime_error("Standing practice jump did not persist its all-time human record");
         const auto replayRecords = records.best;
+        const auto selectedAppearance = records.jumper;
+        if (lastReplay.jumper != selectedAppearance)
+            throw std::runtime_error("Completed jump lost its recorded character");
+        // A later selection must not change the archived character or its re-export.
+        records.jumper = JumperAppearance::Pro;
         beginReplay();
         seekReplay(replayDuration() * .6);
         updateAudio(0);
@@ -2082,11 +2150,12 @@ class App {
                 throw std::runtime_error("Native replay export failed: " + message);
             const auto exportedPath = message.substr(prefix.size());
             Replay exported;
-            if (exportedPath == previousExport || !loadReplay(exportedPath, exported) ||
+            if (std::filesystem::path(exportedPath).extension() != ".pvr" ||
+                exportedPath == previousExport || !loadReplay(exportedPath, exported) ||
                 !exported.hasEnvironment || !(exported.environment == replayEnvironment) ||
                 exported.hill != lastReplay.hill || exported.frames.size() != lastReplay.frames.size() ||
-                exported.originalRpl != lastReplay.originalRpl)
-                throw std::runtime_error("Native replay export lost atmosphere, input recording or uniqueness");
+                exported.originalRpl != lastReplay.originalRpl || exported.jumper != selectedAppearance)
+                throw std::runtime_error("Native replay export lost atmosphere, character, input recording or uniqueness");
             for (size_t i = 0; i < exported.frames.size(); ++i)
                 if (exported.frames[i].windSpeed != lastReplay.frames[i].windSpeed ||
                     exported.frames[i].windAngle != lastReplay.frames[i].windAngle)
@@ -2098,8 +2167,9 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/replay.ppm");
         renderer->finish();
-        if (records.best != replayRecords)
-            throw std::runtime_error("Replay changed hill records");
+        if (records.best != replayRecords || records.jumper != JumperAppearance::Pro)
+            throw std::runtime_error("Replay changed hill records or the preferred character");
+        records.jumper = selectedAppearance;
         action(Action::Back);
         auto dropReplay = [&](const std::string &path) {
             SDL_Event drop{};
@@ -2293,9 +2363,9 @@ class App {
                 if (!lastReplay.hasEnvironment || !(lastReplay.environment == fixedEnvironment))
                     throw std::runtime_error("Cup replay lost its fixed event atmosphere");
                 Replay restored;
-                if (storageError || !loadReplay(dataDir + "/latest-dsj2.sjr", restored) ||
+                if (storageError || !loadReplay(dataDir + "/latest-dsj2.pvr", restored) ||
                     restored.hill != selectedHill || restored.frames.size() != sim.frames.size() ||
-                    restored.result.crashed != sim.result.crashed) {
+                    restored.result.crashed != sim.result.crashed || restored.jumper != records.jumper) {
                     std::cerr << "Cup replay persistence failed at event " << event + 1 << '\n';
                     return 1;
                 }
@@ -2448,8 +2518,8 @@ class App {
             if (!captureDir.empty())
                 renderer->capture(captureDir + "/original-replay.ppm");
             renderer->finish();
-            if (!saveReplay(dataDir + "/imported.sjr", lastReplay) ||
-                !openReplayFile(dataDir + "/imported.sjr") || !canExportOriginal)
+            if (!saveReplay(dataDir + "/imported.pvr", lastReplay) ||
+                !openReplayFile(dataDir + "/imported.pvr") || !canExportOriginal)
                 throw std::runtime_error("Original RPL attachment persistence failed");
             action(Action::ReplayExport);
         } else {

@@ -9,6 +9,7 @@
 #include "visual_start_signal.h"
 #include "visual_contact_shadow.h"
 #include "visual_mountains.h"
+#include "visual_cartoon_hair.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -23,6 +24,49 @@ namespace audit {
 void require(bool ok, const char *message) {
     if (!ok)
         throw std::runtime_error(message);
+}
+void cartoonHairMotion() {
+    using namespace sjp;
+    OriginalPose pose;
+    pose.reset(0);
+    pose.selectMode(7, 0);
+    for (int i = 0; i < 280; ++i)
+        pose.advance(ORIGINAL_TICK);
+    std::array<float, 22> values{};
+    std::copy(pose.angles.begin(), pose.angles.end(), values.begin());
+    std::copy(pose.offsets.begin(), pose.offsets.end(), values.begin() + 18);
+    const auto skeleton = originalSkeleton(values, 0);
+    Frame frame;
+    const auto resting = visual::cartoonHairPath(skeleton, frame);
+    double length = 0;
+    for (size_t i = 1; i < resting.size(); ++i)
+        length += (resting[i] - resting[i - 1]).length();
+    require(length > 3 && length < 7, "Cartoon hair no longer reaches the skis and continues along the ground");
+    frame.phase = int(Phase::Flight);
+    frame.vx = 25;
+    frame.vy = -6;
+    frame.windSpeed = 3;
+    frame.elapsed = 2;
+    const auto flying = visual::cartoonHairPath(skeleton, frame);
+    require((flying.front() - resting.front()).length() < 1e-12,
+            "Hair movement detaches its roots from the unchanged head joint");
+    require(flying.back().x < flying.front().x - 2 && flying.back().y > flying.front().y,
+            "Fast downhill flight does not stream the hair backwards/upwards");
+    frame.elapsed += .23f;
+    const auto fluttered = visual::cartoonHairPath(skeleton, frame);
+    require((fluttered.back() - flying.back()).length() > .02,
+            "Long hair is rigid instead of fluttering with recorded time");
+    frame.elapsed = 2;
+    frame.windSpeed = 8;
+    const auto gust = visual::cartoonHairPath(skeleton, frame);
+    require((gust.back() - flying.back()).length() > .01, "Recorded wind does not affect the hair's flutter");
+    frame.windSpeed = 3;
+    const auto sought = visual::cartoonHairPath(skeleton, frame);
+    for (size_t i = 0; i < sought.size(); ++i) {
+        require(std::isfinite(sought[i].x) && std::isfinite(sought[i].y) && std::isfinite(sought[i].z),
+                "Hair animation produces non-finite geometry");
+        require((sought[i] - flying[i]).length() == 0, "Pause/replay seeking changes identical recorded hair poses");
+    }
 }
 void contactShadowDecals() {
     using namespace sjp;
@@ -1438,12 +1482,13 @@ int main() {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             sjp::Simulation sim(2, 0);
             const auto original = sim.frame();
+            audit::cartoonHairMotion();
             for (auto appearance : sjp::JUMPER_APPEARANCES) {
                 r.setJumperAppearance(appearance);
                 r.begin(sim.hill(), original, 0, 0, false, true, &original);
                 r.overlay();
                 for (size_t i = 0; i < sjp::JUMPER_APPEARANCES.size(); ++i)
-                    r.jumperPreview(sjp::JUMPER_APPEARANCES[i], 275 + i * 444, 674, 170);
+                    r.jumperPreview(sjp::JUMPER_APPEARANCES[i], 196 + i * 334, 638, 145);
                 r.finish();
                 audit::balanced();
                 audit::require(audit::depth, "Jumper previews leaked depth-write state");

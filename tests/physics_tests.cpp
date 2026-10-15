@@ -253,7 +253,7 @@ int main() {
         auto loaded = loadRecords(recordPath);
         near(loaded.best[2], records.best[2], .001, "Records persist");
         require(loaded.camera == 1 && !loaded.sound, "Preferences persist");
-        auto replayPath = (directory / "test.sjr").string();
+        auto replayPath = (directory / "test.pvr").string();
         Replay replay = tele.replay(), restored;
         require(saveReplay(replayPath, replay) && loadReplay(replayPath, restored), "Replay round trip");
         require(restored.frames.size() == replay.frames.size(), "Replay retains every frame");

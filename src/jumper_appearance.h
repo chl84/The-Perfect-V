@@ -2,15 +2,17 @@
 #include <array>
 
 namespace sjp {
-// A rendering preference only; never passed to simulation or scoring.
-enum class JumperAppearance : int { Pro, President, Actor };
-inline constexpr std::array<JumperAppearance, 3> JUMPER_APPEARANCES{
-    JumperAppearance::Pro, JumperAppearance::President, JumperAppearance::Actor};
+// Rendering preferences and replay metadata; never used by simulation or scoring.
+enum class JumperAppearance : int { Pro, President, Actor, Cartoon };
+inline constexpr std::array<JumperAppearance, 4> JUMPER_APPEARANCES{
+    JumperAppearance::Pro, JumperAppearance::President, JumperAppearance::Actor, JumperAppearance::Cartoon};
 inline bool validJumperAppearance(JumperAppearance appearance) {
     return appearance == JumperAppearance::Pro || appearance == JumperAppearance::President ||
-           appearance == JumperAppearance::Actor;
+           appearance == JumperAppearance::Actor || appearance == JumperAppearance::Cartoon;
 }
 inline const char *jumperAppearanceName(JumperAppearance appearance) {
+    if (appearance == JumperAppearance::Cartoon)
+        return "Cartoon";
     if (appearance == JumperAppearance::Actor)
         return "Actor";
     return appearance == JumperAppearance::President ? "President" : "Pro";

@@ -120,7 +120,7 @@ stoppet: kommandoutføringen er asynkron.
 
 | Tid | Hendelse |
 | --- | --- |
-| 00:35:10 | `ring gfx_0.0.0 timeout`, knyttet til `ski-jump-pro`, PID 176420, kommandotråd 176429. |
+| 00:35:10 | `ring gfx_0.0.0 timeout`, knyttet til spillets daværende prosessnavn, PID 176420, kommandotråd 176429. |
 | 00:35:10 | Tilbakestilling av køen mislykkes; full GPU-tilbakestilling starter. |
 | 00:35:11 | Gjenoppretting feiler med `ring kiq_0.2.1.0 test failed (-110)`, `KCQ enable failed`, `resume of IP block <gfx_v10_0> failed -110` og `GPU Recovery Failed: -110`. |
 | 00:35:11 | Hyprlands egen grafikkø får også tidsavbrudd. |
@@ -281,7 +281,7 @@ bestått. CPU-hoppfeilen er ikke rettet i denne undersøkelsen.
 
 ## Lagringer og hva som kan gjenopptas
 
-`~/.local/share/SkiJumpPro/SkiJumpPro/cup.sjc` er gyldig og ligger på renn
+`cup.sjc` i spillets daværende lagringsmappe er gyldig og ligger på renn
 20 av 32, andre omgang, før menneskehoppet som var i gang. World Cup kan
 gjenopptas fra dette kontrollpunktet; det ufullførte hoppet må tas på nytt.
 Siste fullførte replay og rekorder finnes. Ingen endring eller opprydding er

@@ -245,6 +245,11 @@ void Renderer::jumperPreview(JumperAppearance appearance, float x, float y, floa
     gfx::scalef(scale * uiScale, -scale * uiScale, scale * uiScale);
     constexpr float c = .57357644f, s = -.81915204f;
     const float rotation[]{c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1};
+    // Look down at the deck as well as across the athlete. This transform
+    // belongs only to the selection preview, never the gameplay skeleton.
+    constexpr float tiltC = .90630779f, tiltS = .42261826f;
+    const float tilt[]{1, 0, 0, 0, 0, tiltC, tiltS, 0, 0, -tiltS, tiltC, 0, 0, 0, 0, 1};
+    gfx::multMatrixf(tilt);
     gfx::multMatrixf(rotation);
     jumperPreviewGeometry(appearance);
     gfx::popMatrix();

@@ -12,6 +12,8 @@ struct Records {
     environment::Selection environment;
     JumperAppearance jumper = JumperAppearance::Pro;
 };
+// Import missing regular files once, retaining both originals and existing destinations.
+bool importLegacySaves(const std::string &source, const std::string &destination, std::string *error = nullptr);
 bool updateHillRecord(Records &, int hill, const Result &, bool human);
 bool saveRecords(const std::string &, const Records &);
 Records loadRecords(const std::string &);

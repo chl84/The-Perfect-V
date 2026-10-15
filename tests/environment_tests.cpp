@@ -186,18 +186,21 @@ int main() {
         require(sim.phase == Phase::Finished, "Replay fixture jump did not finish");
         auto replay = sim.replay();
         replay.hasEnvironment = true;
+        replay.jumper = JumperAppearance::Cartoon;
         replay.environment = {TimeOfDay::Evening, Weather::Snowfall, 0xffffffffU};
-        const auto replayPath = directory / "replay.sjr";
+        const auto replayPath = directory / "replay.pvr";
         Replay loadedReplay;
         require(saveReplay(replayPath.string(), replay) && loadReplay(replayPath.string(), loadedReplay) &&
                     loadedReplay.hasEnvironment && loadedReplay.environment == replay.environment &&
-                    loadedReplay.frames.size() == replay.frames.size(),
-                "Replay does not retain the jump's actual resolved conditions");
+                    loadedReplay.frames.size() == replay.frames.size() && loadedReplay.jumper == replay.jumper,
+                "Replay does not retain the jump's actual resolved conditions and character");
         auto legacyReplay = contents(replayPath);
-        legacyReplay.erase(legacyReplay.find("ENV "));
+        const auto environmentTag = legacyReplay.find("ENV ");
+        legacyReplay.erase(environmentTag, legacyReplay.find('\n', environmentTag) - environmentTag + 1);
         write(replayPath, legacyReplay);
-        require(loadReplay(replayPath.string(), loadedReplay) && !loadedReplay.hasEnvironment,
-                "Existing native replays are no longer readable");
+        require(loadReplay(replayPath.string(), loadedReplay) && !loadedReplay.hasEnvironment &&
+                    loadedReplay.jumper == JumperAppearance::Cartoon,
+                "Character metadata without atmosphere must remain readable");
         write(replayPath, legacyReplay + "ENV 1 4 0 5\n");
         require(!loadReplay(replayPath.string(), loadedReplay),
                 "Replay accepts unresolved random conditions");

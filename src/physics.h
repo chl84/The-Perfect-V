@@ -1,5 +1,6 @@
 #pragma once
 #include "environment.h"
+#include "jumper_appearance.h"
 #include "original_ai.h"
 #include "original_controls.h"
 #include "original_outrun.h"
@@ -111,6 +112,7 @@ struct Replay {
     std::vector<uint8_t> originalRpl; // Optional original input recording for lossless later export.
     bool hasEnvironment = false;
     environment::Conditions environment;
+    JumperAppearance jumper = JumperAppearance::Pro; // Cosmetic replay metadata only.
 };
 double scoreStyle(std::array<double, 5> judges);
 double distancePoints(const Hill &, double distance);

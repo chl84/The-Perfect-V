@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <stdexcept>
 
 namespace sjp {
 namespace {
@@ -32,6 +33,48 @@ bool replaceFile(const std::string &path, std::ofstream &out) {
     return !ec;
 }
 } // namespace
+bool importLegacySaves(const std::string &source, const std::string &destination, std::string *error) {
+    namespace fs = std::filesystem;
+    try {
+        const fs::path oldDirectory(source), newDirectory(destination);
+        const auto marker = newDirectory / ".legacy-saves-imported";
+        if (!fs::exists(marker)) {
+            if (fs::create_directories(newDirectory))
+                fs::permissions(newDirectory, fs::perms::owner_all);
+            if (fs::exists(oldDirectory)) {
+                for (const auto &entry : fs::recursive_directory_iterator(oldDirectory)) {
+                    if (!fs::is_regular_file(entry.symlink_status()) || entry.path().extension() == ".tmp" ||
+                        entry.path().filename() == marker.filename() ||
+                        entry.path().filename() == ".skijumppro-imported")
+                        continue;
+                    const auto target = newDirectory / entry.path().lexically_relative(oldDirectory);
+                    if (fs::exists(target))
+                        continue;
+                    fs::create_directories(target.parent_path());
+                    // Finish each copy before making it visible. An interrupted import
+                    // can retry without treating a partial copy as an existing save.
+                    const auto temporary = fs::path(target.string() + ".importing.tmp");
+                    fs::copy_file(entry.path(), temporary, fs::copy_options::overwrite_existing);
+                    if (fs::exists(target))
+                        fs::remove(temporary);
+                    else
+                        fs::rename(temporary, target);
+                }
+            }
+            std::ofstream out(marker.string() + ".tmp");
+            out << "Imported missing files from the previous save directory; originals retained.\n";
+            if (!replaceFile(marker.string(), out))
+                throw std::runtime_error("Could not mark the save-directory import as complete.");
+        }
+        if (error)
+            error->clear();
+        return true;
+    } catch (const std::exception &e) {
+        if (error)
+            *error = e.what();
+        return false;
+    }
+}
 bool updateHillRecord(Records &records, int hill, const Result &result, bool human) {
     if (!human || hill < 0 || size_t(hill) >= records.best.size() || result.crashed || result.disqualified ||
         result.beforeTakeoff || !std::isfinite(result.distance) || result.distance <= 0 ||
@@ -119,7 +162,7 @@ Records loadRecords(const std::string &path) {
     return r;
 }
 bool saveReplay(const std::string &path, const Replay &r) {
-    if (r.hasEnvironment && !environment::valid(r.environment))
+    if (!validJumperAppearance(r.jumper) || (r.hasEnvironment && !environment::valid(r.environment)))
         return false;
     if ((r.originalRpl.size() != 0 && r.originalRpl.size() != 1222) || r.frames.size() < 2 ||
         r.frames.size() > 20000 || r.hill < 0 || size_t(r.hill) >= hills().size() ||
@@ -150,6 +193,7 @@ bool saveReplay(const std::string &path, const Replay &r) {
     if (r.hasEnvironment)
         out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << ' '
             << r.environment.seed << '\n';
+    out << "JUMPER 1 " << int(r.jumper) << '\n';
     return replaceFile(path, out);
 }
 bool loadReplay(const std::string &path, Replay &output) {
@@ -213,16 +257,32 @@ bool loadReplay(const std::string &path, Replay &output) {
             byte = uint8_t(value);
         }
     }
-    std::string tag;
-    if (in >> tag) {
-        int version, time, weather;
-        if (tag != "ENV" || !(in >> version >> time >> weather >> r.environment.seed) || version != 1)
+    bool hasJumper = false;
+    while (true) {
+        in >> std::ws;
+        if (in.eof())
+            break;
+        std::string tag;
+        int version;
+        if (!(in >> tag >> version) || version != 1)
             return false;
-        r.environment.time = environment::TimeOfDay(time);
-        r.environment.weather = environment::Weather(weather);
-        if (!environment::valid(r.environment))
+        if (tag == "ENV") {
+            int time, weather;
+            if (r.hasEnvironment || !(in >> time >> weather >> r.environment.seed))
+                return false;
+            r.environment.time = environment::TimeOfDay(time);
+            r.environment.weather = environment::Weather(weather);
+            if (!environment::valid(r.environment))
+                return false;
+            r.hasEnvironment = true;
+        } else if (tag == "JUMPER") {
+            int value;
+            if (hasJumper || !(in >> value) || !validJumperAppearance(JumperAppearance(value)))
+                return false;
+            r.jumper = JumperAppearance(value);
+            hasJumper = true;
+        } else
             return false;
-        r.hasEnvironment = true;
     }
     output = std::move(r);
     return true;

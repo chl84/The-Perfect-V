@@ -3,6 +3,7 @@
 /cmake-build-*/
 /dist/
 /reference/
+/reference-game/
 /references/
 /captures/
 /saves/
@@ -35,8 +36,8 @@ __pycache__/
 *.py[cod]
 *.log
 *.tmp
-*.sjr
-*.SJR
+*.pvr
+*.PVR
 *.rpl
 *.RPL
 *.sjc

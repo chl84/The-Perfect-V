@@ -1,5 +1,6 @@
 #include "original_skeleton.h"
 #include "renderer.h"
+#include "visual_cartoon_hair.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -8,7 +9,7 @@
 namespace sjp {
 namespace {
 // Sample the existing rendered triangles, not a new collision surface. The
-// small height cache covers the unchanged athlete mesh's local x extent.
+// height cache covers the selected cosmetic mesh's local x extent.
 struct FallContact {
     const Hill &hill;
     Vec3 origin;
@@ -21,7 +22,7 @@ struct FallContact {
     sjp::gfx::Enum mode = sjp::gfx::QUADS;
     size_t count = 0;
     std::array<Vec3, 4> face{};
-    FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton)
+    FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton, double padding = .6)
         : hill(h), origin{f.x, f.y, 0}, start(std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale())),
           step(3 * h.scale()), rampStep(2 * h.scale()) {
         double low = skeleton.points[0].x, high = low;
@@ -29,14 +30,14 @@ struct FallContact {
             low = std::min(low, p.x);
             high = std::max(high, p.x);
         }
-        firstX = start + std::floor((f.x + low - .6 - start) / step) * step;
-        const size_t count = size_t(std::ceil((f.x + high + .6 - firstX) / step)) + 2;
+        firstX = start + std::floor((f.x + low - padding - start) / step) * step;
+        const size_t count = size_t(std::ceil((f.x + high + padding - firstX) / step)) + 2;
         heights.reserve(count);
         for (size_t i = 0; i < count; ++i)
             heights.push_back(h.ground(firstX + i * step));
-        if (f.x + low - .6 <= 0 && f.x + high + .6 >= h.inrunStart()) {
-            rampFirstX = h.inrunStart() + std::floor((f.x + low - .6 - h.inrunStart()) / rampStep) * rampStep;
-            const size_t rampCount = size_t(std::ceil((f.x + high + .6 - rampFirstX) / rampStep)) + 2;
+        if (f.x + low - padding <= 0 && f.x + high + padding >= h.inrunStart()) {
+            rampFirstX = h.inrunStart() + std::floor((f.x + low - padding - h.inrunStart()) / rampStep) * rampStep;
+            const size_t rampCount = size_t(std::ceil((f.x + high + padding - rampFirstX) / rampStep)) + 2;
             rampHeights.reserve(rampCount);
             for (size_t i = 0; i < rampCount; ++i)
                 rampHeights.push_back(h.inrun(std::min(0.0, rampFirstX + i * rampStep)));
@@ -317,7 +318,7 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
 }
 void skiBoot(Vec3 ankle, Vec3 knee, const Basis &basis, Color shell, Color sole, Color strap, Color buckle) {
     // A light shell and red closures separate the boot from both trouser skins
-    // and the turquoise binding. The sole sits on the existing binding plate.
+    // and the colored binding. The sole sits on the existing binding plate.
     material(Finish::Rubber);
     orientedBox(ankle + basis.forward * .045 + basis.up * .049, basis, {.36, .030, .155}, sole);
     material(Finish::Shell);
@@ -334,7 +335,11 @@ void skiBoot(Vec3 ankle, Vec3 knee, const Basis &basis, Color shell, Color sole,
     material(Finish::Metal);
     orientedBox(upperStrap + cuff.forward * .127, cuff, {.014, .023, .045}, buckle);
 }
-void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Color accent) {
+struct SkiLivery {
+    Color base, edge, accent, detail;
+};
+void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, const SkiLivery &paint,
+         JumperAppearance appearance) {
     const Basis basis = skiBasis(rear, front);
     if (contactPass) {
         contactPass->skiSurface = true;
@@ -350,35 +355,70 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, Color deck, Color edge, Co
     material(Finish::Ski);
     emitBegin(sjp::gfx::QUADS);
     for (size_t section = 0; section < 2; ++section) {
-        // Three adjacent top panels share their edges; stripes do not sit on
-        // top of a second nearly coplanar ski surface.
-        constexpr std::array<double, 4> stripes{-1, -.23, .23, 1};
-        for (size_t stripe = 0; stripe < 3; ++stripe)
-            quad(corner(section, stripes[stripe], halfThickness),
-                 corner(section, stripes[stripe + 1], halfThickness),
-                 corner(section + 1, stripes[stripe + 1], halfThickness),
-                 corner(section + 1, stripes[stripe], halfThickness),
-                 stripe == 1    ? accent
-                 : section == 1 ? accent
-                                : deck);
-        quad(corner(section, -1, -halfThickness), corner(section + 1, -1, -halfThickness),
-             corner(section + 1, 1, -halfThickness), corner(section, 1, -halfThickness), edge);
+        // Adjacent panels form the graphics on both faces, with no decal
+        // layers or z-fighting. Every point stays on the original ski surface.
+        constexpr std::array<double, 11> rows{0, .12, .22, .32, .44, .56, .68, .78, .88, .95, 1};
+        const size_t rowCount = section == 0 ? rows.size() : 2;
+        auto panelPoint = [&](size_t row, size_t stripe, double height) {
+            const double t = section == 0 ? rows[row] : double(row);
+            const bool end = row == 0 || row + 1 == rowCount;
+            const double middle = appearance == JumperAppearance::Cartoon && !end && row % 2 ? .58 : .18;
+            const std::array<double, 6> across{-1, -.78, -middle, middle, .78, 1};
+            const double bend = !end && appearance != JumperAppearance::Cartoon
+                                    ? .035 * (1 - std::abs(across[stripe])) : 0;
+            const double along = t + bend;
+            return corner(section, across[stripe], height) * (1 - along) +
+                   corner(section + 1, across[stripe], height) * along;
+        };
+        for (size_t row = 0; row + 1 < rowCount; ++row)
+            for (size_t stripe = 0; stripe < 5; ++stripe) {
+                Color ink = paint.base;
+                if (stripe == 0 || stripe == 4)
+                    ink = paint.edge;
+                else if (stripe == 2)
+                    ink = appearance == JumperAppearance::Pro || appearance == JumperAppearance::Actor
+                              ? paint.accent : paint.detail;
+                else if (section == 0) {
+                    switch (appearance) {
+                    case JumperAppearance::Pro:
+                        if (row == 1 || row == 2 || row == 7 || row == 8)
+                            ink = paint.accent;
+                        break;
+                    case JumperAppearance::President:
+                        if (row == 1 || row == 7)
+                            ink = paint.accent;
+                        break;
+                    case JumperAppearance::Actor:
+                        if (row % 3 == 1)
+                            ink = paint.accent;
+                        break;
+                    case JumperAppearance::Cartoon:
+                        if (row % 2 == 0)
+                            ink = paint.accent;
+                        break;
+                    }
+                }
+                quad(panelPoint(row, stripe, halfThickness), panelPoint(row, stripe + 1, halfThickness),
+                     panelPoint(row + 1, stripe + 1, halfThickness), panelPoint(row + 1, stripe, halfThickness), ink);
+                quad(panelPoint(row, stripe, -halfThickness), panelPoint(row + 1, stripe, -halfThickness),
+                     panelPoint(row + 1, stripe + 1, -halfThickness), panelPoint(row, stripe + 1, -halfThickness), ink);
+            }
         quad(corner(section, -1, -halfThickness), corner(section, -1, halfThickness),
-             corner(section + 1, -1, halfThickness), corner(section + 1, -1, -halfThickness), edge);
+             corner(section + 1, -1, halfThickness), corner(section + 1, -1, -halfThickness), paint.edge);
         quad(corner(section + 1, 1, -halfThickness), corner(section + 1, 1, halfThickness),
-             corner(section, 1, halfThickness), corner(section, 1, -halfThickness), edge);
+             corner(section, 1, halfThickness), corner(section, 1, -halfThickness), paint.edge);
     }
     quad(corner(0, -1, -halfThickness), corner(0, 1, -halfThickness), corner(0, 1, halfThickness),
-         corner(0, -1, halfThickness), edge);
+         corner(0, -1, halfThickness), paint.edge);
     quad(corner(2, 1, -halfThickness), corner(2, -1, -halfThickness), corner(2, -1, halfThickness),
-         corner(2, 1, halfThickness), edge);
+         corner(2, 1, halfThickness), paint.edge);
     emitEnd();
     if (contactPass)
         contactPass->skiSurface = false;
     material(Finish::Metal);
-    orientedBox(ankle + basis.up * .025, basis, {.37, .045, .14}, edge);
-    orientedBox(ankle - basis.forward * .13 + basis.up * .067, basis, {.08, .09, .13}, accent);
-    orientedBox(ankle + basis.forward * .13 + basis.up * .046, basis, {.085, .055, .14}, accent);
+    orientedBox(ankle + basis.up * .025, basis, {.37, .045, .14}, paint.edge);
+    orientedBox(ankle - basis.forward * .13 + basis.up * .067, basis, {.08, .09, .13}, paint.accent);
+    orientedBox(ankle + basis.forward * .13 + basis.up * .046, basis, {.085, .055, .14}, paint.accent);
 }
 void helmet(Vec3 head, const Basis &basis, Color shell, Color trim, Color visor, Color skin) {
     material(Finish::Skin);
@@ -946,8 +986,210 @@ void actorTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color skin, Color s
     emitEnd();
 }
 
+void cartoonHead(Vec3 head, const Basis &basis, Color skin, Color gold, Color light, Color shadow, Color white) {
+    const auto at = [&](double forward, double up, double side = 0) {
+        return head + basis.forward * forward + basis.up * up + basis.side * side;
+    };
+    const auto face = [&](double up, double side, double offset = .002) {
+        const double shape = 1 - std::pow((up + .015) / .173, 2) - std::pow(side / .141, 2);
+        return at(.014 + .139 * std::sqrt(std::max(0.0, shape)) + offset, up, side);
+    };
+    material(Finish::Skin);
+    ellipsoid(at(.014, -.015), basis, {.139, .173, .141}, skin, 16, 10);
+    for (double side : {-1.0, 1.0}) {
+        ellipsoid(at(.008, -.026, side * .139), basis, {.021, .036, .018}, skin, 8, 5);
+        ellipsoid(face(.026, side * .060, .002), basis, {.010, .030, .038}, white, 12, 7);
+        ellipsoid(face(.026, side * .060, .012), basis, {.006, .022, .021},
+                  {.055f, .57f, .40f, skin.a}, 12, 7);
+        ellipsoid(face(.026, side * .060, .018), basis, {.002, .012, .011},
+                  {.025f, .10f, .075f, skin.a}, 10, 5);
+        ellipsoid(face(.034, side * .060 - .006, .020), basis, {.0015, .006, .0045}, white, 8, 4);
+        const Color brow{shadow.r * .67f, shadow.g * .67f, shadow.b * .67f, skin.a};
+        tailoredSegment(face(.073, side * .027), face(.082, side * .057), .0028, .0028, .0030, .0030, brow);
+        tailoredSegment(face(.082, side * .057), face(.066, side * .090), .0030, .0030, .0018, .0018, brow);
+    }
+    ellipsoid(at(.160, -.026), basis, {.017, .025, .019}, skin, 10, 6);
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 10; ++i) {
+        const double a = -1 + i * .2, b = a + .2;
+        quad(face(-.093 + .012 * a * a, a * .048), face(-.080 + .005 * a * a, a * .048),
+             face(-.080 + .005 * b * b, b * .048), face(-.093 + .012 * b * b, b * .048),
+             {.72f, .25f, .39f, skin.a});
+    }
+    emitEnd();
+    material(Finish::Fabric);
+    for (int ring = 0; ring < 6; ++ring) {
+        emitBegin(gfx::QUAD_STRIP);
+        for (int slice = 0; slice <= 20; ++slice) {
+            const double angle = slice * PI / 10;
+            const double bottom = -.10 + .90 * std::max(0.0, std::cos(angle)) - .20 * std::max(0.0, -std::cos(angle));
+            for (int edge : {ring, ring + 1}) {
+                const double latitude = bottom + (PI / 2 - bottom) * edge / 6;
+                const double c = std::cos(latitude), s = std::sin(latitude);
+                const Vec3 normal = basis.forward * (c * std::cos(angle)) + basis.up * s + basis.side * (c * std::sin(angle));
+                emitNormal(normal.x, normal.y, normal.z);
+                color(slice % 5 == 0 ? light : slice % 5 == 4 ? shadow : gold);
+                vertex(at(.156 * c * std::cos(angle), .006 + .183 * s, .155 * c * std::sin(angle)));
+            }
+        }
+        emitEnd();
+    }
+    for (double side : {-1.0, 1.0})
+        ellipsoid(at(.006, -.030, side * .138), basis, {.047, .151, .040}, gold, 10, 7);
+    const auto fringe = [&](double t, double across) {
+        const double side = -.045 + .180 * t;
+        const double up = .165 - .080 * t + .025 * std::sin(t * PI) + across * .014;
+        const double shape = 1 - std::pow((up - .006) / .183, 2) - std::pow(side / .155, 2);
+        return at(.156 * std::sqrt(std::max(0.0, shape)) + .006, up, side);
+    };
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 10; ++i) {
+        const double a = i / 10.0, b = (i + 1) / 10.0;
+        for (int stripe = 0; stripe < 3; ++stripe) {
+            const double low = -1 + stripe * 2.0 / 3, high = low + 2.0 / 3;
+            quad(fringe(a, low), fringe(a, high), fringe(b, high), fringe(b, low), stripe == 1 ? light : gold);
+        }
+    }
+    emitEnd();
+}
+
+void cartoonLongHair(const OriginalSkeleton &skeleton, const Frame &motion, Color gold, Color light, Color shadow) {
+    const auto path = visual::cartoonHairPath(skeleton, motion);
+    constexpr int slices = 12;
+    std::array<Basis, visual::cartoonHairSamples> axes{};
+    for (size_t r = 0; r < path.size(); ++r) {
+        const Vec3 tangent = (path[std::min(r + 1, path.size() - 1)] - path[r ? r - 1 : 0]).normalized();
+        const Vec3 previous = r ? axes[r - 1].side : Vec3{0, 0, 1};
+        Vec3 side = previous - tangent * dot(previous, tangent);
+        Vec3 horizontal = cross(tangent, {0, 1, 0});
+        const double blend = clamp((horizontal.length() - .15) / .65, 0.0, 1.0);
+        if (side.length() < 1e-6) side = horizontal;
+        side = side.normalized();
+        horizontal = horizontal.normalized();
+        if (dot(horizontal, side) < 0) horizontal = horizontal * -1;
+        side = (side * (1 - blend) + horizontal * blend).normalized();
+        axes[r] = {cross(tangent, side).normalized(), tangent, side};
+    }
+    const auto point = [&](size_t r, int slice) {
+        const double t = double(r) / (path.size() - 1), angle = slice * 2 * PI / slices;
+        const double width = (.160 + .09 * std::sin(t * PI)) * (1 - .60 * t * t * t);
+        const double depth = .060 * (1 - .55 * t) + .025 * std::sin(t * PI);
+        return path[r] + axes[r].side * (width * std::cos(angle)) + axes[r].forward * (depth * std::sin(angle));
+    };
+    material(Finish::Fabric);
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < path.size(); ++r)
+        for (int i = 0; i < slices; ++i) {
+            color(i % 4 == 0 ? light : i % 4 == 3 ? shadow : gold);
+            for (const auto index : {std::pair{r, i}, {r, i + 1}, {r + 1, i + 1}, {r + 1, i}}) {
+                const double t = double(index.first) / (path.size() - 1), angle = index.second * 2 * PI / slices;
+                const double width = (.160 + .09 * std::sin(t * PI)) * (1 - .60 * t * t * t);
+                const double depth = .060 * (1 - .55 * t) + .025 * std::sin(t * PI);
+                const Vec3 normal = (axes[index.first].side * (std::cos(angle) / width) +
+                                     axes[index.first].forward * (std::sin(angle) / depth)).normalized();
+                emitNormal(normal.x, normal.y, normal.z);
+                vertex(point(index.first, index.second));
+            }
+        }
+    emitEnd();
+    color(gold);
+    emitBegin(gfx::TRIANGLE_FAN);
+    const auto normal = axes.back().up;
+    emitNormal(normal.x, normal.y, normal.z);
+    vertex(path.back());
+    for (int i = 0; i <= slices; ++i)
+        vertex(point(path.size() - 1, i));
+    emitEnd();
+}
+
+void cartoonDress(const OriginalSkeleton &skeleton, Color purple, Color pink, Color trim, Color pattern,
+                   const Frame &motion) {
+    using J = OriginalJoint;
+    const Vec3 hip = skeleton[J::HipCenter], shoulder = skeleton[J::ShoulderCenter];
+    const Basis torso = segmentBasis(shoulder - hip);
+    tailoredSegment(hip, shoulder, .105, .145, .130, .205, purple);
+    const auto bodice = [&](double t, double side, double offset = 0) {
+        constexpr std::array<double, 6> heights{0, .10, .27, .71, .89, 1};
+        constexpr std::array<double, 6> fullness{.76, 1, 1, 1, 1, .76};
+        const auto frontAt = [&](size_t r) {
+            const double width = (.145 + .060 * heights[r]) * fullness[r];
+            const double depth = (.105 + .025 * heights[r]) * fullness[r];
+            const double angle = std::asin(clamp(std::abs(side) / width, 0.0, 1.0));
+            const double a = std::floor(angle / (PI / 4)) * PI / 4, b = std::min(PI / 2, a + PI / 4);
+            const double blend = b > a ? (std::abs(side) / width - std::sin(a)) / (std::sin(b) - std::sin(a)) : 0;
+            return depth * (std::cos(a) * (1 - blend) + std::cos(b) * blend);
+        };
+        size_t r = 1;
+        while (r + 1 < heights.size() && heights[r] < t) ++r;
+        const double blend = (t - heights[r - 1]) / (heights[r] - heights[r - 1]);
+        return hip + (shoulder - hip) * t + torso.side * side +
+               torso.forward * (frontAt(r - 1) * (1 - blend) + frontAt(r) * blend + .003 + offset);
+    };
+    emitBegin(gfx::QUADS);
+    constexpr std::array<double, 6> panelRows{.04, .10, .27, .71, .89, .94};
+    for (size_t r = 0; r + 1 < panelRows.size(); ++r) {
+        const double a = panelRows[r], b = panelRows[r + 1];
+        quad(bodice(a, -.040), bodice(b, -.040), bodice(b, .040), bodice(a, .040), shade(purple, 1.16));
+    }
+    for (int i = 0; i < 7; ++i) {
+        const double a = .09 + i * .11, b = a + .095;
+        quad(bodice(a, -.035, .003), bodice(a + .013, -.035, .003),
+             bodice(b + .013, .035, .003), bodice(b, .035, .003), pink);
+        quad(bodice(a, .035, .003), bodice(a + .013, .035, .003),
+             bodice(b + .013, -.035, .003), bodice(b, -.035, .003), pink);
+    }
+    for (int i = 0; i < 12; ++i) {
+        const double a = -.14 + i * .28 / 12, b = a + .28 / 12;
+        quad(bodice(.93, a, .003), bodice(.97, a, .003), bodice(.97, b, .003), bodice(.93, b, .003), trim);
+    }
+    emitEnd();
+    const Vec3 knees = (skeleton[J::Knee1] + skeleton[J::Knee2]) * .5,
+               ankles = (skeleton[J::Ankle1] + skeleton[J::Ankle2]) * .5;
+    const Vec3 hem = ankles + (knees - ankles).normalized() * .280;
+    const std::array<Vec3, 6> centers{hip + torso.up * .025, hip + (knees - hip) * .26,
+        hip + (knees - hip) * .65, knees, knees + (hem - knees) * .60, hem};
+    constexpr std::array<double, 6> widths{.157, .210, .255, .290, .330, .350};
+    constexpr std::array<double, 6> depths{.115, .150, .175, .200, .225, .250};
+    std::array<Basis, 6> axes{};
+    for (size_t r = 0; r < centers.size(); ++r)
+        axes[r] = segmentBasis(centers[r ? r - 1 : 0] - centers[std::min(r + 1, centers.size() - 1)]);
+    const auto skirt = [&](size_t r, double angle, double offset = 0) {
+        const double t = double(r) / (centers.size() - 1);
+        const double pleat = 1 + .035 * std::cos(angle * 8);
+        const double flutter = .008 * t * std::sin(double(motion.elapsed) * 5 + angle * 3);
+        return centers[r] + axes[r].side * ((widths[r] * pleat + offset + flutter) * std::sin(angle)) +
+               axes[r].forward * ((depths[r] * pleat + offset + flutter) * std::cos(angle));
+    };
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < centers.size(); ++r)
+        for (int i = 0; i < 24; ++i) {
+            const double a = i * PI / 12, b = (i + 1) * PI / 12;
+            quad(skirt(r, a), skirt(r, b), skirt(r + 1, b), skirt(r + 1, a),
+                 i % 6 == 0 ? shade(purple, 1.16) : i % 6 == 5 ? shade(purple, .82) : purple);
+        }
+    // Pale embroidered chains follow the front panels and the hem.
+    for (double side : {-1.0, 1.0})
+        for (size_t r = 1; r + 1 < centers.size(); ++r) {
+            const double angle = side * .52;
+            quad(skirt(r, angle - .016, .004), skirt(r, angle + .016, .004),
+                 skirt(r + 1, angle + .016, .004), skirt(r + 1, angle - .016, .004), pattern);
+            for (double bend : {-.10, .10})
+                quad(skirt(r, angle - .010, .005), skirt(r, angle + .010, .005),
+                     skirt(r + 1, angle + bend + .010, .005), skirt(r + 1, angle + bend - .010, .005), pattern);
+        }
+    emitEnd();
+    color(trim);
+    emitBegin(gfx::QUAD_STRIP);
+    for (int i = 0; i <= 24; ++i) {
+        const Vec3 p = skirt(centers.size() - 1, i * PI / 12, .004);
+        emitNormal(axes.back().forward.x, axes.back().forward.y, axes.back().forward.z);
+        vertex(p); vertex(p + axes.back().up * .012);
+    }
+    emitEnd();
+}
+
 void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance,
-                         double hairLift = 0) {
+                         const Frame &motion = {}) {
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
     const float alpha = ghost ? .35f : 1;
     auto tint = [&](Color c) {
@@ -956,16 +1198,27 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
         c.a = alpha;
         return c;
     };
-    const bool president = appearance == JumperAppearance::President, actor = appearance == JumperAppearance::Actor;
-    const Color suit = tint(president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
+    const bool president = appearance == JumperAppearance::President, actor = appearance == JumperAppearance::Actor,
+               cartoon = appearance == JumperAppearance::Cartoon;
+    const Color suit = tint(cartoon ? Color{.43f, .22f, .60f} : president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
                 dark = tint({.055f, .13f, .19f}), white = tint({.91f, .95f, .95f}),
-                accent = tint({.23f, .82f, .75f}),
                 visor = tint({.22f, .69f, .82f}),
                 bootShell = tint({.86f, .88f, .85f}), bootSole = tint({.065f, .075f, .085f}),
                 bootStrap = tint({.78f, .13f, .09f}), bootBuckle = tint({.62f, .66f, .68f}),
-                skin = tint(actor ? Color{.79f, .57f, .43f} : president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f}),
+                skin = tint(cartoon ? Color{.96f, .75f, .60f} : actor ? Color{.79f, .57f, .43f} : president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f}),
                 actorHair = tint({.13f, .105f, .080f}), bodyHair = tint({.29f, .19f, .13f}),
-                swimwear = tint({.53f, .96f, .10f});
+                swimwear = tint({.53f, .96f, .10f}), pink = tint({.76f, .40f, .64f}),
+                gold = tint({.90f, .66f, .24f}), goldLight = tint({1.f, .84f, .43f}), goldDark = tint({.63f, .39f, .105f});
+    // Saturated decks and dark rails stay distinct from snow in every skin.
+    const SkiLivery skiPaint = president
+        ? SkiLivery{tint({.035f, .16f, .48f}), tint({.018f, .035f, .10f}),
+                    tint({.80f, .035f, .065f}), tint({.93f, .61f, .13f})}
+        : actor ? SkiLivery{tint({.015f, .31f, .16f}), tint({.015f, .055f, .035f}),
+                            tint({.46f, .85f, .025f}), tint({.015f, .055f, .035f})}
+        : cartoon ? SkiLivery{tint({.27f, .035f, .48f}), tint({.095f, .015f, .19f}),
+                              tint({.67f, .045f, .36f}), tint({.96f, .60f, .12f})}
+                  : SkiLivery{tint({.94f, .19f, .035f}), tint({.025f, .065f, .13f}),
+                              tint({.025f, .10f, .22f}), tint({.03f, .54f, .66f})};
     const OriginalJoint rear[]{OriginalJoint::SkiRear1, OriginalJoint::SkiRear2};
     const OriginalJoint front[]{OriginalJoint::SkiFront1, OriginalJoint::SkiFront2};
     const OriginalJoint tips[]{OriginalJoint::SkiTip1, OriginalJoint::SkiTip2};
@@ -978,12 +1231,37 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
     for (size_t leg = 0; leg < 2; ++leg) {
         const Vec3 ankle = point(ankles[leg]), knee = point(knees[leg]), hip = point(hips[leg]),
                    shoulder = point(shoulders[leg]), elbow = point(elbows[leg]), hand = point(hands[leg]);
-        ski(point(rear[leg]), point(front[leg]), point(tips[leg]), ankle, dark, shade(dark, .75), accent);
+        ski(point(rear[leg]), point(front[leg]), point(tips[leg]), ankle, skiPaint, appearance);
         material(actor ? Finish::Skin : Finish::Fabric);
         // Tuck the trouser hem into the cuff instead of drawing a dark tube
         // through the entire light boot. All skeleton joints stay untouched.
         const Vec3 trouserHem = ankle + (knee - ankle).normalized() * .215;
-        if (actor) {
+        if (cartoon) {
+            // The opaque skirt wraps the original leg joints; sleeves and puffs
+            // remain anchored to the unchanged shoulder/elbow/hand positions.
+            tailoredSegment(shoulder, elbow, .079, .078, .062, .064, pink);
+            tailoredSegment(elbow, hand, .064, .062, .049, .051, pink);
+            ellipsoid(elbow, segmentBasis(shoulder - hand), {.063, .075, .063}, pink, 8, 4);
+            const Basis puff = segmentBasis(shoulder - elbow);
+            const Vec3 center = shoulder + (elbow - shoulder).normalized() * .035;
+            ellipsoid(center, puff, {.120, .145, .120}, pink, 12, 7);
+            for (int stripe = 0; stripe < 6; ++stripe) {
+                const double angle = stripe * PI / 3;
+                color(shade(suit, 1.17));
+                emitBegin(gfx::QUAD_STRIP);
+                for (int ring = 0; ring <= 8; ++ring) {
+                    const double latitude = -1.20 + ring * 2.40 / 8;
+                    for (double edge : {angle - .10, angle + .10}) {
+                        const Vec3 normal = puff.forward * (std::cos(latitude) * std::cos(edge)) +
+                                            puff.up * std::sin(latitude) + puff.side * (std::cos(latitude) * std::sin(edge));
+                        emitNormal(normal.x, normal.y, normal.z);
+                        vertex(center + puff.forward * (.122 * std::cos(latitude) * std::cos(edge)) +
+                               puff.up * (.147 * std::sin(latitude)) + puff.side * (.122 * std::cos(latitude) * std::sin(edge)));
+                    }
+                }
+                emitEnd();
+            }
+        } else if (actor) {
             tailoredSegment(trouserHem, knee, .075, .075, .100, .095, skin);
             tailoredSegment(knee, hip, .100, .095, .135, .125, skin);
             ellipsoid(knee, segmentBasis(hip - ankle), {.097, .115, .096}, skin, 8, 4);
@@ -1004,10 +1282,12 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
             ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
         }
         const Basis handBasis = segmentBasis(elbow - hand);
-        material(president || actor ? Finish::Skin : Finish::Rubber);
-        ellipsoid(hand, handBasis, {.077, .11, .075}, president || actor ? skin : dark, 8, 5);
+        material(president || actor || cartoon ? Finish::Skin : Finish::Rubber);
+        ellipsoid(hand, handBasis, cartoon ? Vec3{.064, .090, .061} : Vec3{.077, .11, .075},
+                  president || actor || cartoon ? skin : dark, 8, 5);
         ellipsoid(hand + handBasis.forward * .05 + handBasis.side * (leg == 0 ? -.045 : .045), handBasis,
-                  {.044, .057, .038}, president || actor ? skin : dark, 6, 4);
+                  cartoon ? Vec3{.035, .045, .030} : Vec3{.044, .057, .038},
+                  president || actor || cartoon ? skin : dark, 6, 4);
         if (!actor)
             tailoredSegment(hand + handBasis.up * .045, hand + handBasis.up * .1, .074, .074, .075, .075, white);
         else if (leg == 0) {
@@ -1023,22 +1303,28 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                head = point(OriginalJoint::Head);
     material(Finish::Fabric);
     const Basis torso = segmentBasis(shoulder - hip);
-    if (actor)
+    if (cartoon) {
+        cartoonDress(skeleton, suit, pink, white, tint({.87f, .64f, .73f}), motion);
+        cartoonLongHair(skeleton, motion, gold, goldLight, goldDark);
+    } else if (actor)
         actorTorso(hip, shoulder, torso, skin, swimwear, bodyHair);
     else if (president)
         presidentTorso(hip, shoulder, torso, suit, white, tint({.12f, .155f, .23f}), tint({.80f, .045f, .065f}));
     else
         tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
-    if (!actor)
+    if (!actor && !cartoon)
         tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
-    material(actor ? Finish::Skin : Finish::Fabric);
-    tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09, .075, .078, .075, .078,
-                    actor ? skin : president ? white : dark);
+    material(actor || cartoon ? Finish::Skin : Finish::Fabric);
+    tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09,
+                    cartoon ? .057 : .075, cartoon ? .057 : .078, cartoon ? .060 : .075, cartoon ? .060 : .078,
+                    actor || cartoon ? skin : president ? white : dark);
     const Basis headBasis = segmentBasis(head - shoulder);
-    if (actor)
+    if (cartoon)
+        cartoonHead(head, headBasis, skin, gold, goldLight, goldDark, white);
+    else if (actor)
         actorHead(head, headBasis, skin, actorHair, tint({.76f, .68f, .49f}), tint({.20f, .12f, .065f}), white);
     else if (president)
-        presidentHead(head, headBasis, skin, tint({.95f, .81f, .53f}), tint({1.f, .90f, .67f}), hairLift);
+        presidentHead(head, headBasis, skin, tint({.95f, .81f, .53f}), tint({1.f, .90f, .67f}), fringeLift(motion));
     else
         helmet(head, headBasis, dark, white, visor, skin);
 }
@@ -1057,7 +1343,7 @@ Frame displayedAthleteFrame(const Hill &h, const Frame &f, JumperAppearance appe
     }
     const auto skeleton =
         f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(pose, f.leadingLeg);
-    FallContact contact(h, f, skeleton);
+    FallContact contact(h, f, skeleton, appearance == JumperAppearance::Cartoon ? 3.5 : .6);
     struct MeasurementScope {
         FallContact *previous;
         explicit MeasurementScope(FallContact &contact) : previous(contactPass) { contactPass = &contact; }
@@ -1065,7 +1351,7 @@ Frame displayedAthleteFrame(const Hill &h, const Frame &f, JumperAppearance appe
     } scope(contact);
     // Measure the actual skin without GL calls; only ski ends get snow allowance.
     // One rigid translation preserves all joint angles, limb lengths and rolling.
-    drawAthleteGeometry(skeleton, false, appearance, fringeLift(f));
+    drawAthleteGeometry(skeleton, false, appearance, f);
     display.y = float(double(f.y) + contact.lift);
     return display;
 }
@@ -1091,13 +1377,13 @@ void Renderer::athlete(const Hill &h, const Frame &f, bool ghost) {
     sjp::gfx::lightfv(gfx::LIGHT0, gfx::SPECULAR, ghost ? noHighlights : specularLight);
     sjp::gfx::pushMatrix();
     sjp::gfx::translated(f.x, f.y, 0);
-    drawAthleteGeometry(skeleton, ghost, jumperAppearance, fringeLift(f));
+    drawAthleteGeometry(skeleton, ghost, jumperAppearance, f);
     sjp::gfx::popMatrix();
     sjp::gfx::popAttrib();
 }
 
 void Renderer::jumperPreviewGeometry(JumperAppearance appearance) {
-    // The original standing pose is shared by both previews; only its skin
+    // The original standing pose is shared by all previews; only its skin
     // changes. Preview lighting and transforms never touch the live simulation.
     static const OriginalSkeleton standing = [] {
         OriginalPose pose;
@@ -1110,7 +1396,10 @@ void Renderer::jumperPreviewGeometry(JumperAppearance appearance) {
         std::copy(pose.offsets.begin(), pose.offsets.end(), values.begin() + 18);
         return originalSkeleton(values, 0);
     }();
-    drawAthleteGeometry(standing, false, appearance);
+    Frame motion;
+    motion.elapsed = float(cameraTime);
+    motion.windSpeed = .4f;
+    drawAthleteGeometry(standing, false, appearance, motion);
 }
 
 } // namespace sjp

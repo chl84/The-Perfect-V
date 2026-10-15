@@ -30,6 +30,43 @@ int main() {
         ("sjp-migration-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     try {
         std::filesystem::create_directories(directory);
+        // The product rename imports files once without changing or resurrecting saves.
+        const auto oldDirectory = directory / "previous-saves", newDirectory = directory / "the-perfect-v/saves";
+        std::filesystem::create_directories(oldDirectory / "replays");
+        std::filesystem::create_directories(newDirectory);
+        write(oldDirectory / "records-dsj2.dat", "old preferences");
+        write(oldDirectory / "cup.sjc", "old cup");
+        write(oldDirectory / "replays/jump.pvr", "recorded jump");
+        write(oldDirectory / "latest.pvr.tmp", "incomplete save");
+        write(oldDirectory / ".skijumppro-imported", "previous import marker");
+        write(newDirectory / "records-dsj2.dat", "current preferences");
+        std::string importError;
+        require(importLegacySaves(oldDirectory.string(), newDirectory.string(), &importError) && importError.empty(),
+                "Import the previous default save directory");
+        require(contents(newDirectory / "records-dsj2.dat") == "current preferences" &&
+                    contents(newDirectory / "cup.sjc") == "old cup" &&
+                    contents(newDirectory / "replays/jump.pvr") == "recorded jump" &&
+                    !std::filesystem::exists(newDirectory / "latest.pvr.tmp") &&
+                    !std::filesystem::exists(newDirectory / ".skijumppro-imported"),
+                "Import must preserve existing files, nested replays and skip incomplete saves");
+        require(contents(oldDirectory / "records-dsj2.dat") == "old preferences" &&
+                    contents(oldDirectory / "cup.sjc") == "old cup" &&
+                    contents(oldDirectory / "replays/jump.pvr") == "recorded jump",
+                "Import must preserve every original save");
+        std::filesystem::remove(newDirectory / "cup.sjc");
+        require(importLegacySaves(oldDirectory.string(), newDirectory.string()) &&
+                    !std::filesystem::exists(newDirectory / "cup.sjc"),
+                "A later launch must not restore a cup the player deleted");
+        const auto blockedDirectory = directory / "blocked";
+        write(blockedDirectory, "not a directory");
+        require(!importLegacySaves(oldDirectory.string(), blockedDirectory.string(), &importError) && !importError.empty(),
+                "Failed imports must report the error and leave the source intact");
+        std::filesystem::remove(blockedDirectory);
+        require(importLegacySaves(oldDirectory.string(), blockedDirectory.string()) &&
+                    contents(blockedDirectory / "cup.sjc") == "old cup",
+                "An interrupted import must be retryable");
+        require(importLegacySaves((directory / "absent").string(), (directory / "fresh").string()),
+                "A fresh installation without previous saves must start normally");
         const auto oldPath = directory / "records.dat";
         const auto newPath = directory / "records-dsj2.dat";
         const std::string legacy = "SJP_RECORDS_1\n65 95 125 155 195 255\n2 0 1.6\n";
@@ -136,7 +173,7 @@ int main() {
             for (size_t joint = 0; joint < replay.frames[i].pose.size(); ++joint)
                 replay.frames[i].pose[joint] = float(joint * .01 + i);
         }
-        auto replayPath = directory / "latest-dsj2.sjr";
+        auto replayPath = directory / "latest-dsj2.pvr";
         Replay loaded;
         require(saveReplay(replayPath.string(), replay) && loadReplay(replayPath.string(), loaded),
                 "The final original hill must support replay persistence");
@@ -157,6 +194,34 @@ int main() {
         require(saveReplay(replayPath.string(), replay) && loadReplay(replayPath.string(), loaded) &&
                     loaded.originalRpl == replay.originalRpl,
                 "Original replay attachment persists without byte changes");
+        for (auto appearance : JUMPER_APPEARANCES) {
+            replay.jumper = appearance;
+            require(saveReplay(replayPath.string(), replay) && loadReplay(replayPath.string(), loaded) &&
+                        loaded.jumper == appearance && loaded.originalRpl == replay.originalRpl &&
+                        loaded.frames[0].pose == replay.frames[0].pose && loaded.hill == replay.hill &&
+                        loaded.result.total == replay.result.total,
+                    "PVR must preserve every character without changing the jump or original recording");
+        }
+        const auto withJumper = contents(replayPath);
+        const auto jumperTag = withJumper.find("JUMPER ");
+        require(jumperTag != std::string::npos, "PVR character metadata missing");
+        const auto withoutJumper = withJumper.substr(0, jumperTag);
+        write(replayPath, withoutJumper);
+        require(loadReplay(replayPath.string(), loaded) && loaded.jumper == JumperAppearance::Pro,
+                "A replay without character metadata must default to Pro");
+        for (const auto *metadata : {"JUMPER 1 -1\n", "JUMPER 1 4\n", "JUMPER 2 0\n", "JUMPER 1\n",
+                                     "JUMPER 1 2\nJUMPER 1 3\n", "UNKNOWN 1 0\n"}) {
+            loaded.jumper = JumperAppearance::President;
+            write(replayPath, withoutJumper + metadata);
+            require(!loadReplay(replayPath.string(), loaded) && loaded.jumper == JumperAppearance::President &&
+                        loaded.originalRpl == replay.originalRpl,
+                    "Invalid or duplicate character metadata must reject without replacing the loaded replay");
+        }
+        write(replayPath, withJumper);
+        auto invalidJumper = replay;
+        invalidJumper.jumper = JumperAppearance(99);
+        require(!saveReplay(replayPath.string(), invalidJumper) && contents(replayPath) == withJumper,
+                "Saving an invalid character must preserve the existing replay");
         auto badAttachment = contents(replayPath);
         badAttachment.replace(badAttachment.find("RPL 1222"), 8, "RPL 1223");
         write(replayPath, badAttachment);
@@ -181,7 +246,7 @@ int main() {
         require(!loadReplay(replayPath.string(), loaded) &&
                     loaded.frames.back().pose == replay.frames.back().pose,
                 "Reject nonfinite pose data while preserving the last valid replay");
-        const auto previousReplayPath = directory / "latest-original.sjr";
+        const auto previousReplayPath = directory / "latest-original.pvr";
         const std::string previousReplay = "SJP_REPLAY_3\nDSJ2_ORIGINAL_PROFILES_1\n";
         write(previousReplayPath, previousReplay);
         require(!loadReplay(previousReplayPath.string(), loaded) &&
@@ -192,7 +257,7 @@ int main() {
         require(!loadReplay(replayPath.string(), loaded), "Replay validation must reject decreasing time");
         replay.hill = int(hills().size());
         require(!saveReplay(replayPath.string(), replay), "Reject out-of-range hill indices when saving");
-        const auto legacyReplayPath = directory / "latest.sjr";
+        const auto legacyReplayPath = directory / "latest.pvr";
         const std::string legacyReplay = "SJP_REPLAY_2\n2 2 2\n100 150 0 1\n"
                                          "0 0 30 0 0 0 2 0 0\n1 -1 30 -1 0 1 3 1 0\n";
         write(legacyReplayPath, legacyReplay);

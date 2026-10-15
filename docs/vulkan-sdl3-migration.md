@@ -76,8 +76,10 @@ retained; fixed blocks avoid allocation in the audio callback.
 
 The protected baseline contains 29 source/data files covering physics, original
 hill/pose/control/weather/AI/scoring calculations, competition and storage.
-Their SHA-256 values are unchanged. Save directories and identifiers remain
-`SkiJumpPro/SkiJumpPro`; record, replay and cup formats are unchanged.
+Their SHA-256 values were unchanged at the migration checkpoint, which retained
+the previous save namespace. The current default groups resources and saves
+under `the-perfect-v`, with a one-time import of previous saves; see
+[save compatibility](DEVELOPMENT.md#save-compatibility).
 
 A static comparison of the athlete, effects, environment and batching sources
 matches the checkpoint after normalizing the API renaming, includes and

@@ -154,7 +154,7 @@ credits and the reproducible preparation script accompany the assets.
 
 ## Fall model visibility
 
-The main menu's Ski Jumper screen uses the existing panels, buttons and three native
+The main menu's Ski Jumper screen uses the existing panels, buttons and four native
 3D previews. Pro keeps its competition suit and helmet. President adds a navy suit,
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
 President's reference-based face uses a continuous cheek/jaw mesh, a tapering
@@ -173,19 +173,36 @@ sunglasses and a wristwatch. The opaque swimsuit covers the pelvis and wraps
 over both shoulders; its straps and body hair follow the original poses.
 The hairstyle uses a wavy shell and a few coarse curls instead of individual hairs.
 
+Cartoon adds a purple embroidered dress, striped puff sleeves, a laced bodice,
+large green eyes and a golden side-parted hairstyle. A continuous golden bundle
+reaches the ski plane and coils along the ground while standing. Speed lifts
+the lengths behind the head along the airflow, with travelling waves driven by
+recorded elapsed time and wind. The original/interpolated Frame determines the
+complete pose, so pause and replay seeking reproduce the same flutter. The menu
+uses its presentation clock for a gentle breeze. The fall-contact height cache
+also covers the extended hair, without changing terrain or physical collision.
+
 All skins wrap the exact same original skeleton, including interpolated joints
-and fall poses; skis and bindings retain their geometry. All wear the same
+and fall poses; ski outlines and binding positions retain their geometry. All wear the same
 light boot shells with red closures, metal buckles and dark flat soles, making
-the boots distinct from the trousers and turquoise bindings. Boot cuffs follow
+the boots distinct from the trousers and colored bindings. Boot cuffs follow
 the lower legs, with trouser hems tucked inside instead of covering the shells.
 The appearance
 enum stays outside simulation, AI, input, scoring and replay physics. Native
-replays and ghosts use the selected skin as a presentation preference.
+replays preserve their recorded skin independently of the current preference;
+ghosts use the currently selected skin.
 
 The optional `JUMPER 1` preferences tag preserves the choice while retaining the
 existing records format; older saves default to Pro. The fall-contact display
 correction measures the selected skin and only changes its temporary render copy.
 Preview lights and transforms are scoped to the menu draw and restored afterward.
+
+Skis use saturated decks and dark rails for contrast against snow: Pro has orange/navy
+racing bands, President blue with red bands and a gold pinstripe, Actor green/lime
+chevrons, and Cartoon purple/pink with gold diamonds. Both deck and underside use
+adjacent colored panels on the original surface, without layered decals or textures.
+Selection previews tilt toward the viewer to expose the decks and leave space above
+the buttons. These cosmetic changes leave equipment dimensions and physics intact.
 
 Crashed outrun/replay models receive a presentation-only vertical offset when
 the actual suit, helmet, gloves, boots or skis intersect the existing rendered
@@ -389,7 +406,7 @@ cmake -S . -B build-vulkan -DTPV_BUILD_RENDER_PROBE=ON
 cmake --build build-vulkan --target render-probe --parallel 4
 python3 tools/watch_gpu_test.py --output captures/vulkan-test --timeout 330 -- \
   build-vulkan/render-probe --assets assets --cup /path/to/cup.sjc \
-  --replay /path/to/latest-dsj2.sjr --expect-renderer Vulkan \
+  --replay /path/to/latest-dsj2.pvr --expect-renderer Vulkan \
   --samples 4 --seconds 300
 ```
 
@@ -426,11 +443,21 @@ not receive a flight or landing assessment for a jump that did not happen.
 
 ## Save compatibility
 
-The display name, executable and repository use The Perfect V. The internal SDL
-save namespace intentionally remains unchanged so existing records, settings,
-competitions and replay files stay available. The executable prints the actual
-save directory at startup; `--data-dir PATH` overrides it. Native `.SJR` replay
-and `.SJC` competition formats also retain their identifiers for compatibility.
+The SDL user-data root is `the-perfect-v` without an organization subdirectory.
+On Linux, the default save directory is `~/.local/share/the-perfect-v/saves/`,
+respecting `XDG_DATA_HOME`. A local `~/.local` installation places resources in
+`~/.local/share/the-perfect-v/assets/`; installation only updates resources and
+the executable, leaving saves intact. The first default launch imports regular
+files (including nested replays) from the previous save directory, skipping
+temporary files, obsolete import markers and existing destinations. It prefers
+the most recent previous namespace and only falls back to the original namespace
+when the more recent directory is absent. Copies are staged before rename; originals remain intact. A marker
+prevents subsequent launches from resurrecting deleted saves. Import failures
+stop startup before default records can overwrite missing imported preferences.
+The executable prints the actual save directory at startup; `--data-dir PATH`
+overrides it and bypasses import. Native replays use `.PVR`; there is no
+migration of files with the previous replay extension. The replay payload and
+`.SJC` competition identifiers are unchanged.
 
 ## Time, weather and wind
 
@@ -448,14 +475,21 @@ The next event gets a fresh draw, including a second season on the same hill.
 Random times are equally weighted. Random weather uses 45% sunny, 15% overcast,
 30% snowfall and 10% fog. Native replays store the resolved conditions and cosmetic
 seed, so seeking, camera changes and changed preferences cannot reselect weather.
-Existing replay files and version 1/2 cup saves remain readable, defaulting their
-missing cosmetic metadata to day and sun. Original .RPL exports retain their
+PVR replay payloads without cosmetic metadata and version 1/2 cup saves default
+their missing time/weather metadata to day and sun. Original .RPL exports retain their
 original bytes and cannot carry this modern atmosphere metadata.
 
-The replay screen offers `Export .SJR` beside `Export .RPL`. Native export saves
+The replay screen offers `Export .PVR` and, when supported, `Export .RPL` in the
+right-hand button column. Hover hints explain that PVR preserves the jump, time
+of day, weather and character for The Perfect V, while RPL targets the original Deluxe Ski
+Jump 2 without modern time/weather settings. Native export saves
 an independent, uniquely named file in the game's save directory and displays
 its full path. It preserves the displayed time/weather, recorded wind samples
-and any attached original input recording. The automatically saved latest
+and any attached original input recording. A validated `JUMPER 1` tag stores the
+cosmetic character; files without it default to Pro. Both automatically saved
+and manually exported PVR files retain the recorded choice. Playback never changes
+the player's character preference. RPL imports use the current choice because
+that format has no character metadata. The automatically saved latest
 replay can therefore be archived before another jump replaces it.
 
 Four compact lighting presets set sun/moon direction, sky gradient, ambient and

@@ -165,4 +165,5 @@ if(BUILD_TESTING)
 endif()
 
 install(TARGETS the-perfect-v RUNTIME DESTINATION bin)
+# Runtime owns share/the-perfect-v/saves; installation updates assets only.
 install(DIRECTORY assets DESTINATION share/the-perfect-v)

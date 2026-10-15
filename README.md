@@ -82,9 +82,11 @@ Use small mouse movements in flight. A wider telemark improves style but increas
 the risk of falling.
 
 Replays support pause, timeline seeking, camera changes and 0.25×–2× speed.
-The replay library reads native `.SJR` and original DSJ `.RPL` recordings. Drop a
+Native `.PVR` recordings preserve the selected ski jumper, time of day and weather.
+The replay library reads `.PVR` and original DSJ `.RPL` recordings. Drop a
 replay onto the window or use `./play.sh --replay FILE`. Original replay export
-is available when the recorded input sequence fits that format.
+is available when the recorded input sequence fits that format. Hover over either
+export button for a short explanation of its format.
 
 ## Competitions and saves
 
@@ -99,9 +101,15 @@ to watch CPU jumps. Local players share the machine, and interrupted competition
 can be resumed from checkpoints. Standing human jumps in practice and cups can set all-time hill records. The blue
 spray line marks the saved record on each hill; CPU jumps and replays cannot update it.
 
-Preferences, records and replays remain in the existing SDL user-data directory.
-The launcher prints its location as `Saves:` when the game starts. The name change
-preserves existing saves; use `--data-dir PATH` to select another location.
+On a local Linux installation, game data is grouped under
+`~/.local/share/the-perfect-v/`: `assets/` contains installed resources and
+`saves/` contains preferences, records, cups and replays. Saves respect
+`XDG_DATA_HOME`; `--prefix` controls where resources are installed. Resource
+installation never writes to `saves/`. The first default launch imports missing
+files from the previous save directory once, preferring the most recent namespace
+and retaining originals and existing destination files. The launcher prints the
+active save location as `Saves:`.
+Use `--data-dir PATH` to select another location without importing old saves.
 Personal saves and replays are excluded from Git.
 
 ## Tests and packaging
