@@ -53,6 +53,44 @@ Difference difference(const Image &a, const Image &b) {
 void require(bool condition, const char *message) {
     if (!condition) throw std::runtime_error(message);
 }
+void valleyEdgeChecks(Renderer &r, const fs::path &out) {
+    using namespace gfx;
+    for (int side : {-1, 1}) {
+        beginFrame(r.width, r.height);
+        viewport(0, 0, r.width, r.height);
+        clearColor(0, 0, 0, 1); clear(COLOR_BUFFER_BIT | DEPTH_BUFFER_BIT);
+        disable(DEPTH_TEST); disable(LIGHTING); disable(FOG); disable(TEXTURE_2D);
+        enable(BLEND); blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+        backdropHaze({}, {});
+        matrixMode(PROJECTION); loadIdentity(); ortho(0, r.width, 0, r.height, -1, 1);
+        matrixMode(MODELVIEW); loadIdentity();
+        const float edge[]{195, 200, 1, -1000}, noEdge[]{0, 0, 0, 0};
+        materialfv(FRONT_AND_BACK, VALLEY_EDGE, edge);
+        // Deliberately use a coarse 20-metre quad. The true fade must still
+        // occupy just its last 5 metres, irrespective of vertex interpolation.
+        begin(QUADS);
+        for (const auto &p : std::array<std::array<double, 2>, 4>{{
+                 {0, 0}, {double(r.width), 0}, {double(r.width), double(r.height)}, {0, double(r.height)}}}) {
+            const double t = p[0] / r.width;
+            color4f(1, 1, 1, float(1 - t));
+            texCoord2d(0, side * (180 + 20 * t) / 13);
+            vertex2f(float(p[0]), float(p[1]));
+        }
+        end();
+        materialfv(FRONT_AND_BACK, VALLEY_EDGE, noEdge);
+        const auto path = out / (side < 0 ? "edge-negative.ppm" : "edge-positive.ppm");
+        r.capture(path.string()); r.finish();
+        const auto image = read(path);
+        auto pixel = [&](double z) {
+            const int x = std::clamp(int((z - 180) / 20 * image.w), 0, image.w - 1);
+            return int(image.rgb[(image.h / 2 * image.w + x) * 3]);
+        };
+        require(pixel(190) == 255 && pixel(194) == 255 && pixel(195) >= 254,
+                "Terrain fades before the final five metres");
+        require(std::abs(pixel(197.5) - 128) <= 3 && pixel(199) < 30 && pixel(200) == 0,
+                "Terrain edge must fade smoothly over exactly five metres");
+    }
+}
 void backdropChecks(Renderer &r, const fs::path &out) {
     std::ofstream report(out / "backdrop-report.csv");
     report << "case,changed_pixels,mean_channel_delta,max_delta,foreground_changes\n";
@@ -181,6 +219,8 @@ int run(const fs::path &out, const std::string &assets, bool timingOnly, bool ba
         Renderer r(window, assets, 4, false, true);
         r.setSynchronousRendering(true);
         if (backdropOnly) {
+            SDL_GetWindowSizeInPixels(window, &r.width, &r.height);
+            valleyEdgeChecks(r, out);
             backdropChecks(r, out);
         } else {
         std::ofstream report;

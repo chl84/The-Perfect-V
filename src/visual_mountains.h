@@ -58,12 +58,21 @@ inline Vec3 mountainHazeColor(const EnvironmentLight &light) {
     // as atmospheric haze; plain sky-colored fog formed a gray band here.
     return mix(light.fog, mountainTint(light) * .88, .75);
 }
-inline double valleyEdgeOpacity(const Hill &hill, double z) {
+inline constexpr double valleyEdgeStart = 195, valleyEdgeEnd = 200;
+inline double valleyBackStart(const Hill &hill) {
+    return std::min(-170 * hill.scale(), hill.inrunStart() - 60 * hill.scale());
+}
+inline double valleyBackOpacity(const Hill &hill, double x) {
+    const double t = clamp((x - valleyBackStart(hill)) / (5 * hill.scale()), 0.0, 1.0);
+    return t * t * (3 - 2 * t);
+}
+inline double valleyEdgeOpacity(const Hill &hill, double z, double x = 0) {
     // All trees have their bases within 178 scaled metres; retain opaque snow
     // underneath them and throughout the playable corridor. Only the original
-    // mesh's final two lateral rows dissolve into the photographic background.
-    const double t = clamp((std::abs(z) / hill.scale() - 180) / 20, 0.0, 1.0);
-    return 1 - t * t * (3 - 2 * t);
+    // final five scaled metres dissolve into the photographic background.
+    const double t = clamp((std::abs(z) / hill.scale() - valleyEdgeStart) /
+                               (valleyEdgeEnd - valleyEdgeStart), 0.0, 1.0);
+    return (1 - t * t * (3 - 2 * t)) * valleyBackOpacity(hill, x);
 }
 inline double mountainHazeDistance(Vec3 direction) {
     const double t = clamp((-.10 - direction.normalized().y) / .35, 0.0, 1.0);

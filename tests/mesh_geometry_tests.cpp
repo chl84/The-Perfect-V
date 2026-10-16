@@ -30,7 +30,7 @@ int main() {
         const Uniforms unlit;
         for (auto member : {&Uniforms::signalColor, &Uniforms::signalPositionRange,
                             &Uniforms::signalDirectionCone, &Uniforms::signalParameters,
-                            &Uniforms::backdropHaze, &Uniforms::backdropColor}) {
+                            &Uniforms::backdropHaze, &Uniforms::backdropColor, &Uniforms::valleyEdge}) {
             auto changed = unlit;
             (changed.*member)[0] = 1;
             require(!(changed == unlit), "Different visual uniforms can merge into the same draw packet");

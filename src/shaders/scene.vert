@@ -38,6 +38,7 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 signalParameters; // world X, inverse attenuation distance squared, reserved
     vec4 backdropHaze; // mode, hill scale, decorative tail X, maximum opacity
     vec4 backdropColor;
+    vec4 valleyEdge; // start/end world Z, enabled, upstream X
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -50,6 +51,7 @@ layout(location = 6) out vec3 snowNormal;
 layout(location = 7) out vec3 snowView;
 layout(location = 8) flat out vec3 snowSun;
 layout(location = 9) out vec4 backdropMist;
+layout(location = 10) flat out vec4 valleyEdge;
 
 vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
@@ -175,6 +177,7 @@ void main() {
         snowView = eyeToWorld * -eye.xyz;
         snowSun = eyeToWorld * state.lightDirection0.xyz;
     }
+    valleyEdge = state.valleyEdge;
     backdropMist = vec4(state.backdropColor.rgb, 0.0);
     if (state.backdropHaze.x == 1.0) {
         // World planes already follow object transforms through eye space.

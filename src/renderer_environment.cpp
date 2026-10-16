@@ -138,9 +138,9 @@ void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = fals
         sjp::visual::normal(normal.x, normal.y, normal.z);
         Color color = snowColor(h, p.x, p.z);
         if (groomed)
-            color.a = float(preparedSnowWeight(h, p.x, p.z));
+            color.a = float(preparedSnowWeight(h, p.x, p.z) * visual::valleyBackOpacity(h, p.x));
         else
-            color.a = float(visual::valleyEdgeOpacity(h, p.z));
+            color.a = float(visual::valleyEdgeOpacity(h, p.z, p.x));
         col(color);
         sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
         vertex(p);
@@ -959,6 +959,9 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     sjp::visual::enable(sjp::gfx::TEXTURE_2D);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, naturalSnowTexture);
     sjp::visual::texEnvi(sjp::gfx::TEXTURE_ENV, sjp::gfx::TEXTURE_ENV_MODE, sjp::gfx::MODULATE);
+    const float edge[]{float(visual::valleyEdgeStart * s), float(visual::valleyEdgeEnd * s), 1, float(visual::valleyBackStart(h))};
+    const float noEdge[]{0, 0, 0, 0};
+    sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, edge);
     // Retain bounds/cells and protected ski/arena vertices. Only the backdrop
     // flanks/continuation turn downhill instead of extrapolating indefinitely.
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s); x < std::max(420 * s, h.end() + 80 * s);
@@ -967,6 +970,7 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z});
+    sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, noEdge);
     // Reuse the exact receiver triangles for a finite, softly blended prepared
     // strip. Polygon offset avoids coplanar flicker; this pass never writes depth.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::POLYGON_BIT);

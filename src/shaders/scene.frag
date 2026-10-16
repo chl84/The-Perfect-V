@@ -10,6 +10,7 @@ layout(location = 6) in vec3 snowNormal;
 layout(location = 7) in vec3 snowView;
 layout(location = 8) flat in vec3 snowSun;
 layout(location = 9) in vec4 backdropMist;
+layout(location = 10) flat in vec4 valleyEdge;
 layout(location = 0) out vec4 fragmentColor;
 
 // Integer hashing is stable for fixed surface cells, including negative world
@@ -50,9 +51,17 @@ float snowGlitter() {
     return spot * reflection * resolved * max(dot(n, l), 0.0) * fogParameters.w;
 }
 void main() {
-    fragmentColor = vertexColor;
-    if (textured != 0.0)
-        fragmentColor *= texture(image, textureUV);
+    vec4 texel = textured != 0.0 ? texture(image, textureUV) : vec4(1.0);
+    fragmentColor = vertexColor * texel;
+    if (valleyEdge.z != 0.0) {
+        // The terrain grid has 10-scaled-metre rows. Evaluate its 5-metre
+        // edge per pixel so vertex interpolation cannot widen the fade.
+        float opacity = 1.0 - smoothstep(valleyEdge.x, valleyEdge.y, abs(textureUV.y * 13.0));
+        // The upstream mesh also ends outside the original inrun. Soften that
+        // cap to avoid exposing a straight silhouette when the side fade narrows.
+        float cap = smoothstep(valleyEdge.w, valleyEdge.w + valleyEdge.y - valleyEdge.x, textureUV.x * 13.0);
+        fragmentColor.a = opacity * cap * texel.a;
+    }
     if (fogParameters.w > 0.0) {
         float glint = snowGlitter();
         // Small neutral ice highlights; preserve alpha and retain headroom.

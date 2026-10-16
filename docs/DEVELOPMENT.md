@@ -398,11 +398,16 @@ white point, and residual saturation is reduced to 12% so the scene's light
 palette supplies most of its color. The skyline alpha is applied separately
 and stays identical. These adjustments affect only the prepared photograph,
 with no lens blur, extra runtime processing or change in texture size.
-The original valley mesh's final two lateral rows (180–200 scaled metres from the centre)
-fade into the background through cached vertex alpha. Snow beneath all tree
+Only the valley mesh's final five scaled metres (195–200 from the centre)
+fade into the background. The existing ten-metre grid is retained; the snow
+material evaluates this smooth alpha transition per pixel from world-Z UVs,
+so interpolation cannot widen it to an entire grid row. The decorative upstream
+cap is also softened, at least sixty scaled metres before the original inrun,
+so the narrower lateral fade cannot expose its straight silhouette against sky.
+Snow beneath all tree
 bases and the entire playable corridor stay opaque; this material blend retains
 positions, depth writes and snow texture pixels. This adds no vertices, draw
-calls, shaders, textures or per-frame terrain work. Existing distance fog
+calls, textures or per-frame terrain construction. Existing distance fog
 controls weather visibility and the stronger haze toward the foothills.
 
 The decorative terrain flanks after `outrunBottom()` descend outside a protected

@@ -98,6 +98,7 @@ inline constexpr Enum RGBA = 0x1908;
 inline constexpr Enum SAMPLES = 0x80A9;
 inline constexpr Enum SHININESS = 0x1601;
 inline constexpr Enum SNOW_GLITTER = 0x100001; // Snow-only material weight.
+inline constexpr Enum VALLEY_EDGE = 0x100002; // Start/end world Z, enabled, upstream X.
 inline constexpr Enum SMOOTH = 0x1D01;
 inline constexpr Enum SPECULAR = 0x1202;
 inline constexpr Enum SRC_ALPHA = 0x0302;

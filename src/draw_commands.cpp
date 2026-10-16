@@ -61,7 +61,7 @@ struct State {
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
     std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
-    std::array<float, 4> backdropHaze{}, backdropColor{};
+    std::array<float, 4> backdropHaze{}, backdropColor{}, valleyEdge{};
     float snowMaterial = 0, snowSunlight = 0;
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
@@ -144,6 +144,7 @@ struct Context {
         u.signalParameters = state.signalParameters;
         u.backdropHaze = state.backdropHaze;
         u.backdropColor = state.backdropColor;
+        u.valleyEdge = state.valleyEdge;
         if (u.backdropHaze[0] == 1.f && !state.pipeline.depthTest)
             u.backdropHaze[0] = 0; // UI/sky never inherit the distant scene veil.
         return u;
@@ -559,6 +560,7 @@ void popAttrib() {
             s.snowSunlight = old.snowSunlight;
             s.backdropHaze = old.backdropHaze;
             s.backdropColor = old.backdropColor;
+            s.valleyEdge = old.valleyEdge;
             s.lighting = old.lighting;
             s.light0 = old.light0;
             s.light1 = old.light1;
@@ -740,6 +742,8 @@ void materialfv(Enum, Enum property, const float *v) {
             c.state.specular = value;
         else if (property == EMISSION)
             c.state.emission = value;
+        else if (property == VALLEY_EDGE)
+            c.state.valleyEdge = value;
         else
             throw std::runtime_error("Unsupported scene material");
     });

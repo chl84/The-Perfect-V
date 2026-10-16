@@ -68,12 +68,20 @@ int main() {
             require(visual::valleyEdgeOpacity(hill, side * 178 * hill.scale()) == 1 &&
                         visual::valleyEdgeOpacity(hill, side * 200 * hill.scale()) < 1e-12,
                     "Valley transition affects tree foundations or leaves a hard outer edge");
-            require(visual::valleyEdgeOpacity(hill, side * 185 * hill.scale()) >
-                        visual::valleyEdgeOpacity(hill, side * 195 * hill.scale()),
+            require(visual::valleyEdgeOpacity(hill, side * 190 * hill.scale()) == 1 &&
+                        visual::valleyEdgeOpacity(hill, side * 195 * hill.scale()) == 1,
+                    "Terrain must remain opaque up to the final five scaled metres");
+            require(visual::valleyEdgeOpacity(hill, side * 196 * hill.scale()) >
+                        visual::valleyEdgeOpacity(hill, side * 199 * hill.scale()),
                     "Valley transition does not fade toward the boundary");
         }
-        require(visual::valleyEdgeOpacity(hill, 0) == 1,
+        require(visual::valleyEdgeOpacity(hill, 0) == 1 &&
+                    visual::valleyBackOpacity(hill, hill.inrunStart()) == 1,
                 "Valley transition changes opacity in the playable corridor");
+        require(visual::valleyBackStart(hill) <= hill.inrunStart() - 60 * hill.scale() &&
+                    visual::valleyEdgeOpacity(hill, 0, visual::valleyBackStart(hill)) == 0 &&
+                    visual::valleyBackOpacity(hill, visual::valleyBackStart(hill) + 5 * hill.scale()) > .999999,
+                "Decorative upstream cap must fade outside the original inrun");
     }
     {
         auto redLight = visual::environmentLight({});
