@@ -13,6 +13,12 @@ if(MSVC)
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic)
+  if(APPLE)
+    # Apple Clang contracts a += b*c into FMA on arm64 by default. The
+    # different rounding adds a snow-grid row at fractional hill scales.
+    # Match the separate operations used by the original Linux/Windows build.
+    add_compile_options(-ffp-contract=off)
+  endif()
 endif()
 set(TPV_PRECOMPILED_SHADER_DIR "" CACHE PATH "Directory containing scene.vert.inc and scene.frag.inc")
 if(NOT TPV_PRECOMPILED_SHADER_DIR)

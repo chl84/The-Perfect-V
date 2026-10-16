@@ -93,6 +93,8 @@ SHA-256 checked sources for both architectures; FreeType is static. The release
 MoltenVK archive is SHA-256 checked and its universal dylib is bundled alongside
 SDL3. The existing SPIR-V shaders and Vulkan renderer are used through Metal;
 there is no separate macOS rendering implementation.
+Apple Clang uses `-ffp-contract=off` to preserve the original separate-operation
+rounding: fused grid increments otherwise add an extra snow row on England K50.
 
 On a Mac with Xcode command-line tools, CMake 3.24+, Python 3.11+ and a shader
 compiler, run `./package-macos.sh`. Alternatively, pass the directory containing
