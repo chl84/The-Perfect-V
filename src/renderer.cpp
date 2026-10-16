@@ -68,9 +68,10 @@ void windsock(Vec3 origin, const Frame &frame, double time) {
 }
 // Gradient and soft cloud layers share one small background mesh.
 void sky(int width, int height, const visual::EnvironmentLight &light,
-         environment::Conditions conditions, Vec3 eye, Vec3 target, gfx::Id mountainTexture) {
+         environment::Conditions conditions, Vec3 eye, Vec3 target, gfx::Id mountainTexture, bool mist) {
     sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT |
                          sjp::gfx::COLOR_BUFFER_BIT);
+    sjp::gfx::backdropHaze({}, {});
     sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::depthMask(sjp::gfx::FALSE);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
@@ -172,6 +173,8 @@ void sky(int width, int height, const visual::EnvironmentLight &light,
         sjp::gfx::bindTexture(sjp::gfx::TEXTURE_2D, mountainTexture);
         sjp::gfx::enable(sjp::gfx::FOG);
         const Vec3 hazeColor = visual::mountainHazeColor(light);
+        sjp::gfx::backdropHaze({mist ? 2.f : 0.f, 1, 0, .86f},
+                               {float(hazeColor.x), float(hazeColor.y), float(hazeColor.z), 1});
         const float haze[] = {float(hazeColor.x), float(hazeColor.y), float(hazeColor.z), 1};
         sjp::gfx::fogfv(sjp::gfx::FOG_COLOR, haze);
         sjp::gfx::fogf(sjp::gfx::FOG_START, float(light.fogStart));
@@ -560,7 +563,7 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
         target = target + (wantTarget - target) * blend;
     }
     cameraTime = time;
-    sky(width, height, lighting, sceneEnvironment, eye, target, mountainTexture);
+    sky(width, height, lighting, sceneEnvironment, eye, target, mountainTexture, backdropMist);
     lookAt(eye, target);
     sjp::gfx::enable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::enable(sjp::gfx::LIGHTING);
@@ -598,6 +601,10 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
     sjp::gfx::fogi(sjp::gfx::FOG_MODE, sjp::gfx::LINEAR);
     sjp::gfx::fogf(sjp::gfx::FOG_START, lighting.fogStart * s);
     sjp::gfx::fogf(sjp::gfx::FOG_END, lighting.fogEnd * s);
+    const Vec3 mistColor = visual::mountainHazeColor(lighting);
+    const double tailStart = std::max(h.outrunBottom() + 47, 190 * s);
+    sjp::gfx::backdropHaze({backdropMist && lighting.fogEnd > 340 ? 1.f : 0.f, float(s), float(tailStart), .86f},
+                           {float(mistColor.x), float(mistColor.y), float(mistColor.z), 1});
     sjp::gfx::snowSunlight(snowGlitter ? visual::snowGlitterSunlight(lighting) : 0.f);
     terrain(h);
     hillRecordMarker(h);

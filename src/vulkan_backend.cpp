@@ -21,7 +21,8 @@ bool Uniforms::operator==(const Uniforms &o) const {
            inrunDirectionCone == o.inrunDirectionCone && inrunParameters == o.inrunParameters &&
            inrunColor == o.inrunColor && signalPositionRange == o.signalPositionRange &&
            signalDirectionCone == o.signalDirectionCone && signalColor == o.signalColor &&
-           signalParameters == o.signalParameters;
+           signalParameters == o.signalParameters && backdropHaze == o.backdropHaze &&
+           backdropColor == o.backdropColor;
 }
 bool PipelineState::operator==(const PipelineState &o) const { return !(*this < o) && !(o < *this); }
 bool PipelineState::operator<(const PipelineState &o) const {

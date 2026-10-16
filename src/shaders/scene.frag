@@ -9,6 +9,7 @@ layout(location = 5) flat in vec3 fogColor;
 layout(location = 6) in vec3 snowNormal;
 layout(location = 7) in vec3 snowView;
 layout(location = 8) flat in vec3 snowSun;
+layout(location = 9) in vec4 backdropMist;
 layout(location = 0) out vec4 fragmentColor;
 
 // Integer hashing is stable for fixed surface cells, including negative world
@@ -62,4 +63,7 @@ void main() {
                                  max(fogParameters.y - fogParameters.x, 0.000001), 0.0, 1.0);
         fragmentColor.rgb = mix(fogColor, fragmentColor.rgb, visibility);
     }
+    // Shared air color blends scenery and the photo foot through the same
+    // soft veil. Alpha is retained for foliage, shadows and the photo cutout.
+    fragmentColor.rgb = mix(fragmentColor.rgb, backdropMist.rgb, backdropMist.a);
 }

@@ -53,6 +53,7 @@ class Renderer {
     void setEnvironment(environment::Conditions, bool restart = false);
     const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
     // Visual diagnostics can compare identical scenes with the material disabled.
+    void setBackdropMist(bool enabled) { backdropMist = enabled; }
     void setSnowGlitter(bool enabled) { snowGlitter = enabled; }
     void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
     bool sceneReady() const { return terrainReady; }
@@ -139,6 +140,7 @@ class Renderer {
     void athlete(const Hill &, const Frame &, bool ghost);
     void jumperPreviewGeometry(JumperAppearance);
     void effects(const Hill &, const Frame &, double time, bool showWeather);
+    bool backdropMist = true;
     bool snowGlitter = true;
     bool snowfall = false;
     environment::Conditions sceneEnvironment;

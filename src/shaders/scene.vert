@@ -36,6 +36,8 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 signalDirectionCone;
     vec4 signalColor;      // color, intensity
     vec4 signalParameters; // world X, inverse attenuation distance squared, reserved
+    vec4 backdropHaze; // mode, hill scale, decorative tail X, maximum opacity
+    vec4 backdropColor;
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -47,6 +49,7 @@ layout(location = 5) flat out vec3 fogColor;
 layout(location = 6) out vec3 snowNormal;
 layout(location = 7) out vec3 snowView;
 layout(location = 8) flat out vec3 snowSun;
+layout(location = 9) out vec4 backdropMist;
 
 vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
@@ -171,6 +174,26 @@ void main() {
         mat3 eyeToWorld = transpose(mat3(state.modelView));
         snowView = eyeToWorld * -eye.xyz;
         snowSun = eyeToWorld * state.lightDirection0.xyz;
+    }
+    backdropMist = vec4(state.backdropColor.rgb, 0.0);
+    if (state.backdropHaze.x == 1.0) {
+        // World planes already follow object transforms through eye space.
+        // Keep the complete jumping corridor clear; only distant flanks and
+        // the decorative continuation converge on the photographic foot color.
+        float worldX = dot(state.arenaAxis, eye);
+        float worldZ = dot(state.worldZAxis, eye);
+        float scale = state.backdropHaze.y;
+        float lateral = smoothstep(120.0 * scale, 198.0 * scale, abs(worldZ));
+        float tail = smoothstep(state.backdropHaze.z, state.backdropHaze.z + 75.0 * scale, worldX);
+        float distanceGate = smoothstep(40.0 * scale, 100.0 * scale, length(eye.xyz));
+        backdropMist.a = max(lateral, tail) * distanceGate * state.backdropHaze.w;
+    } else if (state.backdropHaze.x == 2.0) {
+        // The foothill veil follows world altitude/bearing, rather than a
+        // horizontal screen band. The mountain peaks and sky stay distinct.
+        float bearing = uv.x * 6.28318530718;
+        float bank = 0.025 * sin(bearing * 3.0) + 0.012 * sin(bearing * 7.0);
+        float altitude = 0.27 - uv.y * 0.95;
+        backdropMist.a = (1.0 - smoothstep(-0.52 + bank, -0.10 + bank, altitude)) * state.backdropHaze.w;
     }
     vertexColor = color;
     if (state.flags.x != 0.0) {

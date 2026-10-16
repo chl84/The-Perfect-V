@@ -951,6 +951,11 @@ void sjp::gfx::lineWidth(float width) {
 void sjp::gfx::loadIdentity(void) {
     audit::command("sjp::gfx::loadIdentity inside sjp::gfx::begin", false);
 }
+void sjp::gfx::backdropHaze(const std::array<float, 4> &parameters, const std::array<float, 4> &color) {
+    audit::command("backdropHaze inside primitive", false);
+    for (float value : parameters) audit::finite(value);
+    for (float value : color) audit::finite(value);
+}
 void sjp::gfx::snowSunlight(float strength) {
     audit::command("snowSunlight inside primitive", false);
     audit::finite(strength);

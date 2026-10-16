@@ -16,6 +16,8 @@ void col(Color c) {
 }
 } // namespace
 void Renderer::overlay() {
+    // Also clear the world veil before UI previews temporarily enable depth.
+    sjp::gfx::backdropHaze({}, {});
     sjp::gfx::disable(sjp::gfx::DEPTH_TEST);
     sjp::gfx::disable(sjp::gfx::LIGHTING);
     sjp::gfx::disable(sjp::gfx::FOG);

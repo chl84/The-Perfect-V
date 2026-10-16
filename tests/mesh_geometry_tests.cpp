@@ -29,10 +29,11 @@ int main() {
     try {
         const Uniforms unlit;
         for (auto member : {&Uniforms::signalColor, &Uniforms::signalPositionRange,
-                            &Uniforms::signalDirectionCone, &Uniforms::signalParameters}) {
+                            &Uniforms::signalDirectionCone, &Uniforms::signalParameters,
+                            &Uniforms::backdropHaze, &Uniforms::backdropColor}) {
             auto changed = unlit;
             (changed.*member)[0] = 1;
-            require(!(changed == unlit), "Different signal lights can merge into the same draw packet");
+            require(!(changed == unlit), "Different visual uniforms can merge into the same draw packet");
         }
         Mesh mesh;
         Vertex a, b, c, d;

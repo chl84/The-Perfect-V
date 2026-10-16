@@ -61,6 +61,7 @@ struct State {
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
     std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
+    std::array<float, 4> backdropHaze{}, backdropColor{};
     float snowMaterial = 0, snowSunlight = 0;
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
@@ -141,6 +142,10 @@ struct Context {
         u.signalDirectionCone = state.signalDirectionCone;
         u.signalColor = state.signalColor;
         u.signalParameters = state.signalParameters;
+        u.backdropHaze = state.backdropHaze;
+        u.backdropColor = state.backdropColor;
+        if (u.backdropHaze[0] == 1.f && !state.pipeline.depthTest)
+            u.backdropHaze[0] = 0; // UI/sky never inherit the distant scene veil.
         return u;
     }
     void packet(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count, bool opaque) {
@@ -552,6 +557,8 @@ void popAttrib() {
             s.shininess = old.shininess;
             s.snowMaterial = old.snowMaterial;
             s.snowSunlight = old.snowSunlight;
+            s.backdropHaze = old.backdropHaze;
+            s.backdropColor = old.backdropColor;
             s.lighting = old.lighting;
             s.light0 = old.light0;
             s.light1 = old.light1;
@@ -750,6 +757,12 @@ void materialf(Enum, Enum property, float value) {
 void snowSunlight(float strength) {
     const float value = std::clamp(finite(strength), 0.f, 1.f);
     apply([=](Context &c) { c.state.snowSunlight = value; });
+}
+void backdropHaze(const std::array<float, 4> &parameters, const std::array<float, 4> &color) {
+    apply([=](Context &c) {
+        c.state.backdropHaze = parameters;
+        c.state.backdropColor = color;
+    });
 }
 void colorMaterial(Enum, Enum) {}
 void fogfv(Enum property, const float *v) {

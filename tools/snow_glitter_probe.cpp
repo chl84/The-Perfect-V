@@ -53,6 +53,81 @@ Difference difference(const Image &a, const Image &b) {
 void require(bool condition, const char *message) {
     if (!condition) throw std::runtime_error(message);
 }
+void backdropChecks(Renderer &r, const fs::path &out) {
+    std::ofstream report(out / "backdrop-report.csv");
+    report << "case,changed_pixels,mean_channel_delta,max_delta,foreground_changes\n";
+    auto draw = [&](int hill, const Frame &f, environment::Conditions conditions,
+                    int camera, bool panorama, bool enabled, const std::string &name) {
+        r.setBackdropMist(enabled);
+        r.setEnvironment(conditions, true);
+        r.resetCamera();
+        r.begin(hills()[hill], f, f.elapsed, camera, panorama);
+        if (!r.sceneReadyFor(hills()[hill])) {
+            r.waitForScene(); r.resetCamera();
+            r.begin(hills()[hill], f, f.elapsed, camera, panorama);
+        }
+        r.overlay();
+        r.rect(25, 20, 210, 42, {.04f, .07f, .10f, 1});
+        r.text("The Perfect V", 40, 30, 24);
+        r.jumperPreview(JumperAppearance::Pro, 215, 55, 12);
+        const auto path = out / (name + (enabled ? "-on.ppm" : "-off.ppm"));
+        r.capture(path.string()); r.finish();
+        return read(path);
+    };
+    auto check = [&](int hill, const Frame &f, environment::Conditions conditions,
+                     int camera, bool panorama, const std::string &name) {
+        const auto off = draw(hill, f, conditions, camera, panorama, false, name);
+        const auto on = draw(hill, f, conditions, camera, panorama, true, name);
+        const auto d = difference(off, on);
+        size_t foreground = 0;
+        // A small opaque near-snow patch at bottom centre must remain clear.
+        for (int y = on.h * 9 / 10; y < on.h; ++y)
+            for (int x = on.w * 48 / 100; x < on.w * 52 / 100; ++x)
+                for (int c = 0; c < 3; ++c)
+                    foreground += off.rgb[(y * on.w + x) * 3 + c] != on.rgb[(y * on.w + x) * 3 + c];
+        report << name << ',' << d.pixels << ',' << d.mean << ',' << d.maximum << ',' << foreground << '\n';
+        report.flush();
+        if (!panorama) require(foreground == 0, "Backdrop haze changed near snow in the jumping corridor");
+        require(d.mean < 35, "Backdrop mist overwhelms the scene");
+        if (conditions.time == environment::TimeOfDay::Day && conditions.weather == environment::Weather::Sunny)
+            require(d.pixels > 500, "Backdrop transition veil is missing");
+        // The opaque UI badge, including its 3D preview, must remain identical.
+        const int uiLeft = int(std::ceil(r.offsetX + 25 * r.uiScale)) + 2;
+        const int uiRight = int(std::floor(r.offsetX + 235 * r.uiScale)) - 2;
+        const int uiTop = int(std::ceil(r.offsetY + 20 * r.uiScale)) + 2;
+        const int uiBottom = int(std::floor(r.offsetY + 62 * r.uiScale)) - 2;
+        for (int y = uiTop; y < uiBottom; ++y)
+            for (int x = uiLeft; x < uiRight; ++x)
+                for (int c = 0; c < 3; ++c)
+                    require(off.rgb[(y * on.w + x) * 3 + c] == on.rgb[(y * on.w + x) * 3 + c],
+                            "Backdrop material leaked into sky/UI");
+    };
+    std::vector<int> venues{7};
+    for (int i = 0; i < int(HILL_COUNT); ++i) if (i != 7) venues.push_back(i);
+    for (int hill : venues) {
+        Simulation sim(hill, 0); sim.resetOriginal(hill, 12345, 98765);
+        for (int tick = 0; tick < 20000 && sim.phase != Phase::Flight &&
+             sim.phase != Phase::Finished && sim.phase != Phase::Disqualified; ++tick)
+            sim.step(ORIGINAL_TICK, autopilot(sim));
+        require(sim.phase == Phase::Flight, "Backdrop probe jump never reached flight");
+        for (int tick = 0; tick < 40; ++tick) sim.step(ORIGINAL_TICK, autopilot(sim));
+        const auto f = sim.frame();
+        const auto name = "hill-" + std::to_string(hill);
+        check(hill, f, {}, 0, false, name + "-flight");
+        check(hill, f, {}, 0, true, name + "-panorama");
+        if (hill == 7) {
+            check(hill, f, {}, 1, false, name + "-chase");
+            check(hill, f, {}, 2, false, name + "-broadcast");
+            for (int time = 0; time < 4; ++time)
+                for (int weather = 0; weather < 4; ++weather) {
+                    environment::Conditions conditions{environment::TimeOfDay(time), environment::Weather(weather), 76543};
+                    check(hill, f, conditions, 0, false,
+                          name + "-time" + std::to_string(time) + "-weather" + std::to_string(weather));
+                }
+        }
+    }
+    std::cout << r.device << ": backdrop mist passed all 32 venues, cameras and 16 time/weather cases\n";
+}
 void lookAt(Vec3 eye, Vec3 center) {
     Vec3 f = (center - eye).normalized(), s = cross(f, {0, 1, 0}).normalized(), u = cross(s, f);
     float matrix[]{float(s.x), float(u.x), float(-f.x), 0,
@@ -97,7 +172,7 @@ void patch(Renderer &r, double distance, double cameraX, float sunlight, bool ma
     }
     materialf(FRONT_AND_BACK, SNOW_GLITTER, 0);
 }
-int run(const fs::path &out, const std::string &assets, bool timingOnly) {
+int run(const fs::path &out, const std::string &assets, bool timingOnly, bool backdropOnly) {
     fs::create_directories(out);
     if (!SDL_Init(SDL_INIT_VIDEO)) throw std::runtime_error(SDL_GetError());
     auto *window = SDL_CreateWindow("Snow glitter visual tests", 1280, 720, SDL_WINDOW_HIDDEN);
@@ -105,6 +180,9 @@ int run(const fs::path &out, const std::string &assets, bool timingOnly) {
     {
         Renderer r(window, assets, 4, false, true);
         r.setSynchronousRendering(true);
+        if (backdropOnly) {
+            backdropChecks(r, out);
+        } else {
         std::ofstream report;
         if (!timingOnly) report.open(out / "report.csv");
         if (report) report << "case,changed_pixels,mean_channel_delta,max_channel_delta\n";
@@ -227,6 +305,7 @@ int run(const fs::path &out, const std::string &assets, bool timingOnly) {
         }
         std::cout << r.device << (timingOnly ? ": isolated offscreen timings completed\n" :
             ": snow material/resolutions/MSAA/stationary/moving/far/16 weather cases passed\n");
+        }
     }
     SDL_DestroyWindow(window); SDL_Quit();
     return 0;
@@ -234,8 +313,9 @@ int run(const fs::path &out, const std::string &assets, bool timingOnly) {
 } // namespace
 int main(int argc, char **argv) {
     try {
-        if (argc != 3 && !(argc == 4 && std::string(argv[3]) == "--timing-only"))
-            throw std::runtime_error("Usage: snow-glitter-probe output-directory assets-directory [--timing-only]");
-        return run(argv[1], argv[2], argc == 4);
+        if (argc != 3 && !(argc == 4 && (std::string(argv[3]) == "--timing-only" || std::string(argv[3]) == "--backdrop-mist")))
+            throw std::runtime_error("Usage: snow-glitter-probe output-directory assets-directory [--timing-only|--backdrop-mist]");
+        return run(argv[1], argv[2], argc == 4 && std::string(argv[3]) == "--timing-only",
+                   argc == 4 && std::string(argv[3]) == "--backdrop-mist");
     } catch (const std::exception &e) { std::cerr << e.what() << '\n'; return 1; }
 }

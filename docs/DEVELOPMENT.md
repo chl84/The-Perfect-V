@@ -513,6 +513,22 @@ reach the receiver; floodlights contribute one blended projection at night.
 The CPU command suite checks overlap, ski gaps, height-dependent softening and
 landing contrast in all sixteen time/weather combinations.
 
+A low backdrop mist softens the join between the terrain and photographic
+mountains. The outer valley flanks and decorative tail fade toward the same
+light-dependent air color as the photo foot; foreground distance gating keeps
+the jumping corridor clear. The photographic veil follows world bearing and
+altitude, leaving peaks distinct. Dense weather that already hides the photo
+keeps its previous fog. The small vertex calculation and final color blend
+share the existing passes; there are no fog planes, additional textures, or
+terrain/physics changes. UI overlays explicitly reset the veil, including 3D
+jumper previews.
+
+`build-vulkan/snow-glitter-probe /tmp/backdrop-check assets --backdrop-mist`
+writes paired mist on/off captures for all 32 venues, panorama/gameplay views,
+all three cameras and sixteen light/weather presets. Its CSV checks the near
+snow and opaque UI/preview remain unchanged. These explicit Vulkan diagnostics
+use the same `TPV_BUILD_RENDER_PROBE` option as the snow-crystal checks below.
+
 Snow crystals use a fixed world-X/Z cell pattern in the existing scene fragment
 shader, with randomized microfacet normals and camera-dependent solar glints.
 Only terrain/prepared/inrun snow is tagged; other materials retain the previous

@@ -166,6 +166,9 @@ void lightfv(Enum, Enum, const float *);
 void materialfv(Enum, Enum, const float *);
 void materialf(Enum, Enum, float);
 void snowSunlight(float strength);
+// mode: 0 off, 1 distant scene, 2 photographic foothills. Other components:
+// hill scale, start of decorative tail, maximum opacity.
+void backdropHaze(const std::array<float, 4> &parameters, const std::array<float, 4> &color);
 void colorMaterial(Enum, Enum);
 void fogfv(Enum, const float *);
 void fogf(Enum, float);
