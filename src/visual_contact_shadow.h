@@ -1,5 +1,5 @@
 #pragma once
-#include "physics.h"
+#include "visual_snow_mesh.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -70,12 +70,8 @@ void contactShadowTriangles(const Hill &hill, Vec3 center, double rx, double rz,
     const int lastZ = int(std::ceil((back - zStart) / zStep));
     for (int x = firstX; x < lastX; ++x)
         for (int z = firstZ; z < lastZ; ++z) {
-            const double x0 = start + x * step, x1 = x0 + step;
-            const double z0 = zStart + z * zStep, z1 = z0 + zStep;
-            const Vec3 a{x0, height(x0, z0), z0}, b{x0, height(x0, z1), z1};
-            const Vec3 c{x1, height(x1, z1), z1}, d{x1, height(x1, z0), z0};
-            clipTriangle(a, b, c);
-            clipTriangle(a, c, d);
+            const double x0 = start + x * step, z0 = zStart + z * zStep;
+            snowCellTriangles(hill, x0, z0, height, clipTriangle);
         }
 }
 } // namespace sjp::visual

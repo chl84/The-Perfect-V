@@ -1,5 +1,5 @@
 #pragma once
-#include "physics.h"
+#include "visual_snow_mesh.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -11,11 +11,26 @@ class CameraSurface {
     const Hill &hill;
     double start, step, zStep;
 
-    explicit CameraSurface(const Hill &h)
+    bool conservativeRail;
+
+    explicit CameraSurface(const Hill &h, bool rail = false)
         : hill(h), start(std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale())),
-          step(3 * h.scale()), zStep(10 * h.scale()) {}
+          step(3 * h.scale()), zStep(10 * h.scale()), conservativeRail(rail) {}
 
     double height(double x, double z) const {
+        if (conservativeRail)
+            return coarseRailHeight(x, z);
+        double y = terrainSnowHeight(hill, x, z);
+        if (x >= hill.inrunStart() && x <= 0 && std::abs(z) <= 2.3)
+            y = std::max(y, inrunSnowHeight(hill, x));
+        return y;
+    }
+
+  private:
+    // Keep the established camera-2 rail stable. Its conservative coarse
+    // envelope already has a metre of spare clearance; the refined surface
+    // remains the receiver for shadows, markers and live camera protection.
+    double coarseRailHeight(double x, double z) const {
         const double x0 = start + std::floor((x - start) / step) * step;
         const double z0 = std::floor(z / zStep) * zStep;
         const double u = (x - x0) / step, v = (z - z0) / zStep;
@@ -48,43 +63,29 @@ inline double cameraRequiredLift(const CameraSurface &surface, Vec3 eye, Vec3 fo
         const Vec3 p = eye + ray * t;
         lift = std::max(lift, (surface.height(p.x, p.z) + sightClearance - p.y) / (1 - t));
     };
-    auto nextGrid = [&](double origin, double delta, double start, double step, double t) {
-        if (std::abs(delta) < 1e-10)
-            return 1.0;
-        const double cell = std::floor((origin + delta * (t + 1e-8) - start) / step);
-        return std::min(1.0, (start + (cell + (delta > 0 ? 1 : 0)) * step - origin) / delta);
-    };
-    // The surface and ray are linear inside each receiver triangle. Checking
-    // grid edges and diagonals catches narrow ridges without a dense ray march.
-    for (double t = 0; t < 1 - 1e-8;) {
-        double next = std::min({nextGrid(eye.x, ray.x, surface.start, surface.step, t),
-                                nextGrid(eye.z, ray.z, 0, surface.zStep, t),
-                                nextGrid(eye.x, ray.x, surface.hill.inrunStart(), 2 * surface.hill.scale(), t)});
-        auto boundary = [&](double origin, double delta, double edge) {
-            if (std::abs(delta) > 1e-10) {
-                const double cut = (edge - origin) / delta;
-                if (cut > t + 1e-8 && cut < next)
-                    next = cut;
-            }
-        };
-        boundary(eye.z, ray.z, -2.3);
-        boundary(eye.z, ray.z, 2.3);
-        boundary(eye.x, ray.x, surface.hill.inrunStart());
-        boundary(eye.x, ray.x, 0);
-        measure(t);
-        measure(next);
-        const Vec3 mid = eye + ray * ((t + next) * .5);
-        const double x0 = surface.start + std::floor((mid.x - surface.start) / surface.step) * surface.step;
-        const double z0 = std::floor(mid.z / surface.zStep) * surface.zStep;
-        const double slope = ray.z / surface.zStep - ray.x / surface.step;
-        if (std::abs(slope) > 1e-10) {
-            const double diagonal = -((eye.z - z0) / surface.zStep - (eye.x - x0) / surface.step) / slope;
-            if (diagonal > t && diagonal < next)
-                measure(diagonal);
+    // Read the exact cached receiver topology, including its fixed fine belt
+    // and stitched sides. Camera protection never changes simulation contact.
+    measure(0);
+    measure(1);
+    snowEdgeCrossings(surface.hill, eye, focus, measure);
+    auto boundary = [&](double origin, double delta, double edge) {
+        if (std::abs(delta) > 1e-10) {
+            const double t = (edge - origin) / delta;
+            if (t > 0 && t < 1)
+                measure(t);
         }
-        if (next <= t)
-            break;
-        t = next;
+    };
+    boundary(eye.z, ray.z, -2.3);
+    boundary(eye.z, ray.z, 2.3);
+    boundary(eye.x, ray.x, surface.hill.inrunStart());
+    boundary(eye.x, ray.x, 0);
+    if (std::abs(ray.x) > 1e-10) {
+        const double low = std::max(std::min(eye.x, focus.x), surface.hill.inrunStart());
+        const double high = std::min(std::max(eye.x, focus.x), 0.0);
+        const double step = inrunSnowStep(surface.hill);
+        for (double x = surface.hill.inrunStart() +
+                        std::ceil((low - surface.hill.inrunStart()) / step) * step; x < high; x += step)
+            boundary(eye.x, ray.x, x);
     }
     return lift;
 }
@@ -95,7 +96,7 @@ inline double cameraRequiredLift(const CameraSurface &surface, Vec3 eye, Vec3 fo
 class ChaseCameraPath {
   public:
     void build(const Hill &hill) {
-        const CameraSurface surface(hill);
+        const CameraSurface surface(hill, true);
         start = hill.start() - 5;
         constexpr double spacing = 1;
         const size_t count = size_t(std::ceil((hill.end() + 100 - start) / spacing)) + 1;

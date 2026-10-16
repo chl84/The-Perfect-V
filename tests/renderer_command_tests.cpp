@@ -102,17 +102,7 @@ void contactShadowDecals() {
                 // Check vertices and interior points, so a broad flat decal
                 // cannot bridge a snow-grid diagonal or intersect curved snow.
                 for (const auto p : {t[0], t[1], t[2], (t[0] + t[1] + t[2]) * (1.0 / 3)}) {
-                    const double step = 3 * scale, zStep = 10 * scale;
-                    const double start = std::min(-170 * scale, hill.inrunStart() - 60 * scale);
-                    const double x0 = start + std::floor((p.x - start) / step) * step;
-                    const double z0 = -200 * scale + std::floor((p.z + 200 * scale) / zStep) * zStep;
-                    const double u = (p.x - x0) / step, v = (p.z - z0) / zStep;
-                    const double a = visual::backdropGround(hill, x0, z0);
-                    const double b = visual::backdropGround(hill, x0, z0 + zStep);
-                    const double c = visual::backdropGround(hill, x0 + step, z0 + zStep);
-                    const double d = visual::backdropGround(hill, x0 + step, z0);
-                    const double expected = v >= u ? a * (1 - v) + b * (v - u) + c * u
-                                                   : a * (1 - u) + c * v + d * (u - v);
+                    const double expected = visual::terrainSnowHeight(hill, p.x, p.z);
                     require(std::abs(p.y - expected) < 1e-8 &&
                                 std::abs(p.x - center.x) <= rx + 1e-8 &&
                                 std::abs(p.z - center.z) <= rz + 1e-8,
@@ -384,86 +374,94 @@ void smoothSnow(const sjp::Hill &hill) {
             (inrun ? inrunShared : landing ? landingShared : surroundingShared)++;
         }
     }
-    // Static batching still emits each existing snow quad as six vertices.
-    require(snowLighting.size() % 6 == 0, "Snow topology changed");
+    // Static batching emits both the corridor quads and stitched triangles.
+    require(snowLighting.size() % 3 == 0, "Snow is not triangulated");
     require(inrunShared > 20 && landingShared > 20 && surroundingShared > 100,
             "Snow lighting audit did not cover the inrun, landing and surrounding terrain");
 }
 void protectedSnow(int hill) {
-    // Snapshot of every natural/prepared snow and inrun vertex before the
-    // construction changes. Keep all X/Z coordinates and protected elevations
-    // byte-identical. Only distant flank/continuation elevations are normalized
-    // to the original below; their actual geometry is audited separately.
+    const auto &h = sjp::hills()[size_t(hill)];
+    for (const auto &vertex : snowLighting) {
+        const auto p = vertex.position;
+        const bool track = p.x <= 0 && std::abs(std::abs(p.z) - 2.3) < 1e-8;
+        const double expected = track ? h.inrun(p.x) : sjp::visual::backdropGround(h, p.x, p.z);
+        require(std::abs(p.y - expected) < 1e-7, "Tessellation moved a snow node off its original profile");
+    }
+
+    // Snapshot after the fixed four-way ski-corridor refinement. Every node is
+    // checked against its original Hill/backdrop evaluator above; snow-mesh
+    // separately checks exact receiver planes, stitched edges and geometry cost.
+    // Distant flank/continuation elevations are normalized in the hash below.
     static const std::array<std::pair<size_t, uint64_t>, sjp::HILL_COUNT> frozen{{
-        {52692, 8929634750460910395ULL},
-        {52932, 4961535559577657852ULL},
-        {52920, 13011848076777423058ULL},
-        {52422, 17105584306129191312ULL},
-        {57042, 10291631105589817921ULL},
-        {52362, 6735142137497314494ULL},
-        {51750, 16676245615236058334ULL},
-        {53358, 10655617069735740352ULL},
-        {51486, 14876695077908833954ULL},
-        {53130, 12706393837836967098ULL},
-        {51456, 15722584054216609977ULL},
-        {77718, 8313475174198820722ULL},
-        {52362, 17762803137908481336ULL},
-        {53184, 1836508506089985619ULL},
-        {52998, 9459794330870045278ULL},
-        {51354, 17697855449581398120ULL},
-        {52950, 9135949032508433795ULL},
-        {76380, 136115027135053538ULL},
-        {52464, 15590644764506681616ULL},
-        {53202, 6546171082793365974ULL},
-        {51282, 2660078780452410792ULL},
-        {63174, 10473521836022733824ULL},
-        {53364, 13545339765436101732ULL},
-        {52770, 13508245450373346062ULL},
-        {58326, 1545828841040480761ULL},
-        {53646, 5602211231906966122ULL},
-        {52632, 4458927447898145323ULL},
-        {52104, 18169965633297188017ULL},
-        {52362, 14060586234147959493ULL},
-        {51540, 5050501703021410990ULL},
-        {52236, 11485110930087622931ULL},
-        {52368, 11331550327366158445ULL},
+        {63531, 332005838309490671ULL},
+        {61248, 13749656208297562528ULL},
+        {64638, 4113802052620375767ULL},
+        {59352, 5785973603829520542ULL},
+        {71013, 15204791170868200422ULL},
+        {62328, 4805211830282826992ULL},
+        {60042, 15370997253094054266ULL},
+        {65889, 3719971768711360860ULL},
+        {59166, 1514431609527838209ULL},
+        {65181, 12604286175445073289ULL},
+        {58917, 8571053669830528443ULL},
+        {100344, 524981389426267062ULL},
+        {62274, 14157657439108270143ULL},
+        {62190, 17131497041031401304ULL},
+        {64593, 2289514626058496785ULL},
+        {58680, 10225181638702348561ULL},
+        {61113, 13435592756544685374ULL},
+        {98478, 15775536612510400616ULL},
+        {62976, 12319626472824613995ULL},
+        {62232, 7321709931902578620ULL},
+        {58344, 334117920163158061ULL},
+        {79842, 645815661549437037ULL},
+        {62673, 14305831681832638936ULL},
+        {60627, 4286063589193342913ULL},
+        {72624, 5204005737006029097ULL},
+        {63540, 1127316433953725732ULL},
+        {60183, 10756928811792639390ULL},
+        {61431, 6604996147327977918ULL},
+        {62130, 7869743438222762357ULL},
+        {59328, 900319235369458039ULL},
+        {61938, 3282808730320582979ULL},
+        {59199, 18149428405040777750ULL},
     }};
     // Different CRT trigonometric implementations can differ in the last bits.
     // The portable snapshot compares the same vertices at 0.1 mm resolution;
     // Linux additionally retains its original bit-for-bit regression baseline.
     static const std::array<uint64_t, sjp::HILL_COUNT> portable{{
-        16410948978715020856ULL,
-        12147850203029739695ULL,
-        9965119677148511654ULL,
-        1601929013770449108ULL,
-        7184451969848903411ULL,
-        14095122461980488565ULL,
-        139391288926217785ULL,
-        10284364573143670914ULL,
-        14354666242797840021ULL,
-        18360325503214719519ULL,
-        14328893241915900718ULL,
-        757553506729415774ULL,
-        11936073085036567321ULL,
-        16507322509314791118ULL,
-        1003033639534485452ULL,
-        273103672006086742ULL,
-        8258878063574308966ULL,
-        12464365750364648497ULL,
-        13907912896749450359ULL,
-        9160457119029802041ULL,
-        13644606824215427258ULL,
-        15655009457801941446ULL,
-        5443135025366403817ULL,
-        1839736569155908401ULL,
-        1077818679102927524ULL,
-        14848798517484309426ULL,
-        3230060819586849787ULL,
-        5469604649851427510ULL,
-        12829906376846216826ULL,
-        12469243151323574419ULL,
-        10110787086686065376ULL,
-        12569981723246716970ULL
+        9753467656308938359ULL,
+        3558483115039370382ULL,
+        14846863810275329452ULL,
+        3751243153306063734ULL,
+        10788704733033400572ULL,
+        7435114712831765749ULL,
+        18022943485631786390ULL,
+        12277956131118524099ULL,
+        9580181485428545228ULL,
+        13901787160979429984ULL,
+        6808551350350700599ULL,
+        7635505468029913710ULL,
+        11614727659916427143ULL,
+        13064038062443512388ULL,
+        8893013825896103743ULL,
+        10634764686097499608ULL,
+        9141501623561071947ULL,
+        4119410114076155133ULL,
+        10662149025300522707ULL,
+        15278588057074495133ULL,
+        8709463910823194367ULL,
+        4868479142257061674ULL,
+        18306200314570446929ULL,
+        12500328578682909691ULL,
+        8706399353508248069ULL,
+        14084631163883877781ULL,
+        14428581930113406219ULL,
+        2254243515505720408ULL,
+        14081125672645803798ULL,
+        5670050648783477683ULL,
+        14015741728919086731ULL,
+        3669830538441992756ULL,
     }};
     bool unchanged = snowVertices == frozen[size_t(hill)].first &&
                      portableSnowHash == portable[size_t(hill)];

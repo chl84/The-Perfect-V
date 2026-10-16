@@ -91,8 +91,8 @@ void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) 
     // seat and collision profile are constructed separately and remain fixed.
     const double first = h.inrunStart(), last = -.75;
     constexpr int serviceSide = visual::inrunServiceSide;
-    for (double x = first; x < 0; x += 2 * h.scale()) {
-        const double xx = std::min(0.0, x + 2 * h.scale()), y = h.inrun(x), yy = h.inrun(xx);
+    for (double x = first; x < 0; x += visual::inrunSnowStep(h)) {
+        const double xx = std::min(0.0, x + visual::inrunSnowStep(h)), y = h.inrun(x), yy = h.inrun(xx);
         quad({x, y - .62, -2.3}, {xx, yy - .62, -2.3}, {xx, yy - .62, 2.3}, {x, y - .62, 2.3}, timber);
         for (int side : {-1, 1})
             beam({x, y - .48, side * 2.12}, {xx, yy - .48, side * 2.12}, .13, steel);

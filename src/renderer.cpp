@@ -243,7 +243,7 @@ void shadowGeometry(const Hill &h, const Frame &f, const visual::EnvironmentLigh
     const bool central = onInrun ||
                          std::max(std::abs(silhouette.z),
                                   std::abs(silhouette.z + (visual::ShadowMask::rows - 1) * silhouette.dz)) <=
-                             19 * h.scale();
+                             10 * h.scale();
     std::array<double, visual::ShadowMask::columns> xs{}, ground{}, ramp{};
     for (int column = 0; column < visual::ShadowMask::columns; ++column) {
         xs[size_t(column)] = f.x + silhouette.x + column * silhouette.dx;

@@ -15,6 +15,7 @@ struct FallContact {
     Vec3 origin;
     double start, step, firstX, lift = 0;
     double rampStep, rampFirstX = 0;
+    double fineStart, fineEnd, coreWidth;
     bool skiSurface = false;
     Vec3 skiAnkle, skiDirection;
     std::vector<double> heights;
@@ -24,7 +25,12 @@ struct FallContact {
     std::array<Vec3, 4> face{};
     FallContact(const Hill &h, const Frame &f, const OriginalSkeleton &skeleton, double padding = .6)
         : hill(h), origin{f.x, f.y, 0}, start(std::min(-170 * h.scale(), h.inrunStart() - 60 * h.scale())),
-          step(3 * h.scale()), rampStep(2 * h.scale()) {
+          step(3 * h.scale() / visual::snowSubdivisions), rampStep(visual::inrunSnowStep(h)),
+          fineStart(visual::snowCellStart(0, start, 3 * h.scale())),
+          fineEnd(visual::snowCellStart(h.end() + 8 * h.scale(), start, 3 * h.scale()) + 3 * h.scale()),
+          coreWidth(10 * h.scale()) {
+        if (fineStart + 3 * h.scale() <= 0)
+            fineStart += 3 * h.scale();
         double low = skeleton.points[0].x, high = low;
         for (auto p : skeleton.points) {
             low = std::min(low, p.x);
@@ -44,30 +50,29 @@ struct FallContact {
         }
     }
     double terrainSurface(double x, double z) const {
-        const long i = long(std::floor((x - firstX) / step));
-        const double x0 = firstX + i * step, u = (x - x0) / step;
-        auto height = [&](long index) {
-            return index >= 0 && size_t(index) < heights.size() ? heights[size_t(index)]
-                                                                : hill.ground(firstX + index * step);
+        auto cached = [&](long i) {
+            return i >= 0 && size_t(i) < heights.size() ? heights[size_t(i)]
+                                                       : hill.ground(firstX + i * step);
         };
-        const double a = height(i), b = height(i + 1), s = hill.scale();
-        const double zStep = 10 * s, z0 = -200 * s + std::floor((z + 200 * s) / zStep) * zStep;
-        const double z1 = z0 + zStep, v = (z - z0) / zStep;
-        if (std::max(std::abs(z0), std::abs(z1)) <= 19 * s)
-            return a * (1 - u) + b * u;
-        auto node = [&](double xx, double zz, double y) {
-            const double edge = std::max(0.0, std::abs(zz) - 19 * s);
+        if (std::abs(z) <= coreWidth && x >= fineStart && x < fineEnd) {
+            const long i = long(std::floor((x - firstX) / step));
+            const double t = (x - firstX - i * step) / step;
+            return cached(i) * (1 - t) + cached(i + 1) * t;
+        }
+        return visual::terrainSnowHeight(hill, x, z, [&](double xx, double zz) {
+            const long index = std::lround((xx - firstX) / step);
+            const double y = cached(index);
+            const double edge = std::max(0.0, std::abs(zz) - 19 * hill.scale());
+            if (edge == 0)
+                return y;
             return y - edge * .08 + std::sin(xx * .017 + zz * .013) * edge * .018;
-        };
-        const double aa = node(x0, z0, a), bb = node(x0, z1, a), cc = node(x0 + step, z1, b),
-                     dd = node(x0 + step, z0, b);
-        return v >= u ? aa * (1 - v) + bb * (v - u) + cc * u : aa * (1 - u) + cc * v + dd * (u - v);
+        });
     }
     double surface(double x, double z) const {
         double y = terrainSurface(x, z);
         if (rampHeights.empty() || x < hill.inrunStart() || x > 0 || std::abs(z) > 2.3)
             return y;
-        // Read the track's existing 2*scale snow quads, including the shorter
+        // Read the track's refined snow quads, including the shorter
         // final quad at the board. Never extend or move the track itself.
         const long i = long(std::floor((x - rampFirstX) / rampStep));
         const double a = rampFirstX + i * rampStep, b = std::min(0.0, a + rampStep);
@@ -95,13 +100,11 @@ struct FallContact {
         // A triangle edge can cross a terrain-grid bend between its endpoints.
         // Sample those crossings as well, retaining the original height grid.
         const Vec3 delta = b - a;
+        visual::snowEdgeCrossings(hill, a + origin, b + origin,
+                                  [&](double t) { measure(a + delta * t); });
         if (std::abs(delta.x) >= 1e-10) {
             const double low = std::min(a.x, b.x) + origin.x;
             const double high = std::max(a.x, b.x) + origin.x;
-            for (double x = firstX + std::ceil((low - firstX) / step) * step; x < high; x += step) {
-                const double t = (x - origin.x - a.x) / delta.x;
-                measure(a + delta * t);
-            }
             if (!rampHeights.empty()) {
                 auto trackCrossing = [&](double x) {
                     if (x <= low || x >= high || x < hill.inrunStart() || x > 0)

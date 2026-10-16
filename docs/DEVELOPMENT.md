@@ -184,10 +184,28 @@ packages, personal saves, machine-specific shortcuts, caches or local credential
 
 The prepared snow strip fades into ordinary snow after the bottom of each
 hill's outrun. Only its material, grooming pattern and color change. The
-original height grid, surface contours, collisions, simulation and cameras
-remain unchanged. Ordinary scenery snow has grain without grooming stripes.
+original analytic profiles, collisions and simulation remain unchanged.
+Ordinary scenery snow has grain without grooming stripes.
 Both textures have averaged mip levels; the material blend reuses the existing
 terrain triangles with depth writes disabled and polygon offset.
+
+`visual_snow_mesh.h` defines a fixed, four-way longitudinal refinement of the
+ski corridor. The central terrain rows at Z ±10×hill scale use 0.75×scale
+spacing instead of 3×scale, from the cell crossing the takeoff through the
+outrun and its eight-scaled-metre margin. Transition fans join this strip to
+the original coarse rows at Z ±20×scale with matching edges and no T-junctions.
+The inrun retains its ±2.3 m width, with 0.5×scale spacing instead of 2×scale;
+snow, grooves, fascia and underlying stringers follow the same profile samples.
+Fine inrun panels retain the coarse material groups to avoid multiplying draw
+calls. All geometry is still built once in the existing bounded venue cache.
+
+Snow layers, camera clearance, fall contact, scenery decals, athlete shadows
+and distance/record markers share this receiver topology. No skier positions,
+joint angles, Hill functions, inputs, RNG or replay data are changed.
+Camera 2 retains its established rail, built from the previous conservative
+coarse envelope and its spare clearance, so refinement does not reframe a jump.
+`snow-mesh` checks all 32 hills for stitched edges, receiver agreement, geometry
+bounds and a maximum 8.6 mm curve error in the refined landing corridor.
 
 ## Inrun structures and lighting
 
@@ -198,9 +216,9 @@ earth-supported sections. Service stairs, close-spaced rail posts, takeoff
 access openings and supported cabin landings remain outside the ski grooves,
 on the -Z side only. The +Z side facing camera 1 has no service deck, stairs,
 railings or inrun lamps; the underlying load-bearing structure remains.
-The original snow surface, groove vertices, start seat and physics coordinates
-are retained. The command suite freezes the complete terrain/inrun vertex
-streams from before this change on all 32 venues.
+The original analytic snow profile, groove placement, start seat and physics
+coordinates are retained. The command suite checks snow nodes against these
+profiles and freezes the refined terrain/inrun vertex streams on all 32 venues.
 
 A narrow 16 cm transverse marker follows the existing snow mesh at the takeoff
 edge. Red K signs retain their original X/Z coordinates; their upright panels

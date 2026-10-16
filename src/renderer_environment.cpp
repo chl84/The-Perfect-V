@@ -147,6 +147,32 @@ void snowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, bool groomed = fals
     }
     sjp::visual::end();
 }
+void snowPatch(const Hill &h, double x, double z, bool groomed = false) {
+    const double dx = 3 * h.scale(), dz = 10 * h.scale();
+    if (!visual::refinedSnowCell(h, x) || std::abs(z + dz * .5) > 20 * h.scale()) {
+        snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + dz), z + dz},
+                 {x + dx, terrainY(h, x + dx, z + dz), z + dz}, {x + dx, terrainY(h, x + dx, z), z}, groomed);
+        return;
+    }
+    visual::snowCellTriangles(h, x, z, [&](double xx, double zz) { return terrainY(h, xx, zz); },
+                             [&](Vec3 a, Vec3 b, Vec3 c) {
+        if (groomed && preparedSnowWeight(h, a.x, a.z) == 0 &&
+            preparedSnowWeight(h, b.x, b.z) == 0 && preparedSnowWeight(h, c.x, c.z) == 0)
+            return;
+        sjp::visual::begin(sjp::gfx::TRIANGLES);
+        for (Vec3 p : {a, b, c}) {
+            const auto normal = terrainSnowNormal(h, p);
+            sjp::visual::normal(normal.x, normal.y, normal.z);
+            Color color = snowColor(h, p.x, p.z);
+            color.a = float(groomed ? preparedSnowWeight(h, p.x, p.z) * visual::valleyBackOpacity(h, p.x)
+                                    : visual::valleyEdgeOpacity(h, p.z, p.x));
+            col(color);
+            sjp::visual::texCoord(p.x / 13.0, p.z / 13.0);
+            vertex(p);
+        }
+        sjp::visual::end();
+    });
+}
 void inrunSnowQuad(const Hill &h, Vec3 a, Vec3 b, Vec3 c, Vec3 d, Color color) {
     col(color);
     sjp::visual::begin(sjp::gfx::QUADS);
@@ -365,48 +391,26 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
         for (double z = -extent * scale; z < extent * scale - 1e-8;) {
             const double zCell = std::floor(z / zStep + 1e-7) * zStep;
             const double zz = std::min({extent * scale, zCell + zStep, z + sampleStep});
-            const double y00 = terrainY(h, cell, zCell), y01 = terrainY(h, cell, zCell + zStep),
-                         y11 = terrainY(h, cell + step, zCell + zStep), y10 = terrainY(h, cell + step, zCell);
-            auto diagonal = [&](Vec3 p) { return (p.z - zCell) / zStep - (p.x - cell) / step; };
-            // Clip the strip to both receiver triangles, including their shared
-            // diagonal. The overlay then stays exactly on the unchanged snow.
-            for (int side : {-1, 1}) {
-                const std::array<Vec3, 4> corners{{{a, 0, z}, {a, 0, zz}, {b, 0, zz}, {b, 0, z}}};
-                std::vector<Vec3> polygon;
-                polygon.reserve(5);
-                Vec3 previous = corners.back();
-                double before = side * diagonal(previous);
-                for (Vec3 p : corners) {
-                    const double after = side * diagonal(p);
-                    if ((before >= 0) != (after >= 0))
-                        polygon.push_back(previous + (p - previous) * (before / (before - after)));
-                    if (after >= 0)
-                        polygon.push_back(p);
-                    previous = p;
-                    before = after;
-                }
-                if (polygon.size() < 3)
-                    continue;
-                for (auto &p : polygon) {
-                    const double u = (p.x - cell) / step, v = (p.z - zCell) / zStep;
-                    p.y = side > 0 ? y00 * (1 - v) + y01 * (v - u) + y11 * u
-                                   : y00 * (1 - u) + y11 * v + y10 * (u - v);
-                }
-                sjp::visual::begin(sjp::gfx::TRIANGLE_FAN);
-                const Vec3 normal = cross(polygon[1] - polygon[0], polygon[2] - polygon[0]).normalized();
-                sjp::visual::normal(normal.x, normal.y, normal.z);
-                for (const auto &p : polygon) {
-                    // Vary twig size and edge position smoothly, keeping the
-                    // nominal measurement location and receiver mesh intact.
-                    const double size = .65 + .7 * smoothNoise(p.z / 2.2, seed + 53);
-                    const double drift = (smoothNoise(p.z / 3.1, seed + 67) - .5) * halfWidth * .55;
-                    col(appearance(p));
-                    sjp::visual::texCoord(p.z / repeatLength + phase + .25 * smoothNoise(p.z / 2.7, seed + 79),
-                                         .5 + (p.x - x - drift) / (2 * halfWidth * size));
-                    vertex(p);
-                }
-                sjp::visual::end();
-            }
+            visual::snowCellTriangles(h, cell, zCell,
+                [&](double xx, double z) { return terrainY(h, xx, z); }, [&](Vec3 aa, Vec3 bb, Vec3 cc) {
+                visual::clipSnowTriangle(aa, bb, cc, a, b, z, zz, [&](const auto &polygon, size_t count) {
+                    sjp::visual::begin(sjp::gfx::TRIANGLE_FAN);
+                    const Vec3 normal = cross(bb - aa, cc - aa).normalized();
+                    sjp::visual::normal(normal.x, normal.y, normal.z);
+                    for (size_t i = 0; i < count; ++i) {
+                        const auto &p = polygon[i];
+                        // Vary twig size and edge position smoothly, keeping the
+                        // nominal measurement location and receiver mesh intact.
+                        const double size = .65 + .7 * smoothNoise(p.z / 2.2, seed + 53);
+                        const double drift = (smoothNoise(p.z / 3.1, seed + 67) - .5) * halfWidth * .55;
+                        col(appearance(p));
+                        sjp::visual::texCoord(p.z / repeatLength + phase + .25 * smoothNoise(p.z / 2.7, seed + 79),
+                                             .5 + (p.x - x - drift) / (2 * halfWidth * size));
+                        vertex(p);
+                    }
+                    sjp::visual::end();
+                });
+            });
             z = zz;
         }
         a = b;
@@ -962,14 +966,12 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     const float edge[]{float(visual::valleyEdgeStart * s), float(visual::valleyEdgeEnd * s), 1, float(visual::valleyBackStart(h))};
     const float noEdge[]{0, 0, 0, 0};
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, edge);
-    // Retain bounds/cells and protected ski/arena vertices. Only the backdrop
-    // flanks/continuation turn downhill instead of extrapolating indefinitely.
+    // Fixed fine ski corridor, stitched to the unchanged coarse valley. Both
+    // snow layers use the exact same triangles and original Hill samples.
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s); x < std::max(420 * s, h.end() + 80 * s);
          x += 3 * s)
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
-            snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
-                     {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
-                     {x + 3 * s, terrainY(h, x + 3 * s, z), z});
+            snowPatch(h, x, z);
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, noEdge);
     // Reuse the exact receiver triangles for a finite, softly blended prepared
     // strip. Polygon offset avoids coplanar flicker; this pass never writes depth.
@@ -983,9 +985,7 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s);
          x < std::min(std::max(420 * s, h.end() + 80 * s), h.outrunBottom() + 47); x += 3 * s)
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
-            snowQuad(h, {x, terrainY(h, x, z), z}, {x, terrainY(h, x, z + 10 * s), z + 10 * s},
-                     {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
-                     {x + 3 * s, terrainY(h, x + 3 * s, z), z}, true);
+            snowPatch(h, x, z, true);
     sjp::visual::popAttrib();
     sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 0);
     sjp::visual::disable(sjp::gfx::TEXTURE_2D);
@@ -1045,29 +1045,44 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     // or underneath it, and never alter the track's contour or width.
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, snowTexture);
     for (double x = h.inrunStart(); x < 0; x += 2 * s) {
-        const double xx = std::min(0.0, x + 2 * s), y = h.inrun(x), yy = h.inrun(xx);
+        const double xx = std::min(0.0, x + 2 * s);
         sjp::visual::enable(sjp::gfx::TEXTURE_2D);
         sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 1);
-        inrunSnowQuad(h, {x, y, -2.3}, {x, y, 2.3}, {xx, yy, 2.3}, {xx, yy, -2.3}, {.92f, .96f, .97f, 1});
+        for (int i = 0; i < visual::snowSubdivisions; ++i) {
+            const double a = x + i * visual::inrunSnowStep(h);
+            if (a >= xx)
+                break;
+            const double b = std::min(xx, a + visual::inrunSnowStep(h));
+            inrunSnowQuad(h, {a, h.inrun(a), -2.3}, {a, h.inrun(a), 2.3},
+                          {b, h.inrun(b), 2.3}, {b, h.inrun(b), -2.3}, {.92f, .96f, .97f, 1});
+        }
         sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 0);
         sjp::visual::disable(sjp::gfx::TEXTURE_2D);
-        quad({x, y - .62, 2.3}, {xx, yy - .62, 2.3}, {xx, yy, 2.3}, {x, y, 2.3}, {.33f, .29f, .25f, 1});
-        quad({x, y - .62, -2.3}, {x, y, -2.3}, {xx, yy, -2.3}, {xx, yy - .62, -2.3}, {.33f, .29f, .25f, 1});
-        for (double z : {-.22, .22})
-            quad({x, y + .014, z - .055}, {x, y + .014, z + .055}, {xx, yy + .014, z + .055},
-                 {xx, yy + .014, z - .055}, {.48f, .67f, .76f, 1});
-        for (double z : {-2.2, 2.2}) {
-            quad({x, y + .021, z - .09}, {x, y + .021, z + .09}, {xx, yy + .021, z + .09},
-                 {xx, yy + .021, z - .09}, {.19f, .42f, .53f, 1});
-        }
-        if (xx > -.16) {
-            // A narrow metal-colored transverse edge, like a real takeoff
-            // table. Follow the existing snow triangle, without changing it.
-            const double edgeX = std::max(x, -.16);
-            const double edgeY = y + (yy - y) * (edgeX - x) / (xx - x);
-            if (xx - edgeX > 1e-8)
-                quad({edgeX, edgeY + .018, -2.3}, {edgeX, edgeY + .018, 2.3},
-                     {xx, yy + .018, 2.3}, {xx, yy + .018, -2.3}, {.16f, .19f, .22f, 1});
+        const double cellX = x, cellEnd = xx;
+        for (int i = 0; i < visual::snowSubdivisions; ++i) {
+            const double x = cellX + i * visual::inrunSnowStep(h);
+            if (x >= cellEnd)
+                break;
+            const double xx = std::min(cellEnd, x + visual::inrunSnowStep(h));
+            const double y = h.inrun(x), yy = h.inrun(xx);
+            quad({x, y - .62, 2.3}, {xx, yy - .62, 2.3}, {xx, yy, 2.3}, {x, y, 2.3}, {.33f, .29f, .25f, 1});
+            quad({x, y - .62, -2.3}, {x, y, -2.3}, {xx, yy, -2.3}, {xx, yy - .62, -2.3}, {.33f, .29f, .25f, 1});
+            for (double z : {-.22, .22})
+                quad({x, y + .014, z - .055}, {x, y + .014, z + .055}, {xx, yy + .014, z + .055},
+                     {xx, yy + .014, z - .055}, {.48f, .67f, .76f, 1});
+            for (double z : {-2.2, 2.2}) {
+                quad({x, y + .021, z - .09}, {x, y + .021, z + .09}, {xx, yy + .021, z + .09},
+                     {xx, yy + .021, z - .09}, {.19f, .42f, .53f, 1});
+            }
+            if (xx > -.16) {
+                // A narrow metal-colored transverse edge, like a real takeoff
+                // table. Follow the existing snow triangle, without changing it.
+                const double edgeX = std::max(x, -.16);
+                const double edgeY = y + (yy - y) * (edgeX - x) / (xx - x);
+                if (xx - edgeX > 1e-8)
+                    quad({edgeX, edgeY + .018, -2.3}, {edgeX, edgeY + .018, 2.3},
+                         {xx, yy + .018, 2.3}, {xx, yy + .018, -2.3}, {.16f, .19f, .22f, 1});
+            }
         }
     }
     inrunStructure(h, inrunLayouts[index]);
