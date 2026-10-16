@@ -1,6 +1,6 @@
 # The Perfect V
 
-A native Linux ski jumping game with 32 hills, local competitions and four distinct
+A native Linux and Windows ski jumping game with 32 hills, local competitions and four distinct
 jumpers. Built with C++17, SDL3 and Vulkan.
 
 ![Pro in flight above a snowy valley in daylight](docs/screenshots/daylight-flight.webp)
@@ -15,14 +15,24 @@ jumpers. Built with C++17, SDL3 and Vulkan.
 
 ## Get started
 
+Download the package for your system from [Releases](https://github.com/chl84/The-Perfect-V/releases).
+Development builds are also available under **Actions**.
+
+### Windows
+
+The portable ZIP targets **Windows 10 (1903+) and Windows 11, 64-bit**. Extract the entire archive and
+start `ThePerfectV/the-perfect-v.exe`. Keep the included assets and SDL3.dll beside
+the executable. A working Vulkan graphics driver is required; no separate SDL,
+FreeType or Visual C++ runtime installation is needed.
+
+### Linux
+
 The AppImage targets **x86_64 Linux with glibc 2.35 or newer**, including Ubuntu
 22.04 and newer. A graphical desktop, a working Vulkan loader and a compatible
 GPU driver are required. SDL3, FreeType and the window-system libraries are
 bundled; system graphics drivers and audio services stay on the host.
 
-### Run the AppImage
-
-Download the AppImage from a successful **Actions → AppImage** build, then:
+To run the AppImage:
 
 ```sh
 chmod +x ./ThePerfectV-*.AppImage
@@ -84,8 +94,9 @@ or pass `--replay FILE` to the AppImage.
 
 ![Cartoon flying through falling snow under the floodlights in Slovenia](docs/screenshots/night-jump.webp)
 
-The default save folder is `~/.local/share/the-perfect-v/saves/`, respecting
-`XDG_DATA_HOME`. It holds settings, records, cups and replays. Interrupted cups
+The default save folder is `~/.local/share/the-perfect-v/saves/` on Linux (respecting
+`XDG_DATA_HOME`) and `%APPDATA%/the-perfect-v/saves/` on Windows.
+It holds settings, records, cups and replays. Interrupted cups
 can be resumed; resource updates leave saves intact. Use `--data-dir PATH` for
 a separate save folder. Personal saves and replays are excluded from Git.
 
@@ -101,7 +112,12 @@ Ubuntu 22.04 and 24.04 runners. Successful builds provide the AppImage, SHA-256
 checksum and a dependency/baseline report. No release is published automatically.
 The pinned build recipe is in [package-appimage.sh](package-appimage.sh);
 `package.sh` runs the same recipe on a suitably prepared Ubuntu 22.04 system.
-There is no separate tar/zip game package.
+Linux has no separate tar/zip game package.
+
+The **Windows** workflow builds a portable ZIP with MSVC and source-built SDL3 and
+FreeType. It runs the standalone suites and tests the extracted package on a fresh
+Windows runner with software Vulkan, including paths with spaces and Unicode.
+The Windows ZIP includes project and dependency sources under `docs/source/`.
 
 The matching project source and SDL source are embedded in the AppImage. Export
 the project source with `./ThePerfectV-*.AppImage --export-source source.tar.gz`.

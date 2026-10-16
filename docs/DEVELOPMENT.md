@@ -13,7 +13,7 @@ cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
 ```
 
-Without external fixtures, CTest registers ten standalone suites:
+Without external fixtures, CTest registers fourteen standalone suites, including:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
@@ -23,6 +23,7 @@ Without external fixtures, CTest registers ten standalone suites:
 - `fall-presentation`: deterministic display contact, unchanged physics/poses and no GL calls in the contact calculation.
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
 - `storage-migration`: stable hill identifiers and compatibility with older saves.
+- `platform-files`: replacing existing saves and preserving data after a failed replacement, including Unicode paths on Windows.
 - `crowd-audio`: approach/flight envelopes on all hills, distant and nearby falls, replay seeking/speed, one-shot reactions, smooth fades, valid sample mixing and the sound toggle through a dummy SDL audio device.
 - `mesh-geometry`: exact attribute sharing, preserved triangle order, bounded ranges, camera transforms and conservative near/side/far clipping without initializing a GPU.
 
@@ -56,6 +57,32 @@ Use `--data-dir` with a temporary directory to keep personal records intact.
 relative mouse mode and Ready/Next button hit testing. The standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
 mouse-capture test has not been run. See [migration status](vulkan-sdl3-migration.md).
+
+## Windows builds
+
+`.github/workflows/windows.yml` compiles portable Vulkan shaders on Ubuntu, then
+builds and tests the Windows x86_64 game with Visual Studio 2022. The pinned SDL3
+3.4.16 and FreeType 2.14.1 sources are SHA-256 checked by CMake. FreeType is static
+with optional compression/shaping libraries disabled; SDL3 is the only shipped
+DLL. The MSVC runtime is static in the executable and SDL3 DLL.
+
+`package-windows.ps1` performs the build, standalone tests and installation; it
+accepts `-ShaderDirectory` pointing at the `Windows-shaders` Actions artifact.
+The game can also be built directly with CMake, an SDL3/FreeType prefix and an
+installed glslc or glslangValidator. `TPV_PRECOMPILED_SHADER_DIR` optionally supplies
+the two generated C++ shader initializers instead of a local shader compiler.
+
+The ZIP contains `ThePerfectV/the-perfect-v.exe`, SDL3.dll, assets, licenses and
+matching project/dependency source under `docs/source/`. Extract the entire ZIP.
+The game uses `%APPDATA%/the-perfect-v/saves/`; `--data-dir` overrides this.
+Its manifest enables UTF-8 paths on supported Windows 10/11 versions. Completed
+save files use Windows replacement semantics without deleting the old save first.
+
+A second Windows runner downloads and extracts the ZIP, checks its checksum and
+runs the full game smoke test in a directory with spaces and Unicode. Chrome's
+software Vulkan driver is used only by CI and is excluded from the game package.
+Actual GPU drivers still require desktop testing. No workflow publishes releases
+automatically.
 
 ## AppImage builds
 

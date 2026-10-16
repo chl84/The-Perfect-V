@@ -1,4 +1,5 @@
 #include "storage.h"
+#include "platform_file.h"
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
@@ -28,9 +29,7 @@ bool replaceFile(const std::string &path, std::ofstream &out) {
     out.close();
     if (!out)
         return false;
-    std::error_code ec;
-    std::filesystem::rename(path + ".tmp", path, ec);
-    return !ec;
+    return replaceSavedFile(std::filesystem::u8path(path + ".tmp"), std::filesystem::u8path(path));
 }
 } // namespace
 bool importLegacySaves(const std::string &source, const std::string &destination, std::string *error) {

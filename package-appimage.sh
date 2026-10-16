@@ -59,7 +59,7 @@ cp "$sdl_source/LICENSE.txt" "$documentation/third-party/SDL3-LICENSE.txt"
 cp "$game_dir/packaging/appimage/RUNTIME-LICENSE" "$documentation/third-party/AppImage-runtime-LICENSE.txt"
 # Source and build recipes travel inside the AppImage; no separate tar/zip game package.
 git ls-files -z --cached --others --exclude-standard -- \
-  CMakeLists.txt LICENSE README.md .gitignore package.sh package-appimage.sh play.sh play-vulkan.sh \
+  CMakeLists.txt LICENSE README.md .gitignore package.sh package-appimage.sh package-windows.ps1 play.sh play-vulkan.sh \
   src assets tests tools packaging .github docs/DEVELOPMENT.md docs/vulkan-sdl3-migration.md docs/screenshots \
   > "$staging_dir/source-files"
 tar -czf "$documentation/source.tar.gz" --null -T "$staging_dir/source-files"
