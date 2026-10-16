@@ -147,6 +147,60 @@ int main() {
                     "Appearance persistence changed records or environment preferences");
         }
         const auto appearanceFile = contents(newPath);
+        Records graphicsRecords = appearanceRecords;
+        require(!loadRecords(oldPath.string()).graphics.fullscreen &&
+                    loadRecords(oldPath.string()).graphics.msaaSamples == 4 &&
+                    loadRecords(oldPath.string()).graphics.vsync,
+                "Old saves must default to windowed mode and antialiasing");
+        for (bool vsync : {true, false}) {
+            for (int samples : {0, 2, 4, 8}) {
+                graphicsRecords.graphics = {true, samples, vsync};
+                require(saveRecords(newPath.string(), graphicsRecords), "Save graphics preferences");
+                const auto restoredGraphics = loadRecords(newPath.string());
+                require(restoredGraphics.graphics.fullscreen && restoredGraphics.graphics.msaaSamples == samples &&
+                            restoredGraphics.graphics.vsync == vsync && restoredGraphics.best == graphicsRecords.best &&
+                            restoredGraphics.jumper == graphicsRecords.jumper,
+                        "Graphics preferences failed to persist or changed personal data");
+            }
+        }
+        for (int samples : {0, 2, 4, 8}) {
+            write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) +
+                           "GRAPHICS 3 1 " + std::to_string(samples) + "\n");
+            const auto restored = loadRecords(newPath.string());
+            require(restored.graphics.fullscreen && restored.graphics.msaaSamples == samples &&
+                        restored.graphics.vsync && restored.best == graphicsRecords.best,
+                    "Existing MSAA preferences must default to VSync on and retain records");
+        }
+        graphicsRecords.graphics.msaaSamples = 3;
+        require(!saveRecords(newPath.string(), graphicsRecords), "Invalid MSAA level was saved");
+        for (int enabled : {0, 1}) {
+            write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) +
+                           "GRAPHICS 2 1 " + std::to_string(enabled) + "\n");
+            const auto restored = loadRecords(newPath.string());
+            require(restored.graphics.fullscreen && restored.graphics.msaaSamples == (enabled ? 4 : 0) &&
+                        restored.graphics.vsync && restored.best == graphicsRecords.best,
+                    "Former on/off MSAA preference must migrate to 4x/off");
+        }
+        for (int fps : {0, 30, 60, 120}) {
+            write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) +
+                           "GRAPHICS 1 1 0 0 0 " + std::to_string(fps) + "\n");
+            const auto restored = loadRecords(newPath.string());
+            require(restored.graphics.fullscreen && restored.graphics.msaaSamples == 0 &&
+                        restored.graphics.vsync && restored.best == graphicsRecords.best,
+                    "Former manual graphics settings must retain display preferences and records");
+        }
+        for (const auto &tag : {"GRAPHICS 1 0 1 0 1 999\n", "GRAPHICS 1 2 1 0 1 60\n",
+                                "GRAPHICS 99 0 0 0 0 30\n", "GRAPHICS 1 0\n",
+                                "GRAPHICS 2 2 0\n", "GRAPHICS 2 0\n", "GRAPHICS 3 0 3\n",
+                                "GRAPHICS 3 0 16\n", "GRAPHICS 3 0 -2\n",
+                                "GRAPHICS 4 0 4 2\n", "GRAPHICS 4 0 4 -1\n", "GRAPHICS 4 0 4\n"}) {
+            write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) + tag);
+            const auto restored = loadRecords(newPath.string());
+            require(restored.best == appearanceRecords.best &&
+                        !restored.graphics.fullscreen && restored.graphics.msaaSamples == 4 &&
+                        restored.graphics.vsync,
+                    "Malformed optional graphics preferences lost records or used invalid settings");
+        }
         const auto withoutAppearance = appearanceFile.substr(0, appearanceFile.find("JUMPER "));
         write(newPath, withoutAppearance);
         require(loadRecords(newPath.string()).jumper == JumperAppearance::Pro,

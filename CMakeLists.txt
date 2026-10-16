@@ -85,6 +85,10 @@ if(TPV_BUILD_RENDER_PROBE)
     src/renderer.cpp src/renderer_environment.cpp src/renderer_inrun.cpp src/renderer_athlete.cpp
     src/renderer_effects.cpp src/renderer_ui.cpp)
   target_link_libraries(render-probe PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
+  add_executable(snow-glitter-probe tools/snow_glitter_probe.cpp
+    src/renderer.cpp src/renderer_environment.cpp src/renderer_inrun.cpp src/renderer_athlete.cpp
+    src/renderer_effects.cpp src/renderer_ui.cpp)
+  target_link_libraries(snow-glitter-probe PRIVATE ski_physics tpv_vulkan Freetype::Freetype)
 endif()
 # Reference recordings are local development data and are not distributed.
 # Keep the complete existing suite available when those fixtures are present.

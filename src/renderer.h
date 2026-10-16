@@ -26,7 +26,7 @@ constexpr Color ink{.045f, .09f, .13f, 1}, panel{.065f, .12f, .16f, .94f}, white
 }
 class Renderer {
   public:
-    Renderer(SDL_Window *window, const std::string &assetPath, bool noMsaa = false,
+    Renderer(SDL_Window *window, const std::string &assetPath, int msaaSamples = 4,
              bool vsync = true, bool validation = false);
     ~Renderer();
     void begin(const Hill &, const Frame &, double time, int camera, bool panorama, bool ghost = false,
@@ -52,6 +52,8 @@ class Renderer {
     void setJumpWeather(uint32_t seed, environment::Selection selection = {});
     void setEnvironment(environment::Conditions, bool restart = false);
     const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
+    // Visual diagnostics can compare identical scenes with the material disabled.
+    void setSnowGlitter(bool enabled) { snowGlitter = enabled; }
     void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
     bool sceneReady() const { return terrainReady; }
     bool sceneReadyFor(const Hill &hill) const { return terrainReady && sceneHill == hill.id; }
@@ -137,6 +139,7 @@ class Renderer {
     void athlete(const Hill &, const Frame &, bool ghost);
     void jumperPreviewGeometry(JumperAppearance);
     void effects(const Hill &, const Frame &, double time, bool showWeather);
+    bool snowGlitter = true;
     bool snowfall = false;
     environment::Conditions sceneEnvironment;
     visual::EnvironmentLight lighting = visual::environmentLight({});

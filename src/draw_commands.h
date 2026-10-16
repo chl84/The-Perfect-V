@@ -15,6 +15,8 @@ namespace sjp::gfx {
 using Enum = uint32_t;
 using Flags = uint32_t;
 using Id = uint32_t;
+void configureGraphics(int msaaSamples, bool vsync);
+bool vsyncEnabled();
 
 // CPU-only preparation uses an isolated recorder; GPU objects are installed
 // and uploaded on the render thread after the future becomes ready.
@@ -95,6 +97,7 @@ inline constexpr Enum RGB = 0x1907;
 inline constexpr Enum RGBA = 0x1908;
 inline constexpr Enum SAMPLES = 0x80A9;
 inline constexpr Enum SHININESS = 0x1601;
+inline constexpr Enum SNOW_GLITTER = 0x100001; // Snow-only material weight.
 inline constexpr Enum SMOOTH = 0x1D01;
 inline constexpr Enum SPECULAR = 0x1202;
 inline constexpr Enum SRC_ALPHA = 0x0302;
@@ -114,12 +117,15 @@ inline constexpr Enum TRUE = 1;
 inline constexpr Enum UNPACK_ALIGNMENT = 0x0CF5;
 inline constexpr Enum UNSIGNED_BYTE = 0x1401;
 
-void initialize(SDL_Window *, bool noMsaa, bool vsync, bool validation);
+void initialize(SDL_Window *, int msaaSamples, bool vsync, bool validation);
 void shutdown() noexcept;
 void beginFrame(int width, int height);
 void present(bool synchronous);
 void captureImage(const std::string &path);
+// Explicit diagnostics: complete actual GPU drawing even for a hidden window.
+void renderOffscreen();
 int sampleCount();
+bool supportsSampleCount(int samples);
 struct FrameStats {
     uint64_t cachedVertices = 0, cachedIndices = 0, submittedIndices = 0, culledIndices = 0;
     uint64_t dynamicVertices = 0, drawCalls = 0;
@@ -159,6 +165,7 @@ void lightModelfv(Enum, const float *);
 void lightfv(Enum, Enum, const float *);
 void materialfv(Enum, Enum, const float *);
 void materialf(Enum, Enum, float);
+void snowSunlight(float strength);
 void colorMaterial(Enum, Enum);
 void fogfv(Enum, const float *);
 void fogf(Enum, float);

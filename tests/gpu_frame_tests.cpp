@@ -23,6 +23,9 @@ struct Resource {
 };
 int resources = 0, waits = 0, submits = 0, draws = 0, uploads = 0, blits = 0, acquisitions = 0;
 bool available = true;
+bool immediateAvailable = true, multisampleAvailable = true;
+int maxColorSamples = 8, maxDepthSamples = 8;
+SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_VSYNC;
 std::vector<bool> blending;
 std::thread::id renderThread;
 template <class T> T *make() {
@@ -41,11 +44,14 @@ void release(Resource *r) {
 } // namespace audit
 struct SDL_GPUDevice {};
 struct SDL_GPUBuffer : audit::Resource {};
-struct SDL_GPUTexture : audit::Resource {};
+struct SDL_GPUTexture : audit::Resource {
+    SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
+};
 struct SDL_GPUSampler : audit::Resource {};
 struct SDL_GPUShader : audit::Resource {};
 struct SDL_GPUGraphicsPipeline : audit::Resource {
     bool blend = false;
+    SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
 };
 struct SDL_GPUTransferBuffer : audit::Resource {
     std::vector<unsigned char> bytes;
@@ -60,6 +66,7 @@ struct SDL_GPUCopyPass {
 struct SDL_GPURenderPass {
     SDL_GPUCommandBuffer *command;
     SDL_GPUGraphicsPipeline *pipeline = nullptr;
+    SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
 };
 struct SDL_GPUFence {
     std::vector<audit::Resource *> uses;
@@ -113,19 +120,23 @@ bool SDLCALL SDL_SetGPUAllowedFramesInFlight(SDL_GPUDevice *, Uint32 n) {
     audit::require(n == 2, "Backend did not request two frames in flight");
     return true;
 }
-bool SDLCALL SDL_WindowSupportsGPUPresentMode(SDL_GPUDevice *, SDL_Window *, SDL_GPUPresentMode) {
-    return true;
+bool SDLCALL SDL_WindowSupportsGPUPresentMode(SDL_GPUDevice *, SDL_Window *, SDL_GPUPresentMode mode) {
+    return mode == SDL_GPU_PRESENTMODE_VSYNC || audit::immediateAvailable;
 }
 bool SDLCALL SDL_SetGPUSwapchainParameters(SDL_GPUDevice *, SDL_Window *, SDL_GPUSwapchainComposition,
-                                           SDL_GPUPresentMode) {
+                                           SDL_GPUPresentMode mode) {
+    audit::presentMode = mode;
     return true;
 }
 bool SDLCALL SDL_GPUTextureSupportsFormat(SDL_GPUDevice *, SDL_GPUTextureFormat, SDL_GPUTextureType,
                                           SDL_GPUTextureUsageFlags) {
     return true;
 }
-bool SDLCALL SDL_GPUTextureSupportsSampleCount(SDL_GPUDevice *, SDL_GPUTextureFormat, SDL_GPUSampleCount) {
-    return true;
+bool SDLCALL SDL_GPUTextureSupportsSampleCount(SDL_GPUDevice *, SDL_GPUTextureFormat format, SDL_GPUSampleCount count) {
+    const int maximum = format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
+                            ? audit::maxColorSamples : audit::maxDepthSamples;
+    return count == SDL_GPU_SAMPLECOUNT_1 ||
+           (audit::multisampleAvailable && (1 << int(count)) <= maximum);
 }
 SDL_GPUShader *SDLCALL SDL_CreateGPUShader(SDL_GPUDevice *, const SDL_GPUShaderCreateInfo *) {
     return audit::make<SDL_GPUShader>();
@@ -133,8 +144,10 @@ SDL_GPUShader *SDLCALL SDL_CreateGPUShader(SDL_GPUDevice *, const SDL_GPUShaderC
 SDL_GPUBuffer *SDLCALL SDL_CreateGPUBuffer(SDL_GPUDevice *, const SDL_GPUBufferCreateInfo *) {
     return audit::make<SDL_GPUBuffer>();
 }
-SDL_GPUTexture *SDLCALL SDL_CreateGPUTexture(SDL_GPUDevice *, const SDL_GPUTextureCreateInfo *) {
-    return audit::make<SDL_GPUTexture>();
+SDL_GPUTexture *SDLCALL SDL_CreateGPUTexture(SDL_GPUDevice *, const SDL_GPUTextureCreateInfo *info) {
+    auto *texture = audit::make<SDL_GPUTexture>();
+    texture->samples = info->sample_count;
+    return texture;
 }
 SDL_GPUSampler *SDLCALL SDL_CreateGPUSampler(SDL_GPUDevice *, const SDL_GPUSamplerCreateInfo *) {
     return audit::make<SDL_GPUSampler>();
@@ -143,6 +156,7 @@ SDL_GPUGraphicsPipeline *SDLCALL
 SDL_CreateGPUGraphicsPipeline(SDL_GPUDevice *, const SDL_GPUGraphicsPipelineCreateInfo *info) {
     auto *p = audit::make<SDL_GPUGraphicsPipeline>();
     p->blend = info->target_info.color_target_descriptions[0].blend_state.enable_blend;
+    p->samples = info->multisample_state.sample_count;
     return p;
 }
 SDL_GPUTransferBuffer *SDLCALL SDL_CreateGPUTransferBuffer(SDL_GPUDevice *,
@@ -241,13 +255,19 @@ SDL_GPURenderPass *SDLCALL SDL_BeginGPURenderPass(SDL_GPUCommandBuffer *c,
     if (target->resolve_texture)
         audit::write(c, target->resolve_texture);
     audit::write(c, depth->texture);
-    return new SDL_GPURenderPass{c};
+    audit::require(depth->texture->samples == target->texture->samples,
+                   "Color and depth attachment sample counts differ");
+    if (target->resolve_texture)
+        audit::require(target->resolve_texture->samples == SDL_GPU_SAMPLECOUNT_1,
+                       "MSAA resolve target must have one sample");
+    return new SDL_GPURenderPass{c, nullptr, target->texture->samples};
 }
 void SDLCALL SDL_EndGPURenderPass(SDL_GPURenderPass *p) {
     delete p;
 }
 void SDLCALL SDL_SetGPUViewport(SDL_GPURenderPass *, const SDL_GPUViewport *) {}
 void SDLCALL SDL_BindGPUGraphicsPipeline(SDL_GPURenderPass *p, SDL_GPUGraphicsPipeline *pipeline) {
+    audit::require(p->samples == pipeline->samples, "Pipeline sample count differs from its attachment");
     p->pipeline = pipeline;
     audit::use(p->command, pipeline);
 }
@@ -309,7 +329,7 @@ void cacheKeys() {
 }
 void rendererCaches() {
     using namespace sjp;
-    Renderer r(nullptr, SJP_TEST_ASSET_DIR, true, false, false);
+    Renderer r(nullptr, SJP_TEST_ASSET_DIR, 0, false, false);
     Simulation s(0, 0);
     // Real asynchronous recording, rapid selection changes and installation.
     r.begin(hills()[0], s.frame(), 0, 0, false);
@@ -387,8 +407,15 @@ int main() {
     using namespace sjp::gfx;
     try {
         cacheKeys();
-        for (bool noMsaa : {false, true}) {
-            initialize(nullptr, noMsaa, false, false);
+        audit::maxDepthSamples = 2;
+        initialize(nullptr, 8, false, false);
+        audit::require(sampleCount() == 2 && !supportsSampleCount(1) && !supportsSampleCount(16),
+                       "Saved MSAA level did not fall back safely at startup");
+        shutdown();
+        audit::maxDepthSamples = 8;
+        for (int initialSamples : {0, 2, 4, 8}) {
+            initialize(nullptr, initialSamples, false, false);
+            audit::require(sampleCount() == initialSamples, "Initial MSAA level was ignored");
             enable(BLEND);
             const auto baseline = audit::waits;
             for (int i = 0; i < 3; ++i) {
@@ -400,6 +427,41 @@ int main() {
                                "Did not wait only on reused frame slot");
             }
             audit::require(!audit::blending.back(), "Opaque geometry retained blending");
+            for (int samples : {2, 4, 8, 0, 8, 2, 0}) {
+                configureGraphics(samples, samples != 0);
+                audit::require(sampleCount() == samples && supportsSampleCount(samples),
+                               "MSAA setting did not change");
+                audit::require(vsyncEnabled() == (samples != 0) &&
+                                   audit::presentMode == (samples == 0 ? SDL_GPU_PRESENTMODE_IMMEDIATE
+                                                                     : SDL_GPU_PRESENTMODE_VSYNC),
+                               "VSync setting did not change presentation mode");
+                for (int slot = 0; slot < 2; ++slot) {
+                    beginFrame(640, 480);
+                    triangle();
+                    present(false);
+                }
+            }
+            audit::maxDepthSamples = 2;
+            configureGraphics(8, true);
+            audit::require(sampleCount() == 2 && !supportsSampleCount(4) && !supportsSampleCount(8),
+                           "MSAA must respect depth format limits and fall back to a lower level");
+            beginFrame(640, 480);
+            triangle();
+            present(false);
+            audit::maxDepthSamples = 8;
+            audit::maxColorSamples = 4;
+            configureGraphics(8, true);
+            audit::require(sampleCount() == 4 && !supportsSampleCount(8),
+                           "MSAA must respect color format limits");
+            beginFrame(640, 480);
+            triangle();
+            present(false);
+            audit::maxColorSamples = 8;
+            audit::immediateAvailable = audit::multisampleAvailable = false;
+            configureGraphics(8, false);
+            audit::require(vsyncEnabled() && sampleCount() == 0,
+                           "Unsupported graphics settings did not fall back safely");
+            audit::immediateAvailable = audit::multisampleAvailable = true;
             beginFrame(640, 480);
             triangle(.5f);
             present(false);

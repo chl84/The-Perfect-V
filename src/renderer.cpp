@@ -4,6 +4,7 @@
 #include "presentation_timing.h"
 #include "visual_mountains.h"
 #include "visual_shadow.h"
+#include "visual_snow_glitter.h"
 #include "visual_sky.h"
 #include "visual_start_signal.h"
 #include "visual_weather.h"
@@ -417,10 +418,10 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
     FT_Done_FreeType(library);
     return f;
 }
-Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool vsync, bool validation)
+Renderer::Renderer(SDL_Window *w, const std::string &assets, int msaaSamples, bool vsync, bool validation)
     : window(w) {
     shadowCache = std::make_unique<ShadowCache>();
-    sjp::gfx::initialize(window, noMsaa, vsync, validation);
+    sjp::gfx::initialize(window, msaaSamples, vsync, validation);
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
         boldFont = loadFont(assets + "/fonts/Interim-Bold.ttf");
@@ -597,6 +598,7 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
     sjp::gfx::fogi(sjp::gfx::FOG_MODE, sjp::gfx::LINEAR);
     sjp::gfx::fogf(sjp::gfx::FOG_START, lighting.fogStart * s);
     sjp::gfx::fogf(sjp::gfx::FOG_END, lighting.fogEnd * s);
+    sjp::gfx::snowSunlight(snowGlitter ? visual::snowGlitterSunlight(lighting) : 0.f);
     terrain(h);
     hillRecordMarker(h);
     scenery(h, f, time);

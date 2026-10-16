@@ -83,7 +83,8 @@ bool updateHillRecord(Records &records, int hill, const Result &result, bool hum
     return true;
 }
 bool saveRecords(const std::string &path, const Records &r) {
-    if (!environment::valid(r.environment) || !validJumperAppearance(r.jumper))
+    if (!environment::valid(r.environment) || !validJumperAppearance(r.jumper) ||
+        !validMsaaSamples(r.graphics.msaaSamples))
         return false;
     for (size_t i = 0; i < r.best.size(); i++)
         if (hills()[i].id.empty() || !std::isfinite(r.best[i]) || r.best[i] < 0 || r.best[i] > 1000)
@@ -98,6 +99,8 @@ bool saveRecords(const std::string &path, const Records &r) {
     out << r.camera << ' ' << r.sound << ' ' << r.sensitivity << '\n';
     out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << '\n';
     out << "JUMPER 1 " << int(r.jumper) << '\n';
+    out << "GRAPHICS 4 " << r.graphics.fullscreen << ' ' << r.graphics.msaaSamples << ' '
+        << r.graphics.vsync << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -147,6 +150,31 @@ Records loadRecords(const std::string &path) {
             const environment::Selection selection{environment::TimeOfDay(time), environment::Weather(weather)};
             if (version == 1 && environment::valid(selection))
                 r.environment = selection;
+        } else if (tag == "GRAPHICS") {
+            int fullscreen, samples;
+            if (!(in >> version >> fullscreen >> samples))
+                break;
+            if (version == 1) {
+                // Retain display preferences from the former manual frame-rate UI.
+                // Older formats default to VSync on.
+                int automatic, vsync, limit;
+                if (!(in >> automatic >> vsync >> limit))
+                    break;
+                if (automatic < 0 || automatic > 1 || vsync < 0 || vsync > 1 ||
+                    (limit != 0 && limit != 30 && limit != 60 && limit != 120))
+                    continue;
+            }
+            if (version == 1 || version == 2) {
+                if (samples < 0 || samples > 1)
+                    continue;
+                samples = samples ? 4 : 0;
+            }
+            int vsync = 1;
+            if (version == 4 && !(in >> vsync))
+                break;
+            if (version >= 1 && version <= 4 && fullscreen >= 0 && fullscreen <= 1 &&
+                validMsaaSamples(samples) && vsync >= 0 && vsync <= 1)
+                r.graphics = {fullscreen == 1, samples, vsync == 1};
         } else if (tag == "JUMPER") {
             int value;
             if (!(in >> version >> value))

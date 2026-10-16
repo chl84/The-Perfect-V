@@ -62,7 +62,9 @@ data or frame targets are reused. Static resources are retained by pending
 packets; SDL defers releasing GPU resources still referenced by submitted work.
 Resize recreates frame targets after the previous frame completes. Construction
 failure, partial uploads, command cancellation and device/window teardown have
-explicit cleanup paths. Normal play retains its independent 60 FPS limit.
+explicit cleanup paths. Settings → Graphics provides fullscreen, antialiasing and VSync on one page.
+VSync defaults to on; off requests immediate presentation where supported.
+There is no separate FPS limit.
 
 ## SDL3 and original gameplay
 

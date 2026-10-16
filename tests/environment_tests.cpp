@@ -1,6 +1,7 @@
 #include "competition.h"
 #include "storage.h"
 #include "visual_environment.h"
+#include "visual_snow_glitter.h"
 #include "visual_sky.h"
 #include "visual_mountains.h"
 #include <algorithm>
@@ -109,6 +110,10 @@ int main() {
             for (int weather = 0; weather < 4; ++weather) {
                 const Conditions conditions{TimeOfDay(time), Weather(weather), 7654321};
                 const auto light = visual::environmentLight(conditions);
+                const float glitter = visual::snowGlitterSunlight(light);
+                require(glitter >= 0 && glitter <= 1, "Snow glitter strength out of range");
+                require((time == 3 || weather != 0) ? glitter == 0 : glitter > .8f,
+                        "Solar snow glints ignore daylight/weather");
                 for (int angle = 0; angle < 48; ++angle) {
                     const Vec3 direction = Vec3{std::cos(angle * .31), (angle % 9 - 2) * .15,
                                                 std::sin(angle * .31)}.normalized();

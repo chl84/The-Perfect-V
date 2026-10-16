@@ -42,6 +42,20 @@ int main() {
                 "A long stall must discard missed frame deadlines");
         require(schedule.nextDeadline(now + milliseconds(3)) == now + Schedule::period,
                 "The frame after a stall must resume normal pacing");
+        for (int fps : {30, 60, 120}) {
+            Schedule limited(start, fps);
+            const nanoseconds interval(1000000000 / fps);
+            auto completed = start;
+            for (int frame = 1; frame <= 240; ++frame) {
+                const auto next = limited.nextDeadline(completed + microseconds(300));
+                require(next == start + interval * frame, "Selected FPS limit drifted");
+                completed = next;
+            }
+        }
+        Schedule unlimited(start, 0);
+        require(unlimited.nextDeadline(start + milliseconds(1)) == start + milliseconds(1) &&
+                    unlimited.nextDeadline(start + seconds(1)) == start + seconds(1),
+                "Unlimited rendering introduced a frame delay");
 
         require(std::abs(sjp::visual::cameraBlend(1. / 60) - .16) < 1e-12,
                 "Normal 60 FPS camera response changed");

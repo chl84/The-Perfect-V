@@ -9,19 +9,24 @@ class FrameSchedule {
     using Clock = std::chrono::steady_clock;
     static constexpr std::chrono::nanoseconds period{1000000000 / 60};
 
-    explicit FrameSchedule(Clock::time_point start) : deadline(start) {}
+    explicit FrameSchedule(Clock::time_point start, int fps = 60)
+        : deadline(start), interval(fps > 0 ? std::chrono::nanoseconds(1000000000 / fps)
+                                          : std::chrono::nanoseconds::zero()) {}
 
     Clock::time_point nextDeadline(Clock::time_point now) {
         // Keep ordinary timer overshoot out of the next frame's deadline.
-        deadline += period;
+        if (interval == std::chrono::nanoseconds::zero())
+            return now;
+        deadline += interval;
         // After a stall, resume here instead of submitting a burst to catch up.
-        if (now - deadline >= period)
+        if (now - deadline >= interval)
             deadline = now;
         return deadline;
     }
 
   private:
     Clock::time_point deadline;
+    std::chrono::nanoseconds interval;
 };
 
 inline double cameraBlend(double elapsed) {

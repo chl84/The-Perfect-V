@@ -52,6 +52,7 @@ enum class Screen {
     Hills,
     Help,
     Settings,
+    Graphics,
     Records,
     Playing,
     Paused,
@@ -70,6 +71,10 @@ enum class Action {
     Hills,
     Help,
     Settings,
+    Graphics,
+    Fullscreen,
+    Antialiasing,
+    Vsync,
     Records,
     Quit,
     Back,
@@ -258,9 +263,6 @@ class App {
         }
         if (assets.empty())
             throw std::runtime_error("Game fonts are missing. Keep the assets directory with the game.");
-        renderer = std::make_unique<Renderer>(window, assets, noMsaa, !smoke, gpuValidation);
-        renderer->setSynchronousRendering(synchronousRendering);
-        audio = std::make_unique<Audio>(assets);
         if (dataDir.empty()) {
             char *pref = SDL_GetPrefPath("", "the-perfect-v");
             if (pref) {
@@ -292,6 +294,15 @@ class App {
                               : std::filesystem::exists(oldProfileRecords) ? oldProfileRecords
                                                                            : dataDir + "/records.dat");
         camera = records.camera;
+        if (!smoke && records.graphics.fullscreen) {
+            fullscreen = SDL_SetWindowFullscreen(window, true);
+            if (!fullscreen)
+                records.graphics.fullscreen = false;
+        }
+        renderer = std::make_unique<Renderer>(window, assets, noMsaa ? 0 : records.graphics.msaaSamples,
+                                              !smoke && records.graphics.vsync, gpuValidation);
+        renderer->setSynchronousRendering(synchronousRendering);
+        audio = std::make_unique<Audio>(assets);
         Competition saved;
         if (loadCompetition(dataDir + "/cup.sjc", saved)) {
             hasCupSave = saved.active();
@@ -320,7 +331,7 @@ class App {
                   << SDL_VERSIONNUM_MINOR(sdlVersion) << '.' << SDL_VERSIONNUM_MICRO(sdlVersion)
                   << ", MSAA=" << sjp::gfx::sampleCount() << ", synchronous=" << synchronousRendering
                   << ", frames in flight=2"
-                  << ", frame cap=" << (smoke ? 0 : 60) << '\n'
+                  << ", vsync=" << gfx::vsyncEnabled() << '\n'
                   << std::flush;
         startup.complete = true;
     }
@@ -361,7 +372,6 @@ class App {
             return smokeTest();
         }
         uint64_t previous = SDL_GetPerformanceCounter();
-        visual::FrameSchedule frameSchedule(std::chrono::steady_clock::now());
         while (running) {
             if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
                 // A null event pointer waits without consuming the event. The
@@ -369,7 +379,6 @@ class App {
                 SDL_WaitEventTimeout(nullptr, 100);
                 events();
                 previous = SDL_GetPerformanceCounter();
-                frameSchedule = visual::FrameSchedule(std::chrono::steady_clock::now());
                 continue;
             }
             uint64_t now = SDL_GetPerformanceCounter();
@@ -409,8 +418,6 @@ class App {
             updateAudio(dt);
             render();
             renderer->finish();
-            // Bound submission rate even when VSync is unavailable or ignored.
-            std::this_thread::sleep_until(frameSchedule.nextDeadline(std::chrono::steady_clock::now()));
         }
         return 0;
     }
@@ -769,6 +776,18 @@ class App {
         double k = clamp((sample - a.elapsed) / (b.elapsed - a.elapsed), 0.0, 1.0);
         return interpolateFrame(a, b, k);
     }
+    void savePreferences() {
+        records.camera = camera;
+        if (!saveRecords(dataDir + "/records-dsj2.dat", records))
+            storageError = true;
+    }
+    void applyGraphics() {
+        gfx::configureGraphics(noMsaa ? 0 : records.graphics.msaaSamples, records.graphics.vsync);
+        if (!noMsaa)
+            records.graphics.msaaSamples = gfx::sampleCount();
+        records.graphics.vsync = gfx::vsyncEnabled();
+        savePreferences();
+    }
     void action(Action a, int value = 0) {
         if (editingName != -1) {
             finishNameEdit(true);
@@ -813,6 +832,36 @@ class App {
         case Action::Settings:
             changeScreen(Screen::Settings);
             break;
+        case Action::Graphics:
+            changeScreen(Screen::Graphics);
+            break;
+        case Action::Fullscreen:
+            if (SDL_SetWindowFullscreen(window, !fullscreen)) {
+                fullscreen = !fullscreen;
+                records.graphics.fullscreen = fullscreen;
+                savePreferences();
+            } else {
+                message = "Could not change fullscreen mode.";
+            }
+            break;
+        case Action::Antialiasing: {
+            constexpr std::array<int, 4> levels{{0, 2, 4, 8}};
+            const auto current = std::find(levels.begin(), levels.end(), gfx::sampleCount());
+            for (size_t step = 1; step <= levels.size(); ++step) {
+                const int next = levels[(size_t(current - levels.begin()) + step) % levels.size()];
+                if (gfx::supportsSampleCount(next)) {
+                    records.graphics.msaaSamples = next;
+                    break;
+                }
+            }
+            noMsaa = false;
+            applyGraphics();
+            break;
+        }
+        case Action::Vsync:
+            records.graphics.vsync = !gfx::vsyncEnabled();
+            applyGraphics();
+            break;
         case Action::Records:
             changeScreen(Screen::Records);
             break;
@@ -820,7 +869,9 @@ class App {
             running = false;
             break;
         case Action::Back:
-            if (screen == Screen::Help) {
+            if (screen == Screen::Graphics) {
+                changeScreen(Screen::Settings);
+            } else if (screen == Screen::Help) {
                 changeScreen(helpReturn);
             } else if (screen == Screen::Replay) {
                 audio->endReplay();
@@ -1154,8 +1205,7 @@ class App {
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
                 auto key = e.key.key;
                 if (key == SDLK_F11) {
-                    fullscreen = !fullscreen;
-                    SDL_SetWindowFullscreen(window, fullscreen);
+                    action(Action::Fullscreen);
                 }
                 if (key == SDLK_M)
                     action(Action::Sound);
@@ -1446,6 +1496,25 @@ class App {
         smallButton("+", 630, 690, 56, Action::SensitivityUp);
         smallButton("Day & sun", 1202, 662, 151, Action::EnvironmentReset);
         button("Controls", 64, 803, 210, Action::Help);
+        button("Graphics", 290, 803, 210, Action::Graphics);
+    }
+    void graphicsSettings() {
+        top("Graphics");
+        struct Setting {
+            const char *title;
+            std::string value;
+            Action action;
+        };
+        const std::array<Setting, 3> rows{{
+            {"Fullscreen", fullscreen ? "On" : "Off", Action::Fullscreen},
+            {"Antialiasing", gfx::sampleCount() ? std::to_string(gfx::sampleCount()) + "x MSAA" : "Off", Action::Antialiasing},
+            {"VSync", gfx::vsyncEnabled() ? "On" : "Off", Action::Vsync}}};
+        for (size_t i = 0; i < rows.size(); ++i) {
+            const float y = 253 + i * 87;
+            renderer->glassPanel(64, y, 870, 74, 7, .9f);
+            renderer->text(rows[i].title, 86, y + 25, 18, colors::white, true);
+            button(rows[i].value, 652, y + 12, 260, rows[i].action);
+        }
     }
     void recordScreen() {
         top("Records");
@@ -1825,6 +1894,7 @@ class App {
     void render() {
         buttons.clear();
         bool panorama = screen == Screen::Menu || screen == Screen::Hills || screen == Screen::Help ||
+                        screen == Screen::Graphics ||
                         screen == Screen::Settings || screen == Screen::Records ||
                         screen == Screen::Standings || screen == Screen::CupSetup ||
                         screen == Screen::ReplayFiles || screen == Screen::SkiJumper;
@@ -1877,6 +1947,9 @@ class App {
             break;
         case Screen::Settings:
             settings();
+            break;
+        case Screen::Graphics:
+            graphicsSettings();
             break;
         case Screen::Records:
             recordScreen();
@@ -2053,6 +2126,51 @@ class App {
         clickButton(Action::Settings);
         if (screen != Screen::Settings)
             throw std::runtime_error("Home Settings link failed");
+        const auto savedGraphics = records.graphics;
+        const bool savedNoMsaa = noMsaa;
+        const auto graphicsBaseline = sim.frame();
+        clickButton(Action::Graphics);
+        if (screen != Screen::Graphics)
+            throw std::runtime_error("Settings Graphics link failed");
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/graphics.ppm");
+        renderer->finish();
+        const int previousSamples = gfx::sampleCount();
+        int availableLevels = 0;
+        for (int count : {0, 2, 4, 8})
+            availableLevels += gfx::supportsSampleCount(count);
+        for (int choice = 0; choice < availableLevels; ++choice) {
+            clickButton(Action::Antialiasing);
+            render();
+            renderer->finish();
+            const auto restoredGraphics = loadRecords(dataDir + "/records-dsj2.dat").graphics;
+            if (restoredGraphics.msaaSamples != gfx::sampleCount() ||
+                !gfx::supportsSampleCount(gfx::sampleCount()) ||
+                restoredGraphics.vsync != gfx::vsyncEnabled())
+                throw std::runtime_error("MSAA must use supported levels and persist graphics preferences");
+        }
+        if (gfx::sampleCount() != previousSamples)
+            throw std::runtime_error("Antialiasing levels did not cycle back to the initial setting");
+        for (int toggle = 0; toggle < 2; ++toggle) {
+            clickButton(Action::Vsync);
+            render();
+            renderer->finish();
+            const auto restoredGraphics = loadRecords(dataDir + "/records-dsj2.dat").graphics;
+            if (restoredGraphics.vsync != gfx::vsyncEnabled() ||
+                gfx::sampleCount() != previousSamples)
+                throw std::runtime_error("VSync must persist the supported mode without changing MSAA");
+        }
+        if (sim.frame().x != graphicsBaseline.x || sim.frame().y != graphicsBaseline.y ||
+            sim.frame().pose != graphicsBaseline.pose || sim.frame().elapsed != graphicsBaseline.elapsed)
+            throw std::runtime_error("Graphics settings changed the simulation");
+        records.graphics = savedGraphics;
+        noMsaa = savedNoMsaa;
+        gfx::configureGraphics(noMsaa ? 0 : records.graphics.msaaSamples, false);
+        savePreferences();
+        clickButton(Action::Back);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Graphics Back did not return to Settings");
         clickButton(Action::Help);
         if (screen != Screen::Help)
             throw std::runtime_error("Settings Controls link failed");

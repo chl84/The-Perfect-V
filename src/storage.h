@@ -1,6 +1,7 @@
 #pragma once
 #include "physics.h"
 #include "jumper_appearance.h"
+#include "graphics_settings.h"
 #include <string>
 
 namespace sjp {
@@ -11,6 +12,7 @@ struct Records {
     double sensitivity = 1;
     environment::Selection environment;
     JumperAppearance jumper = JumperAppearance::Pro;
+    GraphicsSettings graphics;
 };
 // Import missing regular files once, retaining both originals and existing destinations.
 bool importLegacySaves(const std::string &source, const std::string &destination, std::string *error = nullptr);

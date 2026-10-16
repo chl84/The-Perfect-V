@@ -61,6 +61,7 @@ struct State {
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
     std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
+    float snowMaterial = 0, snowSunlight = 0;
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
 struct SavedState {
@@ -96,8 +97,8 @@ struct Context {
     std::array<float, 4> background{};
 
     Context() { state.lights[0].diffuse = state.lights[0].specular = {1, 1, 1, 1}; }
-    Context(SDL_Window *window, bool noMsaa, bool vsync, bool validation) : Context() {
-        backend = std::make_unique<VulkanBackend>(window, noMsaa, vsync, validation);
+    Context(SDL_Window *window, int msaaSamples, bool vsync, bool validation) : Context() {
+        backend = std::make_unique<VulkanBackend>(window, msaaSamples, vsync, validation);
     }
     Matrix &matrix() { return matrixTarget == PROJECTION ? projection : modelView; }
     std::vector<Matrix> &matrixStack() {
@@ -123,7 +124,8 @@ struct Context {
         u.emission = state.emission;
         u.fogColor = state.fogColor;
         u.parameters = {state.shininess, state.fogStart, state.fogEnd, state.lineWidth};
-        u.flags = {float(state.lighting), float(state.fog), float(state.texture), 0};
+        u.flags = {float(state.lighting), float(state.fog), float(state.texture),
+                   state.lighting && state.light0 ? state.snowMaterial * state.snowSunlight : 0.f};
         u.viewport = {float(width), float(height), 1.f / width, 1.f / height};
         u.spotPositionRange = state.spotPositionRange;
         u.spotDirectionCone = state.spotDirectionCone;
@@ -269,10 +271,10 @@ template <typename Operation> void changeCurrent(Operation command) {
 }
 } // namespace
 
-void initialize(SDL_Window *window, bool noMsaa, bool vsync, bool validation) {
+void initialize(SDL_Window *window, int msaaSamples, bool vsync, bool validation) {
     if (context)
         throw std::runtime_error("A drawing context already exists on this thread");
-    context = std::make_unique<Context>(window, noMsaa, vsync, validation);
+    context = std::make_unique<Context>(window, msaaSamples, vsync, validation);
 }
 void shutdown() noexcept {
     context.reset();
@@ -333,12 +335,25 @@ void present(bool synchronous) {
         throw std::runtime_error("Unbalanced scene state before presentation");
     c.backend->render(c.width, c.height, c.background, c.packets, c.dynamic, true, synchronous, nullptr);
 }
+void renderOffscreen() {
+    auto &c = ctx();
+    c.backend->render(c.width, c.height, c.background, c.packets, c.dynamic, false, true, nullptr);
+}
 void captureImage(const std::string &path) {
     auto &c = ctx();
     c.backend->render(c.width, c.height, c.background, c.packets, c.dynamic, false, true, &path);
 }
 int sampleCount() {
     return ctx().backend->samples();
+}
+bool supportsSampleCount(int samples) {
+    return ctx().backend->supportsSampleCount(samples);
+}
+void configureGraphics(int msaaSamples, bool vsync) {
+    ctx().backend->configureGraphics(msaaSamples, vsync);
+}
+bool vsyncEnabled() {
+    return ctx().backend->vsyncEnabled();
 }
 void setFrustumCulling(bool enabled) {
     ctx().frustumCulling = enabled;
@@ -535,6 +550,8 @@ void popAttrib() {
             s.specular = old.specular;
             s.emission = old.emission;
             s.shininess = old.shininess;
+            s.snowMaterial = old.snowMaterial;
+            s.snowSunlight = old.snowSunlight;
             s.lighting = old.lighting;
             s.light0 = old.light0;
             s.light1 = old.light1;
@@ -721,9 +738,18 @@ void materialfv(Enum, Enum property, const float *v) {
     });
 }
 void materialf(Enum, Enum property, float value) {
-    if (property != SHININESS)
+    if (property != SHININESS && property != SNOW_GLITTER)
         throw std::runtime_error("Unsupported material scalar");
-    apply([=](Context &c) { c.state.shininess = value; });
+    apply([=](Context &c) {
+        if (property == SNOW_GLITTER)
+            c.state.snowMaterial = std::clamp(value, 0.f, 1.f);
+        else
+            c.state.shininess = value;
+    });
+}
+void snowSunlight(float strength) {
+    const float value = std::clamp(finite(strength), 0.f, 1.f);
+    apply([=](Context &c) { c.state.snowSunlight = value; });
 }
 void colorMaterial(Enum, Enum) {}
 void fogfv(Enum property, const float *v) {

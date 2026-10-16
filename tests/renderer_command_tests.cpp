@@ -689,7 +689,7 @@ bool SDL_GetWindowSizeInPixels(SDL_Window *, int *w, int *h) {
     *h = audit::drawableHeight;
     return true;
 }
-void sjp::gfx::initialize(SDL_Window *, bool, bool, bool) {}
+void sjp::gfx::initialize(SDL_Window *, int, bool, bool) {}
 void sjp::gfx::shutdown() noexcept {}
 namespace {
 struct AuditPreparedList : sjp::gfx::PreparedList {
@@ -950,6 +950,11 @@ void sjp::gfx::lineWidth(float width) {
 }
 void sjp::gfx::loadIdentity(void) {
     audit::command("sjp::gfx::loadIdentity inside sjp::gfx::begin", false);
+}
+void sjp::gfx::snowSunlight(float strength) {
+    audit::command("snowSunlight inside primitive", false);
+    audit::finite(strength);
+    audit::require(strength >= 0 && strength <= 1, "Invalid snow sunlight strength");
 }
 void sjp::gfx::materialf(sjp::gfx::Enum face, sjp::gfx::Enum pname, float param) {
     audit::command("sjp::gfx::materialf inside sjp::gfx::begin", false);

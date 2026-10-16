@@ -84,16 +84,19 @@ struct Packet {
 };
 class VulkanBackend {
   public:
-    VulkanBackend(SDL_Window *, bool noMsaa, bool vsync, bool validation);
+    VulkanBackend(SDL_Window *, int msaaSamples, bool vsync, bool validation);
     ~VulkanBackend();
     VulkanBackend(const VulkanBackend &) = delete;
     VulkanBackend &operator=(const VulkanBackend &) = delete;
     void beginFrame();
     void wait();
+    void configureGraphics(int msaaSamples, bool vsync);
+    bool vsyncEnabled() const;
     void render(int width, int height, const std::array<float, 4> &clearColor, const std::vector<Packet> &,
                 const std::vector<Vertex> &dynamic, bool present, bool synchronous,
                 const std::string *capture);
     int samples() const;
+    bool supportsSampleCount(int samples) const;
     const std::string &name() const;
 
   private:

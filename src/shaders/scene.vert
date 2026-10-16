@@ -20,7 +20,7 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 emission;
     vec4 fogColor;
     vec4 parameters; // shininess, fog start, fog end, line width
-    vec4 flags;      // lighting, fog, texturing, reserved
+    vec4 flags;      // lighting, fog, texturing, sunlit snow glitter
     vec4 viewport;   // pixel width/height, their reciprocals
     vec4 spotPositionRange[10];
     vec4 spotDirectionCone[10];
@@ -44,6 +44,9 @@ layout(location = 2) out float fogDistance;
 layout(location = 3) flat out float textured;
 layout(location = 4) flat out vec4 fogParameters;
 layout(location = 5) flat out vec3 fogColor;
+layout(location = 6) out vec3 snowNormal;
+layout(location = 7) out vec3 snowView;
+layout(location = 8) flat out vec3 snowSun;
 
 vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
@@ -158,6 +161,17 @@ void main() {
     clip.z = (clip.z + clip.w) * 0.5;
     gl_Position = clip;
 
+    // Snow meshes use unchanged world coordinates. The scene view is rigid,
+    // so its transposed rotation brings view/sun directions back to that space.
+    // Keeping the crystal pattern and its normals in world space avoids swimming.
+    snowNormal = normal;
+    snowView = vec3(0.0);
+    snowSun = vec3(0.0);
+    if (state.flags.w > 0.0) {
+        mat3 eyeToWorld = transpose(mat3(state.modelView));
+        snowView = eyeToWorld * -eye.xyz;
+        snowSun = eyeToWorld * state.lightDirection0.xyz;
+    }
     vertexColor = color;
     if (state.flags.x != 0.0) {
         vec3 n = normalize((state.normalMatrix * vec4(normal, 0.0)).xyz);
@@ -180,6 +194,6 @@ void main() {
     textureUV = uv;
     fogDistance = abs(eye.z);
     textured = state.flags.z;
-    fogParameters = vec4(state.parameters.yz, state.flags.y, 0.0);
+    fogParameters = vec4(state.parameters.yz, state.flags.y, state.flags.w);
     fogColor = state.fogColor.rgb;
 }

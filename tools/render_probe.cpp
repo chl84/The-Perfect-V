@@ -106,7 +106,7 @@ int run(const Options &o) {
         jumps[hi] = std::move(s.frames);
     }
     Context context(o.samples);
-    sjp::Renderer renderer(context.window, o.assets, o.samples == 0);
+    sjp::Renderer renderer(context.window, o.assets, o.samples);
     renderer.setSynchronousRendering(o.synchronize);
     sjp::gfx::setFrustumCulling(o.culling);
     if (renderer.device.find(o.expectedRenderer) == std::string::npos ||

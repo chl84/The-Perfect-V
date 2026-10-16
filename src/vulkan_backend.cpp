@@ -116,6 +116,7 @@ struct VulkanBackend::Impl {
     size_t frameIndex = frames.size() - 1;
     FrameResources &frame() { return frames[frameIndex]; }
     SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_VSYNC;
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
     static constexpr auto colorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     std::map<PipelineState, SDL_GPUGraphicsPipeline *> pipelines;
@@ -145,7 +146,30 @@ struct VulkanBackend::Impl {
             SDL_ReleaseWindowFromGPUDevice(device, window);
         SDL_DestroyGPUDevice(device);
     }
-    void setup(SDL_Window *w, bool noMsaa, bool vsync, bool validation) {
+    static SDL_GPUSampleCount sampleEnum(int count) {
+        switch (count) {
+        case 2: return SDL_GPU_SAMPLECOUNT_2;
+        case 4: return SDL_GPU_SAMPLECOUNT_4;
+        case 8: return SDL_GPU_SAMPLECOUNT_8;
+        default: return SDL_GPU_SAMPLECOUNT_1;
+        }
+    }
+    bool supportsSamples(int count) const {
+        if (count == 0)
+            return true;
+        if (count != 2 && count != 4 && count != 8)
+            return false;
+        const auto value = sampleEnum(count);
+        return SDL_GPUTextureSupportsSampleCount(device, colorFormat, value) &&
+               SDL_GPUTextureSupportsSampleCount(device, depthFormat, value);
+    }
+    SDL_GPUSampleCount selectSamples(int requested) const {
+        for (int count : {8, 4, 2})
+            if (count <= requested && supportsSamples(count))
+                return sampleEnum(count);
+        return SDL_GPU_SAMPLECOUNT_1;
+    }
+    void setup(SDL_Window *w, int msaaSamples, bool vsync, bool validation) {
         window = w;
         // This requests the actual Vulkan backend, including on systems with
         // several SDL GPU drivers. It cannot silently select another API.
@@ -166,12 +190,11 @@ struct VulkanBackend::Impl {
                 : SDL_GPU_PRESENTMODE_VSYNC;
         if (!SDL_SetGPUSwapchainParameters(device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
             fail("swapchain configuration");
+        presentMode = mode;
         if (!SDL_GPUTextureSupportsFormat(device, depthFormat, SDL_GPU_TEXTURETYPE_2D,
                                           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
             depthFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
-        if (!noMsaa && SDL_GPUTextureSupportsSampleCount(device, colorFormat, SDL_GPU_SAMPLECOUNT_4) &&
-            SDL_GPUTextureSupportsSampleCount(device, depthFormat, SDL_GPU_SAMPLECOUNT_4))
-            samples = SDL_GPU_SAMPLECOUNT_4;
+        samples = selectSamples(msaaSamples);
         SDL_GPUShaderCreateInfo shader{};
         shader.format = SDL_GPU_SHADERFORMAT_SPIRV;
         shader.entrypoint = "main";
@@ -565,9 +588,9 @@ struct VulkanBackend::Impl {
     }
 };
 
-VulkanBackend::VulkanBackend(SDL_Window *window, bool noMsaa, bool vsync, bool validation)
+VulkanBackend::VulkanBackend(SDL_Window *window, int msaaSamples, bool vsync, bool validation)
     : impl(std::make_unique<Impl>()) {
-    impl->setup(window, noMsaa, vsync, validation);
+    impl->setup(window, msaaSamples, vsync, validation);
 }
 VulkanBackend::~VulkanBackend() = default;
 void VulkanBackend::wait() { impl->wait(); }
@@ -575,7 +598,43 @@ void VulkanBackend::beginFrame() {
     impl->frameIndex = (impl->frameIndex + 1) % impl->frames.size();
     impl->rendered = false;
 }
-int VulkanBackend::samples() const { return impl->samples == SDL_GPU_SAMPLECOUNT_4 ? 4 : 0; }
+int VulkanBackend::samples() const {
+    switch (impl->samples) {
+    case SDL_GPU_SAMPLECOUNT_2: return 2;
+    case SDL_GPU_SAMPLECOUNT_4: return 4;
+    case SDL_GPU_SAMPLECOUNT_8: return 8;
+    default: return 0;
+    }
+}
+bool VulkanBackend::supportsSampleCount(int samples) const { return impl->supportsSamples(samples); }
+bool VulkanBackend::vsyncEnabled() const { return impl->presentMode == SDL_GPU_PRESENTMODE_VSYNC; }
+void VulkanBackend::configureGraphics(int msaaSamples, bool vsync) {
+    auto &b = *impl;
+    const auto mode = !vsync && SDL_WindowSupportsGPUPresentMode(b.device, b.window, SDL_GPU_PRESENTMODE_IMMEDIATE)
+                          ? SDL_GPU_PRESENTMODE_IMMEDIATE : SDL_GPU_PRESENTMODE_VSYNC;
+    const auto samples = b.selectSamples(msaaSamples);
+    if (mode == b.presentMode && samples == b.samples)
+        return;
+    // Changes happen between submissions. Both slots must finish before their
+    // attachments or sample-count-specific pipelines can be replaced.
+    b.wait();
+    if (mode != b.presentMode) {
+        if (!SDL_SetGPUSwapchainParameters(b.device, b.window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode))
+            fail("swapchain configuration");
+        b.presentMode = mode;
+    }
+    if (samples != b.samples) {
+        for (const auto &entry : b.pipelines)
+            SDL_ReleaseGPUGraphicsPipeline(b.device, entry.second);
+        b.pipelines.clear();
+        for (auto &frame : b.frames) {
+            b.releaseTargets(frame);
+            frame.width = frame.height = 0;
+        }
+        b.samples = samples;
+        b.rendered = false;
+    }
+}
 const std::string &VulkanBackend::name() const { return impl->description; }
 void VulkanBackend::render(int width, int height, const std::array<float, 4> &background,
                            const std::vector<Packet> &packets, const std::vector<Vertex> &dynamic,

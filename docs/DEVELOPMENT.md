@@ -513,9 +513,39 @@ reach the receiver; floodlights contribute one blended projection at night.
 The CPU command suite checks overlap, ski gaps, height-dependent softening and
 landing contrast in all sixteen time/weather combinations.
 
-Normal play has an independent 60 FPS submission limit. Its deadlines advance
-from a fixed clock schedule so timer wake-up delays do not accumulate; long
-stalls discard missed deadlines. Camera smoothing uses elapsed presentation
+Snow crystals use a fixed world-X/Z cell pattern in the existing scene fragment
+shader, with randomized microfacet normals and camera-dependent solar glints.
+Only terrain/prepared/inrun snow is tagged; other materials retain the previous
+shader output. Daylight strength disables glints at night and under the existing
+cloud/fog presets. Screen-space derivatives soften each highlight and fade
+unresolved distant cells before texture-scale shimmer can develop. There is no
+frame-clock randomization, additional geometry, texture, or render pass. Terrain
+positions, normals, physics, input and original simulation RNG are unchanged.
+
+The explicit visual probe is built with `-DTPV_BUILD_RENDER_PROBE=ON`:
+`build-vulkan/snow-glitter-probe /tmp/snow-glitter-check assets`.
+It writes paired captures and CSV measurements for tagged/untagged materials,
+960/1920-wide images, supported MSAA levels, fixed/moving viewpoints, distant
+snow, all sixteen time/weather presets and a 24-frame slow camera traverse.
+Its on/off timing comparison explicitly renders and completes the offscreen GPU
+work, since hidden windows may have no drawable swapchain. No personal saves
+are read or written. Software-GPU timing does not predict hardware frame rates.
+
+Settings → Graphics provides Fullscreen, Antialiasing (off/2×/4×/8× MSAA), and
+VSync (on/off) on one page. VSync defaults to on and follows the display, without
+a separate FPS cap. Off requests immediate presentation; unsupported immediate
+presentation falls back to VSync and the UI shows the supported mode.
+Preferences are saved in an optional `GRAPHICS 4` records tag;
+older saves retain their records and display preferences, including saves from
+the former manual frame-rate menu. Graphics changes apply between submissions.
+Both GPU frame slots finish before sample-count-specific attachments and
+pipelines are replaced; cached scenery and textures remain available.
+Only levels supported by both color and depth targets are offered. Saved levels
+unsupported on another GPU fall back to the nearest lower supported level.
+The default is 4× when available. F11 uses and saves the same fullscreen
+setting.
+
+Camera smoothing uses elapsed presentation
 time, retaining the previous 16 percent response per frame at 60 FPS. The
 original 70 Hz physics and terrain geometry remain unchanged. The renderer uses
 SDL3's GPU API with Vulkan selected explicitly, embedded SPIR-V shaders and at

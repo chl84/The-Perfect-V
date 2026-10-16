@@ -955,6 +955,7 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     const float matte[]{.025f, .035f, .045f, 1};
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, matte);
     sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SHININESS, 8);
+    sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 1);
     sjp::visual::enable(sjp::gfx::TEXTURE_2D);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, naturalSnowTexture);
     sjp::visual::texEnvi(sjp::gfx::TEXTURE_ENV, sjp::gfx::TEXTURE_ENV_MODE, sjp::gfx::MODULATE);
@@ -982,6 +983,7 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
                      {x + 3 * s, terrainY(h, x + 3 * s, z + 10 * s), z + 10 * s},
                      {x + 3 * s, terrainY(h, x + 3 * s, z), z}, true);
     sjp::visual::popAttrib();
+    sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 0);
     sjp::visual::disable(sjp::gfx::TEXTURE_2D);
     // Distant photographic mountains are drawn with the sky, behind this
     // valley and its descending decorative continuation.
@@ -1041,7 +1043,9 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     for (double x = h.inrunStart(); x < 0; x += 2 * s) {
         const double xx = std::min(0.0, x + 2 * s), y = h.inrun(x), yy = h.inrun(xx);
         sjp::visual::enable(sjp::gfx::TEXTURE_2D);
+        sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 1);
         inrunSnowQuad(h, {x, y, -2.3}, {x, y, 2.3}, {xx, yy, 2.3}, {xx, yy, -2.3}, {.92f, .96f, .97f, 1});
+        sjp::visual::materialf(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SNOW_GLITTER, 0);
         sjp::visual::disable(sjp::gfx::TEXTURE_2D);
         quad({x, y - .62, 2.3}, {xx, yy - .62, 2.3}, {xx, yy, 2.3}, {x, y, 2.3}, {.33f, .29f, .25f, 1});
         quad({x, y - .62, -2.3}, {x, y, -2.3}, {xx, yy, -2.3}, {xx, yy - .62, -2.3}, {.33f, .29f, .25f, 1});
