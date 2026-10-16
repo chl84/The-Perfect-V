@@ -80,7 +80,7 @@ jobs:
   packaged:
     name: Test macOS ${{ matrix.arch }}
     needs: build
-    if: ${{ always() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.package_run_id)) }}
+    if: ${{ !cancelled() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.package_run_id)) }}
     strategy:
       fail-fast: false
       matrix:
