@@ -2551,7 +2551,7 @@ int main(int argc, char **argv) {
         return app.run();
     } catch (const std::exception &e) {
         std::cerr << "The Perfect V: " << e.what() << '\n';
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
         bool automated = false;
         for (int i = 1; i < argc; ++i)
             automated = automated || std::string(argv[i]) == "--smoke-test";

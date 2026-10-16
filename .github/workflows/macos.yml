@@ -1,0 +1,145 @@
+name: macOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shaders:
+    name: Compile macOS Vulkan shaders
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y glslang-tools
+      - name: Compile SPIR-V and embed as C++
+        run: |
+          mkdir -p shaders
+          for stage in vert frag; do
+            glslangValidator -V --target-env vulkan1.0 src/shaders/scene.$stage -o shaders/scene.$stage.spv
+            cmake -DSOURCE="$PWD/shaders/scene.$stage.spv" -DOUTPUT="$PWD/shaders/scene.$stage.inc" -P tools/embed_spirv.cmake
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-shaders
+          path: shaders/*.inc
+
+  build:
+    name: Build macOS universal
+    needs: shaders
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: macOS-shaders
+          path: build-macos/shaders
+      - name: Build, test and package
+        run: ./package-macos.sh
+      - name: Stage standalone tests for both architectures
+        run: |
+          mkdir -p build-macos/test-package
+          cp build-macos/game/*-tests build-macos/test-package/
+          cp -L build-macos/dependencies/lib/libSDL3.0.dylib build-macos/test-package/
+          tar -czf dist/macOS-tests.tar.gz -C build-macos/test-package .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThePerfectV-macos-universal
+          path: |
+            dist/*-macos-universal.zip
+            dist/*-macos-universal.zip.sha256
+            dist/macOS-build.json
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macOS-tests
+          path: dist/macOS-tests.tar.gz
+
+  packaged:
+    name: Test macOS ${{ matrix.arch }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            arch: arm64
+          - os: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ThePerfectV-macos-universal
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: macOS-tests
+          path: dist
+      - name: Run all standalone suites on native architecture
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: |
+          test "$(uname -m)" = '${{ matrix.arch }}'
+          mkdir -p "$RUNNER_TEMP/tests"
+          tar -xzf dist/macOS-tests.tar.gz -C "$RUNNER_TEMP/tests"
+          export DYLD_LIBRARY_PATH="$RUNNER_TEMP/tests"
+          for suite in "$RUNNER_TEMP/tests/"*-tests; do
+            echo "Running $(basename "$suite")"
+            "$suite"
+          done
+      - name: Verify relocated app without build dependencies
+        run: |
+          cd dist
+          shasum -a 256 --check ./*-macos-universal.zip.sha256
+          unpacked="$RUNNER_TEMP/The Perfect V ÆØÅ"
+          mkdir -p "$unpacked"
+          ditto -x -k ./*-macos-universal.zip "$unpacked"
+          app="$unpacked/The Perfect V.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          "$app/Contents/MacOS/The Perfect V" --help
+          python3 - "$app" <<'PY'
+          import ctypes, pathlib, sys
+          app = pathlib.Path(sys.argv[1])
+          ctypes.CDLL(str(app / 'Contents/Frameworks/libMoltenVK.dylib'))
+          assert (app / 'Contents/Resources/assets/fonts/Interim-Regular.ttf').is_file()
+          assert (app / 'Contents/Resources/docs/source/ThePerfectV-source.zip').is_file()
+          PY
+      - name: Run graphics smoke test when runner exposes Metal
+        env:
+          SDL_AUDIODRIVER: dummy
+        run: |
+          set +e
+          swift packaging/macos/check-metal.swift
+          metal_status=$?
+          set -e
+          if [ "$metal_status" = 2 ]; then
+            echo '::notice::This macOS runner has no Metal GPU; graphics smoke test skipped.'
+            echo 'Graphics: not tested (runner has no Metal GPU).' >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$metal_status" != 0 ]; then
+            exit "$metal_status"
+          else
+            app="$RUNNER_TEMP/The Perfect V ÆØÅ/The Perfect V.app"
+            "$app/Contents/MacOS/The Perfect V" --smoke-test --hidden \
+              --data-dir "$RUNNER_TEMP/macOS saves ÆØÅ"
+            echo 'Graphics: full packaged MoltenVK smoke test passed.' >> "$GITHUB_STEP_SUMMARY"
+          fi

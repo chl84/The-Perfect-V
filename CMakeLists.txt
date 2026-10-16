@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(ThePerfectV VERSION 1.0.1 LANGUAGES CXX)
+project(ThePerfectV VERSION 1.0.2 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(SDL3 3.4 CONFIG QUIET)
@@ -201,7 +201,20 @@ if(BUILD_TESTING)
   endif()
 endif()
 
-if(WIN32)
+if(APPLE)
+  set(TPV_APP_CONTENTS "The Perfect V.app/Contents")
+  set(TPV_INSTALL_BIN "${TPV_APP_CONTENTS}/MacOS")
+  set(TPV_INSTALL_DATA "${TPV_APP_CONTENTS}/Resources")
+  set_target_properties(the-perfect-v PROPERTIES
+    MACOSX_BUNDLE TRUE
+    MACOSX_BUNDLE_BUNDLE_NAME "The Perfect V"
+    MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.chl84.the-perfect-v"
+    MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/packaging/macos/Info.plist.in"
+    OUTPUT_NAME "The Perfect V"
+    INSTALL_RPATH "@executable_path/../Frameworks")
+elseif(WIN32)
   set(TPV_INSTALL_BIN .)
   set(TPV_INSTALL_DATA .)
   if(MSVC)
@@ -213,7 +226,8 @@ else()
   set(TPV_INSTALL_BIN bin)
   set(TPV_INSTALL_DATA share/the-perfect-v)
 endif()
-install(TARGETS the-perfect-v RUNTIME DESTINATION "${TPV_INSTALL_BIN}")
+install(TARGETS the-perfect-v
+  BUNDLE DESTINATION . RUNTIME DESTINATION "${TPV_INSTALL_BIN}")
 # Runtime owns share/the-perfect-v/saves; installation updates assets only.
 install(DIRECTORY assets DESTINATION "${TPV_INSTALL_DATA}")
 
