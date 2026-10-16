@@ -57,7 +57,7 @@ the same save folder as a native installation.
 ### Build from source
 
 Install a C++17 compiler, CMake 3.16 or newer, pkg-config, the SDL3 and FreeType
-development packages, and either `glslc` (shaderc) or `glslangValidator`. Then:
+development packages, and either `glslc` (shaderc) or `glslangValidator`. On Linux:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
@@ -66,6 +66,10 @@ cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Release
 cmake --build build-vulkan --parallel 4
 ./play-vulkan.sh
 ```
+
+For a complete macOS app, use `./package-macos.sh` on a Mac. Windows builds use
+`./package-windows.ps1` with the precompiled shader directory. See the
+[development notes](docs/DEVELOPMENT.md) for platform-specific prerequisites.
 
 ## How to jump
 
