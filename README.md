@@ -1,6 +1,6 @@
 # The Perfect V
 
-A native Linux and Windows ski jumping game with 32 hills, local competitions and four distinct
+A native Linux, Windows and macOS ski jumping game with 32 hills, local competitions and four distinct
 jumpers. Built with C++17, SDL3 and Vulkan.
 
 ![Pro in flight above a snowy valley in daylight](docs/screenshots/daylight-flight.webp)
@@ -25,6 +25,17 @@ start `ThePerfectV/the-perfect-v.exe`. Keep the included assets and SDL3.dll bes
 the executable. A working Vulkan graphics driver is required; no separate SDL,
 FreeType or Visual C++ runtime installation is needed.
 
+### macOS
+
+The universal ZIP targets **macOS 12 or newer** on **Apple Silicon and Intel**,
+with a Metal-capable GPU. Extract it and move **The Perfect V.app** to Applications.
+SDL3, FreeType and MoltenVK (Vulkan over Metal) are included; Homebrew and the
+Vulkan SDK are not required.
+
+The app has an ad-hoc signature and is **not Apple notarized**. macOS may block
+the first launch. After attempting to open it, use **System Settings → Privacy
+& Security → Open Anyway** if you trust the download.
+
 ### Linux
 
 The AppImage targets **x86_64 Linux with glibc 2.35 or newer**, including Ubuntu
@@ -46,7 +57,7 @@ the same save folder as a native installation.
 ### Build from source
 
 Install a C++17 compiler, CMake 3.16 or newer, pkg-config, the SDL3 and FreeType
-development packages, and either `glslc` (shaderc) or `glslangValidator`. Then:
+development packages, and either `glslc` (shaderc) or `glslangValidator`. On Linux:
 
 ```sh
 git clone https://github.com/chl84/The-Perfect-V.git
@@ -55,6 +66,10 @@ cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Release
 cmake --build build-vulkan --parallel 4
 ./play-vulkan.sh
 ```
+
+For a complete macOS app, use `./package-macos.sh` on a Mac. Windows builds use
+`./package-windows.ps1` with the precompiled shader directory. See the
+[development notes](docs/DEVELOPMENT.md) for platform-specific prerequisites.
 
 ## How to jump
 
@@ -90,12 +105,14 @@ Replays support pause, timeline seeking, three cameras and 0.25×–2× playback
 **RPL** files can also be opened, and exported when the recording supports it.
 Hover over the export buttons for a short explanation. Open a replay through
 **Replays**, drop it onto the window, or use `./play-vulkan.sh --replay FILE`
-or pass `--replay FILE` to the AppImage.
+or pass `--replay FILE` to the executable or AppImage. On macOS, files can also
+be dropped onto the running game window.
 
 ![Cartoon flying through falling snow under the floodlights in Slovenia](docs/screenshots/night-jump.webp)
 
 The default save folder is `~/.local/share/the-perfect-v/saves/` on Linux (respecting
-`XDG_DATA_HOME`) and `%APPDATA%/the-perfect-v/saves/` on Windows.
+`XDG_DATA_HOME`), `%APPDATA%/the-perfect-v/saves/` on Windows, and
+`~/Library/Application Support/the-perfect-v/saves/` on macOS.
 It holds settings, records, cups and replays. Interrupted cups
 can be resumed; resource updates leave saves intact. Use `--data-dir PATH` for
 a separate save folder. Personal saves and replays are excluded from Git.
@@ -118,6 +135,13 @@ The **Windows** workflow builds a portable ZIP with MSVC and source-built SDL3 a
 FreeType. It runs the standalone suites and tests the extracted package on a fresh
 Windows runner with software Vulkan, including paths with spaces and Unicode.
 The Windows ZIP includes project and dependency sources under `docs/source/`.
+
+The **macOS** workflow builds one universal app with Apple Clang, pinned SDL3,
+FreeType and MoltenVK. Standalone tests run natively on Apple Silicon and Intel;
+the extracted app is checked on fresh runners in paths with spaces and Unicode.
+Graphics smoke tests run only when the runner exposes a Metal GPU; a missing
+GPU is explicitly reported as untested. Project and SDL3/FreeType sources are
+included under `Contents/Resources/docs/source/` in the app.
 
 The matching project source and SDL source are embedded in the AppImage. Export
 the project source with `./ThePerfectV-*.AppImage --export-source source.tar.gz`.

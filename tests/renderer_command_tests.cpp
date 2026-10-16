@@ -467,7 +467,9 @@ void protectedSnow(int hill) {
     }};
     bool unchanged = snowVertices == frozen[size_t(hill)].first &&
                      portableSnowHash == portable[size_t(hill)];
-#ifndef _WIN32
+// The bitwise baseline uses glibc's math; other platforms use the same
+// independently frozen positions quantized to 0.1 mm above.
+#if defined(__linux__)
     unchanged = unchanged && snowHash == frozen[size_t(hill)].second;
 #endif
     if (!unchanged)

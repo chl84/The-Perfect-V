@@ -84,6 +84,49 @@ software Vulkan driver is used only by CI and is excluded from the game package.
 Actual GPU drivers still require desktop testing. No workflow publishes releases
 automatically.
 
+## macOS builds
+
+`.github/workflows/macos.yml` builds a universal `arm64` + `x86_64` app on macOS
+15 with Apple Clang. The minimum deployment target is macOS 12.0, matching the
+bundled MoltenVK 1.4.2 requirement. SDL3 3.4.16 and FreeType 2.14.1 are built from
+SHA-256 checked sources for both architectures; FreeType is static. The release
+MoltenVK archive is SHA-256 checked and its universal dylib is bundled alongside
+SDL3. The existing SPIR-V shaders and Vulkan renderer are used through Metal;
+there is no separate macOS rendering implementation.
+Apple Clang uses `-ffp-contract=off` to preserve the original separate-operation
+rounding: fused grid increments otherwise add an extra snow row on England K50.
+The Intel game defaults `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0` before SDL
+initialization. MoltenVK 1.4.2's indirect argument encoder query aborts inside
+Metal on the Intel runner's paravirtual GPU; conventional descriptor binding
+passes the full game test. An explicitly supplied environment value takes
+precedence. Apple Silicon retains MoltenVK's default binding path.
+
+On a Mac with Xcode command-line tools, CMake 3.24+, Python 3.11+ and a shader
+compiler, run `./package-macos.sh`. Alternatively, pass the directory containing
+the two generated shader initializers as its first argument. The workflow
+compiles these portable shaders on Ubuntu, so no Vulkan SDK is needed on the Mac.
+
+The package contains `The Perfect V.app`, with the executable under
+`Contents/MacOS`, dylibs under `Contents/Frameworks`, and assets, documentation,
+licenses and source under `Contents/Resources`. SDL's bundle resource path finds
+assets independently of the working directory. An executable-relative rpath
+finds SDL3, and SDL loads the bundled MoltenVK directly without a Vulkan loader.
+Packaging checks both architectures and rejects unbundled dylib dependencies.
+All binaries and the finished bundle are ad-hoc signed; the signature is verified
+again after extraction. Developer ID signing and Apple notarization are not
+configured. Gatekeeper may require first-launch approval in Privacy & Security.
+
+Fresh macOS runners execute the fourteen standalone suites on both architectures,
+verify the package in a path with spaces and Unicode, load MoltenVK, and run the
+executable's help command. The full packaged graphics smoke test runs when Metal
+is available; runners without a GPU explicitly report the graphics check as
+untested. These checks do not establish performance or hardware compatibility
+on a physical Mac. The default save path is
+`~/Library/Application Support/the-perfect-v/saves/`; `--data-dir` overrides it.
+For workflow dispatch, `package_run_id` optionally retests a previous run's
+artifacts without rebuilding. Normal PR, main and tag builds always compile the
+current source. A graphics failure reruns under LLDB to record all thread stacks.
+
 ## AppImage builds
 
 The distributable is a single x86_64 AppImage. GitHub Actions
