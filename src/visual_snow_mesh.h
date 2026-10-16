@@ -1,5 +1,5 @@
 #pragma once
-#include "visual_mountains.h"
+#include "visual_terrain_profile.h"
 #include <algorithm>
 #include <array>
 #include <cmath>

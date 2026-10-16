@@ -198,6 +198,9 @@ The inrun retains its ±2.3 m width, with 0.5×scale spacing instead of 2×scale
 snow, grooves, fascia and underlying stringers follow the same profile samples.
 Fine inrun panels retain the coarse material groups to avoid multiplying draw
 calls. All geometry is still built once in the existing bounded venue cache.
+The height evaluators in `visual_terrain_profile.h` and the mesh helpers are
+CPU-only; they do not include SDL or graphics-command headers. The camera and
+mesh test targets therefore build without graphics include paths.
 
 Snow layers, camera clearance, fall contact, scenery decals, athlete shadows
 and distance/record markers share this receiver topology. No skier positions,

@@ -1,14 +1,11 @@
 #pragma once
 #include "draw_commands.h"
 #include "visual_environment.h"
+#include "visual_terrain_profile.h"
 #include <array>
 #include <cmath>
 
 namespace sjp::visual {
-inline double arenaGround(const Hill &h, double x, double z) {
-    const double edge = std::max(0.0, std::abs(z) - 19 * h.scale());
-    return h.ground(x) - edge * .08 + std::sin(x * .017 + z * .013) * edge * .018;
-}
 struct FloodlightMast {
     Vec3 base, lamp;
     double size;
