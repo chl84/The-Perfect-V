@@ -69,6 +69,7 @@ struct MipLevel {
 struct Image {
     std::vector<MipLevel> levels;
     bool repeatU = true, repeatV = true, mipmapped = false;
+    bool opaque = true;
     SDL_GPUDevice *device = nullptr;
     SDL_GPUTexture *texture = nullptr;
     SDL_GPUSampler *sampler = nullptr;

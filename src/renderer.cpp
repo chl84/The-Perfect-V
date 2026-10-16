@@ -1,11 +1,12 @@
 #include "renderer.h"
-#include "presentation_timing.h"
 #include "original_skeleton.h"
-#include "visual_weather.h"
-#include "visual_shadow.h"
-#include "visual_start_signal.h"
-#include "visual_sky.h"
+#include "presentation_cache.h"
+#include "presentation_timing.h"
 #include "visual_mountains.h"
+#include "visual_shadow.h"
+#include "visual_sky.h"
+#include "visual_start_signal.h"
+#include "visual_weather.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -204,9 +205,14 @@ void sky(int width, int height, const visual::EnvironmentLight &light,
     sjp::gfx::matrixMode(sjp::gfx::MODELVIEW);
     sjp::gfx::popAttrib();
 }
-void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight &light,
-                  const visual::FloodlightField &lamps, const visual::InrunLayout &inrun,
-                  environment::TimeOfDay time) {
+struct ShadowVertex {
+    Vec3 position;
+    float alpha;
+};
+void shadowGeometry(const Hill &h, const Frame &f, const visual::EnvironmentLight &light,
+                    const visual::FloodlightField &lamps, const visual::InrunLayout &inrun,
+                    environment::TimeOfDay time, std::vector<ShadowVertex> &vertices) {
+    vertices.clear();
     const bool onInrun = f.x <= 0;
     const auto surface = [&](double x) { return onInrun ? h.inrun(x) : h.ground(x); };
     const double clearance = std::max(0.0, f.y - surface(f.x));
@@ -230,14 +236,6 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
     visual::ShadowMask silhouette;
     silhouette.build(visual::shadowSilhouette(skeleton, shadow.cast, clearance, slope), shadow.softness);
     const visual::CameraSurface receiver(h);
-    sjp::gfx::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::COLOR_BUFFER_BIT);
-    sjp::gfx::disable(sjp::gfx::LIGHTING);
-    sjp::gfx::disable(sjp::gfx::TEXTURE_2D);
-    sjp::gfx::enable(sjp::gfx::BLEND);
-    sjp::gfx::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
-    sjp::gfx::depthMask(sjp::gfx::FALSE);
-    sjp::gfx::enable(sjp::gfx::POLYGON_OFFSET_FILL);
-    sjp::gfx::polygonOffset(-1, -1);
     const bool central = onInrun ||
                          std::max(std::abs(silhouette.z),
                                   std::abs(silhouette.z + (visual::ShadowMask::rows - 1) * silhouette.dz)) <=
@@ -258,14 +256,12 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
         if (onInrun)
             z = clamp(z, -2.25, 2.25);
         const float alpha = silhouette.coverage[size_t(row * visual::ShadowMask::columns + column)];
-        col({.09f, .15f, .20f, alpha * float(shadow.opacity)});
         const double y = central ? (std::abs(z) <= 2.3 ? ramp[size_t(column)] : ground[size_t(column)])
                                  : receiver.height(x, z);
-        sjp::gfx::vertex3d(x, y + .012, z);
+        vertices.push_back({{x, y + .012, z}, alpha * float(shadow.opacity)});
     };
     // Each receiver cell is drawn once. Body/limb/ski overlap has already been
     // resolved in the mask; no oval or second contact shadow is drawn.
-    sjp::gfx::begin(sjp::gfx::QUADS);
     for (int row = 0; row < visual::ShadowMask::rows - 1; ++row)
         for (int column = 0; column < visual::ShadowMask::columns - 1; ++column) {
             const size_t at = size_t(row * visual::ShadowMask::columns + column);
@@ -278,8 +274,6 @@ void jumperShadow(const Hill &h, const Frame &f, const visual::EnvironmentLight 
             shadowVertex(column + 1, row + 1);
             shadowVertex(column + 1, row);
         }
-    sjp::gfx::end();
-    sjp::gfx::popAttrib();
 }
 void lookAt(Vec3 eye, Vec3 center) {
     Vec3 f = (center - eye).normalized(), s = cross(f, {0, 1, 0}).normalized(), u = cross(s, f);
@@ -289,6 +283,70 @@ void lookAt(Vec3 eye, Vec3 center) {
     sjp::gfx::translated(-eye.x, -eye.y, -eye.z);
 }
 } // namespace
+struct Renderer::ShadowCache {
+    bool valid = false;
+    std::string hill;
+    Frame frame;
+    environment::Conditions conditions;
+    std::vector<ShadowVertex> vertices;
+    gfx::Id mesh = 0;
+};
+void Renderer::shadow(const Hill &h, const Frame &f, const visual::FloodlightField &lamps,
+                      const visual::InrunLayout &inrun) {
+    auto &cache = *shadowCache;
+    const bool repeat = cache.valid && cache.hill == h.id && cache.conditions == sceneEnvironment &&
+                        visual::samePresentationFrame(cache.frame, f);
+    if (!repeat) {
+        if (cache.mesh)
+            gfx::deleteLists(cache.mesh, 1);
+        cache.mesh = 0;
+        shadowGeometry(h, f, lighting, lamps, inrun, sceneEnvironment.time, cache.vertices);
+        cache.hill = h.id;
+        cache.frame = f;
+        cache.conditions = sceneEnvironment;
+        cache.valid = true;
+    }
+    gfx::pushAttrib(gfx::ENABLE_BIT | gfx::DEPTH_BUFFER_BIT | gfx::CURRENT_BIT | gfx::POLYGON_BIT |
+                    gfx::COLOR_BUFFER_BIT);
+    gfx::disable(gfx::LIGHTING);
+    gfx::disable(gfx::TEXTURE_2D);
+    gfx::enable(gfx::BLEND);
+    gfx::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
+    gfx::depthMask(false);
+    gfx::enable(gfx::POLYGON_OFFSET_FILL);
+    gfx::polygonOffset(-1, -1);
+    if (cache.mesh) {
+        gfx::callList(cache.mesh);
+    } else {
+        // Moving frames stay dynamic. Promote only a repeated mask, so live
+        // flight never pays mesh indexing/allocation every presentation frame.
+        if (repeat) {
+            cache.mesh = gfx::genLists(1);
+            gfx::newList(cache.mesh, gfx::COMPILE_AND_EXECUTE);
+        }
+        gfx::begin(gfx::QUADS);
+        for (const auto &v : cache.vertices) {
+            gfx::color4f(.09f, .15f, .20f, v.alpha);
+            gfx::vertex3d(v.position.x, v.position.y, v.position.z);
+        }
+        gfx::end();
+        if (repeat)
+            gfx::endList();
+    }
+    gfx::popAttrib();
+}
+Frame Renderer::cachedAthleteFrame(const Hill &h, const Frame &f, bool ghost) {
+    auto &cache = contactCache[ghost ? 1 : 0];
+    if (!cache.valid || cache.hill != h.id || cache.appearance != jumperAppearance ||
+        !visual::samePresentationFrame(cache.input, f)) {
+        cache.input = f;
+        cache.output = displayedAthleteFrame(h, f, jumperAppearance);
+        cache.hill = h.id;
+        cache.appearance = jumperAppearance;
+        cache.valid = true;
+    }
+    return cache.output;
+}
 void Renderer::loadMountainPanorama(const std::string &path) {
     SDL_Surface *bitmap = SDL_LoadBMP(path.c_str());
     if (!bitmap)
@@ -361,11 +419,7 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
 }
 Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool vsync, bool validation)
     : window(w) {
-    for (size_t i = 0; i < chasePaths.size(); ++i) {
-        chasePaths[i].build(hills()[i]);
-        inrunLayouts[i].build(hills()[i]);
-        grandstandLayouts[i].build(hills()[i]);
-    }
+    shadowCache = std::make_unique<ShadowCache>();
     sjp::gfx::initialize(window, noMsaa, vsync, validation);
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
@@ -388,6 +442,17 @@ Renderer::Renderer(SDL_Window *w, const std::string &assets, bool noMsaa, bool v
     }
 }
 Renderer::~Renderer() {
+    // The worker owns no GPU context, but reads textures and writes venue
+    // layouts. Join before destroying either, including on an early exit.
+    if (preparingLandscape.valid())
+        preparingLandscape.wait();
+    if (shadowCache->mesh)
+        gfx::deleteLists(shadowCache->mesh, 1);
+    for (auto mesh : previewMeshes)
+        if (mesh)
+            gfx::deleteLists(mesh, 1);
+    if (cartoonPreviewHead)
+        gfx::deleteLists(cartoonPreviewHead, 1);
     for (auto l : landscapes)
         if (l)
             sjp::gfx::deleteLists(l, 1);
@@ -419,9 +484,35 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     width = std::max(1, width);
     height = std::max(1, height);
     sjp::gfx::beginFrame(width, height);
+    const bool changedScene = sceneHill != h.id || !terrainReady;
+    sceneHill = h.id;
+    terrainReady = prepareTerrain(h);
     sjp::gfx::viewport(0, 0, width, height);
-    sjp::gfx::clearColor(float(lighting.fog.x), float(lighting.fog.y), float(lighting.fog.z), 1);
+    // Until the first venue is ready, use the UI's dark background. Never
+    // expose a bright, terrain-free sky for a frame during hill selection.
+    sjp::gfx::clearColor(colors::ink.r, colors::ink.g, colors::ink.b, 1);
     sjp::gfx::clear(sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::DEPTH_BUFFER_BIT);
+    if (!terrainReady) {
+        if (presentedScene && landscapes[presentedScene->venue]) {
+            const auto &previous = *presentedScene;
+            drawScene(hills()[previous.venue], previous.frame, previous.time, previous.camera,
+                      previous.panorama, previous.ghost, previous.ghost ? &previous.ghostFrame : nullptr);
+        } else {
+            cameraInit = false;
+        }
+        return;
+    }
+    if (changedScene)
+        cameraInit = false;
+    drawScene(h, f, time, camera, panorama, ghost, gf);
+    size_t venue = 0;
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (h.id == hills()[i].id)
+            venue = i;
+    presentedScene = PresentedScene{venue, f, gf ? *gf : Frame{}, time, camera, panorama, ghost && gf};
+}
+void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera, bool panorama, bool ghost,
+                         const Frame *gf) {
     sjp::gfx::matrixMode(sjp::gfx::PROJECTION);
     sjp::gfx::loadIdentity();
     double near = .25, aspect = double(width) / height;
@@ -442,7 +533,7 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     if (panorama) {
         wantEye = {35 * s + std::sin(time * .05) * 10 * s, 37 * s, 145 * s};
         wantTarget = {24 * s, -13 * s, -4 * s};
-    } else if (camera == 1) {
+    } else if (chasePath) {
         wantEye = chasePath->eye(f.x);
         wantTarget = {f.x, f.y + 1.1, 0};
     } else if (camera == 2) {
@@ -513,12 +604,12 @@ void Renderer::begin(const Hill &h, const Frame &f, double time, int camera, boo
     double wx = 10 * s, wy = h.ground(wx) + 10;
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
-    const Frame display = displayedAthleteFrame(h, f, jumperAppearance);
-    jumperShadow(h, display, lighting, lamps, inrun, sceneEnvironment.time);
+    const Frame display = cachedAthleteFrame(h, f, false);
+    shadow(h, display, lamps, inrun);
     athlete(h, display, false);
     if (ghost && gf) {
         sjp::gfx::depthMask(sjp::gfx::FALSE);
-        athlete(h, displayedAthleteFrame(h, *gf, jumperAppearance), true);
+        athlete(h, cachedAthleteFrame(h, *gf, true), true);
         sjp::gfx::depthMask(sjp::gfx::TRUE);
     }
     effects(h, display, time, !panorama);

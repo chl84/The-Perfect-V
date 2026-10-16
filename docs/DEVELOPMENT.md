@@ -11,9 +11,16 @@ external reference data or analysis captures.
 cmake -S . -B build-vulkan -DCMAKE_BUILD_TYPE=Release
 cmake --build build-vulkan --parallel 4
 ctest --test-dir build-vulkan --output-on-failure
+cmake --install build-vulkan --prefix "$HOME/.local"
 ```
 
-Without external fixtures, CTest registers fourteen standalone suites, including:
+For local development on this machine, always complete a game build by installing
+it to `~/.local`. The desktop shortcut runs `~/.local/bin/the-perfect-v-vulkan`,
+which points to `~/.local/bin/the-perfect-v`. Check that this executable matches
+`build-vulkan/the-perfect-v` before reporting the build as updated. Installation
+updates game resources without replacing personal saves.
+
+Without external fixtures, CTest registers fifteen standalone suites, including:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
@@ -26,6 +33,7 @@ Without external fixtures, CTest registers fourteen standalone suites, including
 - `platform-files`: replacing existing saves and preserving data after a failed replacement, including Unicode paths on Windows.
 - `crowd-audio`: approach/flight envelopes on all hills, distant and nearby falls, replay seeking/speed, one-shot reactions, smooth fades, valid sample mixing and the sound toggle through a dummy SDL audio device.
 - `mesh-geometry`: exact attribute sharing, preserved triangle order, bounded ranges, camera transforms and conservative near/side/far clipping without initializing a GPU.
+- `gpu-frames`: the real recorder and Vulkan submission code against a deterministic CPU queue. Checks two-frame resource reuse, resize, capture/present, unavailable swapchains, opaque/transparent pipelines, asynchronous mesh installation, preview/shadow invalidation and resource cleanup without a GPU.
 
 `BUILD_TESTING=OFF` builds only the game and its simulation library.
 
@@ -116,7 +124,7 @@ All binaries and the finished bundle are ad-hoc signed; the signature is verifie
 again after extraction. Developer ID signing and Apple notarization are not
 configured. Gatekeeper may require first-launch approval in Privacy & Security.
 
-Fresh macOS runners execute the fourteen standalone suites on both architectures,
+Fresh macOS runners execute the fifteen standalone suites on both architectures,
 verify the package in a path with spaces and Unicode, load MoltenVK, and run the
 executable's help command. The full packaged graphics smoke test runs when Metal
 is available; runners without a GPU explicitly report the graphics check as
@@ -319,8 +327,18 @@ that do not intersect snow receive no offset.
 
 ## Rendering resource limits
 
-The terrain GPU mesh cache retains the two most recently used venues. Returning
-to an evicted venue rebuilds its unchanged geometry. Static batching finishes before
+The terrain mesh cache uses a 128 MiB budget for vertex/index buffers, culling
+ranges and command records, evicting the least recently used venues. One active
+venue may exceed the budget by itself. A single CPU worker prepares missing
+scenery and that venue's camera/arena layouts in an isolated command recorder;
+it creates no GPU objects. While preparation runs, the renderer continues drawing
+the last complete venue and menus keep their controls visible and interactive.
+Before the first venue is ready, the background uses the UI's dark color instead
+of exposing a bright, terrain-free sky. Gameplay shows a loading card; simulation
+and replay clocks wait for the requested scene, even when an older venue is
+visible. Only
+explicit smoke tests/captures wait synchronously for preparation. Startup no
+longer builds the camera rails for all 32 venues. Static batching finishes before
 the outer attribute restoration so cached scenery preserves the caller's current
 color, normal and texture coordinates. Drawable dimensions are clamped to at least
 one pixel to avoid invalid projections and UI scaling when a backend reports zero.
@@ -329,6 +347,15 @@ Static meshes share vertices only when all 64 attribute bytes are identical.
 Their original triangle stream becomes a 32-bit index buffer with unchanged
 triangle, material and transparency ordering; no coordinates are rounded.
 Vertex/index upload occurs once, and both temporary CPU streams are released.
+Commands with alpha=1 at every vertex use an opaque pipeline only if the bound
+texture also has alpha=255 throughout its mip levels. Transparent snow edges,
+markers, shadows, ghosts and UI keep their original blending and draw order.
+
+Character previews cache fixed geometry while Cartoon's dress and long hair
+continue to animate. Repeated presentation frames reuse fall contact results;
+the shadow is promoted to an indexed GPU mesh on repetition. Pose, interpolated
+skeleton, wind, animation time, hill, character and lighting changes invalidate
+the relevant caches. Moving frames avoid rebuilding indexed shadow meshes.
 
 Ordered ranges of at most 128 triangles retain conservative local-space bounds.
 The current projection/model-view frustum rejects only ranges wholly outside
@@ -492,7 +519,12 @@ stalls discard missed deadlines. Camera smoothing uses elapsed presentation
 time, retaining the previous 16 percent response per frame at 60 FPS. The
 original 70 Hz physics and terrain geometry remain unchanged. The renderer uses
 SDL3's GPU API with Vulkan selected explicitly, embedded SPIR-V shaders and at
-most one frame in flight. `--graphics-compat` and `--sync-rendering` wait for each
+most two frames in flight. Each slot owns its transfer/vertex buffers, color/depth
+targets and fence, and retains referenced meshes/textures until completion. CPU
+scene building overlaps the previous submission; waiting happens only before
+reusing a GPU slot. Minimized windows wait for events without rendering, and an
+unavailable swapchain skips offscreen drawing and uploads. `--graphics-compat`
+and `--sync-rendering` wait for each
 submitted frame immediately. `--no-msaa` disables multisample antialiasing;
 `--gpu-validation` enables SDL GPU/Vulkan validation explicitly. Actual graphics
 settings are printed and flushed at startup. The smoke test is not frame limited.

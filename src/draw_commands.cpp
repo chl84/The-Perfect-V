@@ -70,13 +70,13 @@ struct SavedState {
 };
 struct Context;
 using Command = std::function<void(Context &)>;
-struct CachedMesh {
+struct CachedMesh : PreparedList {
     std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>();
     std::vector<Command> commands;
 };
 struct Context {
     // Resources below are destroyed before the backend and its device.
-    VulkanBackend backend;
+    std::unique_ptr<VulkanBackend> backend;
     State state;
     Vertex current;
     Matrix projection = identity(), modelView = identity();
@@ -88,16 +88,16 @@ struct Context {
     std::map<Id, std::shared_ptr<Image>> images;
     std::map<Id, std::shared_ptr<CachedMesh>> meshes;
     std::shared_ptr<CachedMesh> compiling;
-    bool inPrimitive = false;
+    bool inPrimitive = false, primitiveOpaque = true;
     Id nextImage = 1, nextMesh = 1;
     int width = 1, height = 1, unpackAlignment = 4, packAlignment = 4;
     bool frustumCulling = true;
     uint64_t culledIndices = 0;
     std::array<float, 4> background{};
 
-    Context(SDL_Window *window, bool noMsaa, bool vsync, bool validation)
-        : backend(window, noMsaa, vsync, validation) {
-        state.lights[0].diffuse = state.lights[0].specular = {1, 1, 1, 1};
+    Context() { state.lights[0].diffuse = state.lights[0].specular = {1, 1, 1, 1}; }
+    Context(SDL_Window *window, bool noMsaa, bool vsync, bool validation) : Context() {
+        backend = std::make_unique<VulkanBackend>(window, noMsaa, vsync, validation);
     }
     Matrix &matrix() { return matrixTarget == PROJECTION ? projection : modelView; }
     std::vector<Matrix> &matrixStack() {
@@ -141,7 +141,7 @@ struct Context {
         u.signalParameters = state.signalParameters;
         return u;
     }
-    void packet(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
+    void packet(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count, bool opaque) {
         if (!count)
             return;
         Packet packet;
@@ -156,6 +156,10 @@ struct Context {
                 throw std::runtime_error("Drawing with an unavailable texture");
             packet.image = image->second;
         }
+        // The fragment shader preserves vertex alpha and multiplies texture
+        // alpha. Only a provably opaque primitive may bypass blending.
+        if (opaque && (!packet.image || packet.image->opaque))
+            packet.pipeline.blend = false;
         if (!packets.empty()) {
             auto &prior = packets.back();
             if (prior.mesh == packet.mesh && prior.image == packet.image &&
@@ -167,9 +171,11 @@ struct Context {
         }
         packets.push_back(std::move(packet));
     }
-    void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count) {
+    void emit(const std::shared_ptr<Mesh> &mesh, uint32_t first, uint32_t count, bool opaque) {
+        if (!backend)
+            return;
         if (!mesh || !mesh->indexed || !frustumCulling || !count) {
-            packet(mesh, first, count);
+            packet(mesh, first, count, opaque);
             return;
         }
         const Frustum view(projection, modelView);
@@ -186,13 +192,13 @@ struct Context {
                 runCount += b - a;
             } else {
                 if (runCount)
-                    packet(mesh, runFirst, runCount);
+                    packet(mesh, runFirst, runCount, opaque);
                 runCount = 0;
                 culledIndices += b - a;
             }
         }
         if (runCount)
-            packet(mesh, runFirst, runCount);
+            packet(mesh, runFirst, runCount, opaque);
     }
 };
 thread_local std::unique_ptr<Context> context;
@@ -271,12 +277,50 @@ void initialize(SDL_Window *window, bool noMsaa, bool vsync, bool validation) {
 void shutdown() noexcept {
     context.reset();
 }
+std::future<std::shared_ptr<PreparedList>> prepareList(std::function<void()> draw) {
+    const auto &caller = ctx();
+    auto recorder = std::make_unique<Context>();
+    recorder->state = caller.state;
+    recorder->current = caller.current;
+    recorder->images = caller.images;
+    return std::async(
+        std::launch::async,
+        [recorder = std::move(recorder), draw = std::move(draw)]() mutable -> std::shared_ptr<PreparedList> {
+            context = std::move(recorder);
+            struct Reset {
+                ~Reset() { context.reset(); }
+            } reset;
+            const Id id = genLists(1);
+            newList(id, COMPILE_AND_EXECUTE);
+            draw();
+            endList();
+            const auto &c = ctx();
+            if (!c.attributes.empty() || !c.modelViewStack.empty() || !c.projectionStack.empty())
+                throw std::runtime_error("Unbalanced prepared scene");
+            return c.meshes.at(id);
+        });
+}
+Id installList(std::shared_ptr<PreparedList> prepared) {
+    auto &c = ctx();
+    auto mesh = std::dynamic_pointer_cast<CachedMesh>(std::move(prepared));
+    if (!mesh || !mesh->mesh->indexed || c.compiling || c.inPrimitive)
+        throw std::runtime_error("Invalid prepared scene installation");
+    const Id id = c.nextMesh++;
+    c.meshes.emplace(id, std::move(mesh));
+    return id;
+}
+size_t listBytes(Id id) {
+    const auto &list = *ctx().meshes.at(id);
+    return size_t(list.mesh->vertexCount) * sizeof(Vertex) +
+           size_t(list.mesh->indexCount) * sizeof(uint32_t) + list.mesh->ranges.size() * sizeof(MeshRange) +
+           list.commands.size() * sizeof(Command);
+}
 void beginFrame(int width, int height) {
     auto &c = ctx();
     if (c.inPrimitive || c.compiling || !c.attributes.empty() || !c.modelViewStack.empty() ||
         !c.projectionStack.empty())
         throw std::runtime_error("Unbalanced scene state at frame boundary");
-    c.backend.beginFrame();
+    c.backend->beginFrame();
     c.packets.clear();
     c.dynamic.clear();
     c.culledIndices = 0;
@@ -287,14 +331,14 @@ void present(bool synchronous) {
     auto &c = ctx();
     if (c.inPrimitive || c.compiling || !c.attributes.empty())
         throw std::runtime_error("Unbalanced scene state before presentation");
-    c.backend.render(c.width, c.height, c.background, c.packets, c.dynamic, true, synchronous, nullptr);
+    c.backend->render(c.width, c.height, c.background, c.packets, c.dynamic, true, synchronous, nullptr);
 }
 void captureImage(const std::string &path) {
     auto &c = ctx();
-    c.backend.render(c.width, c.height, c.background, c.packets, c.dynamic, false, true, &path);
+    c.backend->render(c.width, c.height, c.background, c.packets, c.dynamic, false, true, &path);
 }
 int sampleCount() {
-    return ctx().backend.samples();
+    return ctx().backend->samples();
 }
 void setFrustumCulling(bool enabled) {
     ctx().frustumCulling = enabled;
@@ -319,7 +363,7 @@ FrameStats frameStats() {
     return stats;
 }
 void finish() {
-    ctx().backend.wait();
+    ctx().backend->wait();
 }
 
 void begin(Enum mode) {
@@ -327,6 +371,7 @@ void begin(Enum mode) {
     if (c.inPrimitive)
         throw std::runtime_error("Nested scene primitive");
     c.inPrimitive = true;
+    c.primitiveOpaque = true;
     c.primitiveMode = mode;
     c.primitive.clear();
 }
@@ -392,10 +437,11 @@ void end() {
     const uint32_t emitted = uint32_t(target.size()) - first;
     if (mesh)
         appendMeshRanges(*mesh, first, emitted);
+    const bool opaque = c.primitiveOpaque;
     const Vertex current = c.current;
-    apply([mesh, first, emitted, current](Context &c) {
+    apply([mesh, first, emitted, current, opaque](Context &c) {
         c.current = current;
-        c.emit(mesh, first, emitted);
+        c.emit(mesh, first, emitted, opaque);
     });
 }
 void color4f(float r, float g, float b, float a) {
@@ -426,6 +472,8 @@ void vertex3d(double x, double y, double z) {
     if (!c.inPrimitive)
         throw std::runtime_error("Scene vertex outside a primitive");
     Vertex v = c.current;
+    if (v.color[3] != 1.f)
+        c.primitiveOpaque = false;
     v.position = {finite(x), finite(y), finite(z)};
     c.primitive.push_back(v);
 }
@@ -752,14 +800,14 @@ void getIntegerv(Enum property, int *v) {
     if (property == UNPACK_ALIGNMENT)
         *v = ctx().unpackAlignment;
     else if (property == SAMPLES)
-        *v = ctx().backend.samples();
+        *v = ctx().backend->samples();
     else
         throw std::runtime_error("Unsupported scene integer query");
 }
 const unsigned char *getString(Enum property) {
     if (property != RENDERER)
         throw std::runtime_error("Unsupported renderer query");
-    return reinterpret_cast<const unsigned char *>(ctx().backend.name().c_str());
+    return reinterpret_cast<const unsigned char *>(ctx().backend->name().c_str());
 }
 void genTextures(int count, Id *ids) {
     auto &c = ctx();
@@ -805,6 +853,7 @@ void texImage2D(Enum, int level, int, int width, int height, int, Enum format, E
             out[1] = (format == RGB || format == RGBA) && in ? in[1] : out[0];
             out[2] = (format == RGB || format == RGBA) && in ? in[2] : out[0];
             out[3] = format == RGBA && in ? in[3] : (format == ALPHA && in ? in[0] : 255);
+            image->opaque &= out[3] == 255;
         }
 }
 void texParameteri(Enum, Enum property, int value) {

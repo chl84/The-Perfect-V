@@ -102,12 +102,19 @@ struct VulkanBackend::Impl {
     SDL_GPUDevice *device = nullptr;
     bool claimed = false, rendered = false;
     SDL_GPUShader *vertexShader = nullptr, *fragmentShader = nullptr;
-    SDL_GPUFence *lastFence = nullptr;
-    SDL_GPUTexture *color = nullptr, *multisample = nullptr, *depth = nullptr;
-    SDL_GPUBuffer *dynamicBuffer = nullptr;
-    SDL_GPUTransferBuffer *dynamicTransfer = nullptr;
-    uint32_t dynamicCapacity = 0;
-    int width = 0, height = 0;
+    struct FrameResources {
+        SDL_GPUFence *fence = nullptr;
+        SDL_GPUTexture *color = nullptr, *multisample = nullptr, *depth = nullptr;
+        SDL_GPUBuffer *dynamicBuffer = nullptr;
+        SDL_GPUTransferBuffer *dynamicTransfer = nullptr;
+        uint32_t dynamicCapacity = 0;
+        int width = 0, height = 0;
+        // Retain cache entries evicted while a prior frame is still executing.
+        std::vector<Packet> packets;
+    };
+    std::array<FrameResources, 2> frames;
+    size_t frameIndex = frames.size() - 1;
+    FrameResources &frame() { return frames[frameIndex]; }
     SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
     SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
     static constexpr auto colorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
@@ -118,18 +125,18 @@ struct VulkanBackend::Impl {
     ~Impl() {
         if (!device)
             return;
-        // Resource release is deferred by SDL until submitted work no longer
-        // references it. The device owns the final queue teardown.
-        if (lastFence)
-            SDL_ReleaseGPUFence(device, lastFence);
+        for (auto &f : frames)
+            waitFrame(f, false);
         white.reset();
         for (const auto &[key, pipeline] : pipelines)
             SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
-        if (dynamicBuffer)
-            SDL_ReleaseGPUBuffer(device, dynamicBuffer);
-        if (dynamicTransfer)
-            SDL_ReleaseGPUTransferBuffer(device, dynamicTransfer);
-        releaseTargets();
+        for (auto &f : frames) {
+            if (f.dynamicBuffer)
+                SDL_ReleaseGPUBuffer(device, f.dynamicBuffer);
+            if (f.dynamicTransfer)
+                SDL_ReleaseGPUTransferBuffer(device, f.dynamicTransfer);
+            releaseTargets(f);
+        }
         if (vertexShader)
             SDL_ReleaseGPUShader(device, vertexShader);
         if (fragmentShader)
@@ -151,7 +158,7 @@ struct VulkanBackend::Impl {
         if (!SDL_ClaimWindowForGPUDevice(device, window))
             fail("window claim");
         claimed = true;
-        if (!SDL_SetGPUAllowedFramesInFlight(device, 1))
+        if (!SDL_SetGPUAllowedFramesInFlight(device, 2))
             fail("frame queue configuration");
         const auto mode =
             !vsync && SDL_WindowSupportsGPUPresentMode(device, window, SDL_GPU_PRESENTMODE_IMMEDIATE)
@@ -190,22 +197,27 @@ struct VulkanBackend::Impl {
         white->levels.push_back({1, 1, {255, 255, 255, 255}});
         white->repeatU = white->repeatV = false;
     }
-    void wait() {
-        if (!lastFence)
-            return;
-        if (!SDL_WaitForGPUFences(device, true, &lastFence, 1))
-            fail("frame fence wait");
-        SDL_ReleaseGPUFence(device, lastFence);
-        lastFence = nullptr;
+    void waitFrame(FrameResources &f, bool reportFailure = true) {
+        if (f.fence) {
+            if (!SDL_WaitForGPUFences(device, true, &f.fence, 1) && reportFailure)
+                fail("frame fence wait");
+            SDL_ReleaseGPUFence(device, f.fence);
+            f.fence = nullptr;
+        }
+        f.packets.clear();
     }
-    void releaseTargets() {
-        if (color)
-            SDL_ReleaseGPUTexture(device, color);
-        if (multisample)
-            SDL_ReleaseGPUTexture(device, multisample);
-        if (depth)
-            SDL_ReleaseGPUTexture(device, depth);
-        color = multisample = depth = nullptr;
+    void wait() {
+        for (auto &f : frames)
+            waitFrame(f);
+    }
+    void releaseTargets(FrameResources &f) {
+        if (f.color)
+            SDL_ReleaseGPUTexture(device, f.color);
+        if (f.multisample)
+            SDL_ReleaseGPUTexture(device, f.multisample);
+        if (f.depth)
+            SDL_ReleaseGPUTexture(device, f.depth);
+        f.color = f.multisample = f.depth = nullptr;
     }
     SDL_GPUTexture *target(SDL_GPUTextureFormat format, SDL_GPUTextureUsageFlags usage,
                            SDL_GPUSampleCount count, int w, int h) {
@@ -224,47 +236,46 @@ struct VulkanBackend::Impl {
         return texture;
     }
     void resize(int w, int h) {
-        if (w == width && h == height)
+        if (w == frame().width && h == frame().height)
             return;
         if (w < 1 || h < 1 || w > 16384 || h > 16384)
             throw std::runtime_error("Invalid Vulkan frame size");
-        wait();
-        releaseTargets();
-        color = target(colorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
-                       SDL_GPU_SAMPLECOUNT_1, w, h);
+        releaseTargets(frame());
+        frame().color = target(colorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER,
+                               SDL_GPU_SAMPLECOUNT_1, w, h);
         if (samples != SDL_GPU_SAMPLECOUNT_1)
-            multisample = target(colorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, samples, w, h);
-        depth = target(depthFormat, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, samples, w, h);
-        width = w;
-        height = h;
+            frame().multisample = target(colorFormat, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, samples, w, h);
+        frame().depth = target(depthFormat, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, samples, w, h);
+        frame().width = w;
+        frame().height = h;
     }
     void dynamicStorage(uint32_t required) {
-        if (required <= dynamicCapacity)
+        if (required <= frame().dynamicCapacity)
             return;
         if (required > 128 * 1024 * 1024)
             throw std::runtime_error("Dynamic scene exceeded its 128 MiB limit");
         uint32_t capacity = 65536;
         while (capacity < required)
             capacity *= 2;
-        if (dynamicBuffer)
-            SDL_ReleaseGPUBuffer(device, dynamicBuffer);
-        if (dynamicTransfer)
-            SDL_ReleaseGPUTransferBuffer(device, dynamicTransfer);
-        dynamicBuffer = nullptr;
-        dynamicTransfer = nullptr;
+        if (frame().dynamicBuffer)
+            SDL_ReleaseGPUBuffer(device, frame().dynamicBuffer);
+        if (frame().dynamicTransfer)
+            SDL_ReleaseGPUTransferBuffer(device, frame().dynamicTransfer);
+        frame().dynamicBuffer = nullptr;
+        frame().dynamicTransfer = nullptr;
         SDL_GPUBufferCreateInfo buffer{};
         buffer.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
         buffer.size = capacity;
-        dynamicBuffer = SDL_CreateGPUBuffer(device, &buffer);
-        if (!dynamicBuffer)
+        frame().dynamicBuffer = SDL_CreateGPUBuffer(device, &buffer);
+        if (!frame().dynamicBuffer)
             fail("dynamic vertex buffer allocation");
         SDL_GPUTransferBufferCreateInfo transfer{};
         transfer.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         transfer.size = capacity;
-        dynamicTransfer = SDL_CreateGPUTransferBuffer(device, &transfer);
-        if (!dynamicTransfer)
+        frame().dynamicTransfer = SDL_CreateGPUTransferBuffer(device, &transfer);
+        if (!frame().dynamicTransfer)
             fail("dynamic transfer allocation");
-        dynamicCapacity = capacity;
+        frame().dynamicCapacity = capacity;
     }
     SDL_GPUGraphicsPipeline *pipeline(const PipelineState &state) {
         const auto found = pipelines.find(state);
@@ -450,13 +461,13 @@ struct VulkanBackend::Impl {
                 uploadMesh(copy, packet.mesh, transfers);
             }
             if (dynamicSize) {
-                auto *mapped = SDL_MapGPUTransferBuffer(device, dynamicTransfer, false);
+                auto *mapped = SDL_MapGPUTransferBuffer(device, frame().dynamicTransfer, false);
                 if (!mapped)
                     fail("dynamic transfer mapping");
                 std::memcpy(mapped, dynamic.data(), dynamicSize);
-                SDL_UnmapGPUTransferBuffer(device, dynamicTransfer);
-                SDL_GPUTransferBufferLocation source{dynamicTransfer, 0};
-                SDL_GPUBufferRegion destination{dynamicBuffer, 0, dynamicSize};
+                SDL_UnmapGPUTransferBuffer(device, frame().dynamicTransfer);
+                SDL_GPUTransferBufferLocation source{frame().dynamicTransfer, 0};
+                SDL_GPUBufferRegion destination{frame().dynamicBuffer, 0, dynamicSize};
                 SDL_UploadToGPUBuffer(copy, &source, &destination, false);
             }
         } catch (...) {
@@ -465,13 +476,13 @@ struct VulkanBackend::Impl {
         }
         SDL_EndGPUCopyPass(copy);
         SDL_GPUColorTargetInfo target{};
-        target.texture = multisample ? multisample : color;
+        target.texture = frame().multisample ? frame().multisample : frame().color;
         target.clear_color = {background[0], background[1], background[2], background[3]};
         target.load_op = SDL_GPU_LOADOP_CLEAR;
-        target.store_op = multisample ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
-        target.resolve_texture = multisample ? color : nullptr;
+        target.store_op = frame().multisample ? SDL_GPU_STOREOP_RESOLVE : SDL_GPU_STOREOP_STORE;
+        target.resolve_texture = frame().multisample ? frame().color : nullptr;
         SDL_GPUDepthStencilTargetInfo depthTarget{};
-        depthTarget.texture = depth;
+        depthTarget.texture = frame().depth;
         depthTarget.clear_depth = 1;
         depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
         depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
@@ -480,7 +491,7 @@ struct VulkanBackend::Impl {
         auto *pass = SDL_BeginGPURenderPass(command, &target, 1, &depthTarget);
         if (!pass)
             fail("render pass creation");
-        SDL_GPUViewport viewport{0, 0, float(width), float(height), 0, 1};
+        SDL_GPUViewport viewport{0, 0, float(frame().width), float(frame().height), 0, 1};
         SDL_SetGPUViewport(pass, &viewport);
         SDL_GPUGraphicsPipeline *lastPipeline = nullptr;
         SDL_GPUBuffer *lastBuffer = nullptr;
@@ -492,7 +503,7 @@ struct VulkanBackend::Impl {
                 SDL_BindGPUGraphicsPipeline(pass, selected);
                 lastPipeline = selected;
             }
-            auto *buffer = packet.mesh ? packet.mesh->buffer : dynamicBuffer;
+            auto *buffer = packet.mesh ? packet.mesh->buffer : frame().dynamicBuffer;
             if (buffer != lastBuffer) {
                 SDL_GPUBufferBinding binding{buffer, 0};
                 SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
@@ -523,9 +534,9 @@ struct VulkanBackend::Impl {
         if (!copy)
             fail("screenshot copy pass creation");
         SDL_GPUTextureRegion source{};
-        source.texture = color;
-        source.w = uint32_t(width);
-        source.h = uint32_t(height);
+        source.texture = frame().color;
+        source.w = uint32_t(frame().width);
+        source.h = uint32_t(frame().height);
         source.d = 1;
         SDL_GPUTextureTransferInfo destination{};
         destination.transfer_buffer = readback.buffer;
@@ -539,11 +550,11 @@ struct VulkanBackend::Impl {
         try {
             std::ofstream output(path, std::ios::binary);
             output.exceptions(std::ios::badbit | std::ios::failbit);
-            output << "P6\n" << width << ' ' << height << "\n255\n";
-            std::vector<unsigned char> row(size_t(width) * 3);
-            for (int y = 0; y < height; ++y) {
-                for (int x = 0; x < width; ++x)
-                    std::memcpy(row.data() + size_t(x) * 3, mapped + (size_t(y) * width + x) * 4, 3);
+            output << "P6\n" << frame().width << ' ' << frame().height << "\n255\n";
+            std::vector<unsigned char> row(size_t(frame().width) * 3);
+            for (int y = 0; y < frame().height; ++y) {
+                for (int x = 0; x < frame().width; ++x)
+                    std::memcpy(row.data() + size_t(x) * 3, mapped + (size_t(y) * frame().width + x) * 4, 3);
                 output.write(reinterpret_cast<const char *>(row.data()), std::streamsize(row.size()));
             }
         } catch (...) {
@@ -561,7 +572,7 @@ VulkanBackend::VulkanBackend(SDL_Window *window, bool noMsaa, bool vsync, bool v
 VulkanBackend::~VulkanBackend() = default;
 void VulkanBackend::wait() { impl->wait(); }
 void VulkanBackend::beginFrame() {
-    impl->wait();
+    impl->frameIndex = (impl->frameIndex + 1) % impl->frames.size();
     impl->rendered = false;
 }
 int VulkanBackend::samples() const { return impl->samples == SDL_GPU_SAMPLECOUNT_4 ? 4 : 0; }
@@ -570,9 +581,22 @@ void VulkanBackend::render(int width, int height, const std::array<float, 4> &ba
                            const std::vector<Packet> &packets, const std::vector<Vertex> &dynamic,
                            bool present, bool synchronous, const std::string *capture) {
     auto &b = *impl;
-    b.wait();
-    b.resize(width, height);
+    auto &f = b.frame();
+    // CPU scene construction has already overlapped the previous submission.
+    // Only wait when reusing this slot's transfer buffers and attachments.
+    b.waitFrame(f);
     CommandBuffer command(b.device);
+    SDL_GPUTexture *swapchain = nullptr;
+    uint32_t swapWidth = 0, swapHeight = 0;
+    if (present) {
+        if (!SDL_WaitAndAcquireGPUSwapchainTexture(command.buffer, b.window, &swapchain, &swapWidth,
+                                                   &swapHeight))
+            fail("swapchain acquisition");
+        if (!swapchain)
+            return; // No offscreen drawing/upload when the window is unavailable.
+        command.acquiredSwapchain = true;
+    }
+    b.resize(width, height);
     std::unique_ptr<Transfer> readback;
     if (!b.rendered)
         b.draw(command.buffer, background, packets, dynamic);
@@ -581,27 +605,20 @@ void VulkanBackend::render(int width, int height, const std::array<float, 4> &ba
                                               SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
         b.screenshot(command.buffer, *readback);
     }
-    if (present) {
-        SDL_GPUTexture *swapchain = nullptr;
-        uint32_t swapWidth = 0, swapHeight = 0;
-        if (!SDL_WaitAndAcquireGPUSwapchainTexture(command.buffer, b.window, &swapchain, &swapWidth,
-                                                   &swapHeight))
-            fail("swapchain acquisition");
-        if (swapchain) {
-            command.acquiredSwapchain = true;
-            SDL_GPUBlitInfo blit{};
-            blit.source.texture = b.color;
-            blit.source.w = uint32_t(width);
-            blit.source.h = uint32_t(height);
-            blit.destination.texture = swapchain;
-            blit.destination.w = swapWidth;
-            blit.destination.h = swapHeight;
-            blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
-            blit.filter = SDL_GPU_FILTER_NEAREST;
-            SDL_BlitGPUTexture(command.buffer, &blit);
-        }
+    if (swapchain) {
+        SDL_GPUBlitInfo blit{};
+        blit.source.texture = f.color;
+        blit.source.w = uint32_t(width);
+        blit.source.h = uint32_t(height);
+        blit.destination.texture = swapchain;
+        blit.destination.w = swapWidth;
+        blit.destination.h = swapHeight;
+        blit.load_op = SDL_GPU_LOADOP_DONT_CARE;
+        blit.filter = SDL_GPU_FILTER_NEAREST;
+        SDL_BlitGPUTexture(command.buffer, &blit);
     }
-    b.lastFence = command.submit();
+    f.packets = packets;
+    f.fence = command.submit();
     if (synchronous || capture)
         b.wait();
     if (capture)

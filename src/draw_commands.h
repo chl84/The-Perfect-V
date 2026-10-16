@@ -2,6 +2,9 @@
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
+#include <functional>
+#include <future>
+#include <memory>
 #include <string>
 
 // The scene's existing construction order is retained by this command recorder.
@@ -12,6 +15,15 @@ namespace sjp::gfx {
 using Enum = uint32_t;
 using Flags = uint32_t;
 using Id = uint32_t;
+
+// CPU-only preparation uses an isolated recorder; GPU objects are installed
+// and uploaded on the render thread after the future becomes ready.
+struct PreparedList {
+    virtual ~PreparedList() = default;
+};
+std::future<std::shared_ptr<PreparedList>> prepareList(std::function<void()>);
+Id installList(std::shared_ptr<PreparedList>);
+size_t listBytes(Id);
 
 // Up to five paired mast columns. Only the two adjacent columns illuminate a vertex.
 inline constexpr int ARENA_LIGHT_COLUMNS = 5;

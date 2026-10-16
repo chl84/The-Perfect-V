@@ -157,6 +157,19 @@ void lightfv(Enum, Enum, const float *) { ++drawCalls; }
 void pushMatrix() { ++drawCalls; }
 void popMatrix() { ++drawCalls; }
 void translated(double, double, double) { ++drawCalls; }
+Id genLists(int) {
+    ++drawCalls;
+    return 1;
+}
+void newList(Id, Enum) {
+    ++drawCalls;
+}
+void endList() {
+    ++drawCalls;
+}
+void callList(Id) {
+    ++drawCalls;
+}
 } // namespace sjp::gfx
 
 int main() {

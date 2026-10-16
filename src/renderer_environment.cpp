@@ -1,11 +1,12 @@
-#include "renderer.h"
 #include "original_skeleton.h"
-#include "visual_weather.h"
+#include "renderer.h"
+#include "visual_contact_shadow.h"
 #include "visual_floodlights.h"
 #include "visual_mountains.h"
-#include "visual_contact_shadow.h"
+#include "visual_weather.h"
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -868,17 +869,49 @@ void floodlight(const Hill &h, double x, double z, double size) {
 }
 } // namespace
 
-void Renderer::terrain(const Hill &h) {
-    const double s = h.scale();
+void Renderer::installTerrain() {
+    const auto prepared = preparingLandscape.get();
+    const size_t index = preparingVenue;
+    landscapes[index] = gfx::installList(prepared);
+    landscapeBytes[index] = gfx::listBytes(landscapes[index]);
+    landscapeUse[index] = ++landscapeClock;
+    size_t bytes = 0;
+    for (size_t n : landscapeBytes)
+        bytes += n;
+    while (bytes > landscapeBudget) {
+        size_t oldest = landscapes.size();
+        for (size_t i = 0; i < landscapes.size(); ++i)
+            if (i != index && landscapes[i] &&
+                (oldest == landscapes.size() || landscapeUse[i] < landscapeUse[oldest]))
+                oldest = i;
+        if (oldest == landscapes.size())
+            break; // A single venue may exceed the budget; never discard the active one.
+        gfx::deleteLists(landscapes[oldest], 1);
+        landscapes[oldest] = 0;
+        bytes -= landscapeBytes[oldest];
+        landscapeBytes[oldest] = 0;
+    }
+}
+void Renderer::waitForScene() {
+    if (preparingLandscape.valid())
+        installTerrain();
+}
+bool Renderer::prepareTerrain(const Hill &h) {
     size_t index = 0;
     for (size_t i = 0; i < hills().size(); ++i)
         if (h.id == hills()[i].id)
             index = i;
-    landscapeUse[index] = ++landscapeClock;
+    if (preparingLandscape.valid() &&
+        preparingLandscape.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        installTerrain();
     if (landscapes[index]) {
-        sjp::gfx::callList(landscapes[index]);
-        return;
+        landscapeUse[index] = ++landscapeClock;
+        return true;
     }
+    // Only one bounded preparation job exists. Rapid selection changes never
+    // join/cancel a worker on the UI thread or queue all 32 venues.
+    if (preparingLandscape.valid())
+        return false;
     if (!snowTexture)
         snowTexture = makeSnowTexture(true);
     if (!naturalSnowTexture)
@@ -891,21 +924,32 @@ void Renderer::terrain(const Hill &h) {
         contactShadowTexture = makeContactShadowTexture();
     if (!concreteTexture)
         concreteTexture = makeConcreteTexture();
-    // Keep the current and most recently visited venue. The full 32-venue
-    // cache retained millions of unused vertices between jumps.
-    size_t count = 0, oldest = index;
-    for (size_t i = 0; i < landscapes.size(); ++i)
-        if (landscapes[i]) {
-            ++count;
-            if (oldest == index || landscapeUse[i] < landscapeUse[oldest])
-                oldest = i;
+    preparingVenue = index;
+    const Hill *hill = &hills()[index];
+    preparingLandscape = gfx::prepareList([this, hill, index] {
+        if (!venueInitialized[index]) {
+            chasePaths[index].build(*hill);
+            inrunLayouts[index].build(*hill);
+            grandstandLayouts[index].build(*hill);
+            venueInitialized[index] = true;
         }
-    if (count >= 2) {
-        sjp::gfx::deleteLists(landscapes[oldest], 1);
-        landscapes[oldest] = 0;
+        buildTerrain(*hill, index);
+    });
+    if (preparingLandscape.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+        installTerrain();
+        return true;
     }
-    landscapes[index] = sjp::gfx::genLists(1);
-    sjp::gfx::newList(landscapes[index], sjp::gfx::COMPILE_AND_EXECUTE);
+    return false;
+}
+void Renderer::terrain(const Hill &h) {
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (h.id == hills()[i].id) {
+            gfx::callList(landscapes[i]);
+            return;
+        }
+}
+void Renderer::buildTerrain(const Hill &h, size_t index) {
+    const double s = h.scale();
     visual::StaticBatch staticBatch;
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::POLYGON_BIT);
     const float matte[]{.025f, .035f, .045f, 1};
@@ -1187,7 +1231,6 @@ void Renderer::terrain(const Hill &h) {
     staticBatch.finish();
     // Finish writes current attributes, so restore the caller's state last.
     sjp::visual::popAttrib();
-    sjp::gfx::endList();
 }
 
 void Renderer::hillRecordMarker(const Hill &h) {

@@ -318,9 +318,10 @@ class App {
         std::cout << "The Perfect V | " << renderer->device << "\nSaves: " << dataDir
                   << "\nGraphics: Vulkan, SDL " << SDL_VERSIONNUM_MAJOR(sdlVersion) << '.'
                   << SDL_VERSIONNUM_MINOR(sdlVersion) << '.' << SDL_VERSIONNUM_MICRO(sdlVersion)
-                  << ", MSAA=" << sjp::gfx::sampleCount()
-                  << ", synchronous=" << synchronousRendering << ", frames in flight=1"
-                  << ", frame cap=" << (smoke ? 0 : 60) << '\n' << std::flush;
+                  << ", MSAA=" << sjp::gfx::sampleCount() << ", synchronous=" << synchronousRendering
+                  << ", frames in flight=2"
+                  << ", frame cap=" << (smoke ? 0 : 60) << '\n'
+                  << std::flush;
         startup.complete = true;
     }
     ~App() {
@@ -362,12 +363,21 @@ class App {
         uint64_t previous = SDL_GetPerformanceCounter();
         visual::FrameSchedule frameSchedule(std::chrono::steady_clock::now());
         while (running) {
+            if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+                // A null event pointer waits without consuming the event. The
+                // normal handler still processes restore, close and file drops.
+                SDL_WaitEventTimeout(nullptr, 100);
+                events();
+                previous = SDL_GetPerformanceCounter();
+                frameSchedule = visual::FrameSchedule(std::chrono::steady_clock::now());
+                continue;
+            }
             uint64_t now = SDL_GetPerformanceCounter();
             double dt = std::min(.08, double(now - previous) / SDL_GetPerformanceFrequency());
             previous = now;
             time += dt;
             events();
-            if (screen == Screen::Playing) {
+            if (screen == Screen::Playing && renderer->sceneReadyFor(hills()[selectedHill])) {
                 accumulator += dt;
                 while (accumulator >= ORIGINAL_TICK) {
                     Input input = pending;
@@ -394,7 +404,7 @@ class App {
                 }
             } else if (screen != Screen::Paused)
                 accumulator = 0;
-            if (screen == Screen::Replay && replayPlaying)
+            if (screen == Screen::Replay && replayPlaying && renderer->sceneReadyFor(hills()[lastReplay.hill]))
                 replayTime = std::min(replayTime + dt * replaySpeed, replayDuration());
             updateAudio(dt);
             render();
@@ -1079,7 +1089,7 @@ class App {
             }
             if (e.type == SDL_EVENT_QUIT)
                 running = false;
-            if (e.type == SDL_EVENT_WINDOW_FOCUS_LOST &&
+            if ((e.type == SDL_EVENT_WINDOW_FOCUS_LOST || e.type == SDL_EVENT_WINDOW_MINIMIZED) &&
                 screen == Screen::Playing) {
                 if (smokeMouseCapture)
                     std::cout << "Mouse capture test: window lost focus during play\n" << std::flush;
@@ -1842,7 +1852,19 @@ class App {
         renderer->setJumperAppearance(screen == Screen::Replay ? lastReplay.jumper : records.jumper);
         renderer->setHillRecord(records.best[size_t(hi)]);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
+        if (smoke && !renderer->sceneReady()) {
+            renderer->waitForScene();
+            renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
+        }
         renderer->overlay();
+        // Menus remain visible and interactive while their new background
+        // venue loads. The renderer keeps drawing the previous complete scene.
+        if (!renderer->sceneReady() && !panorama) {
+            renderer->glassPanel(485, 373, 470, 130);
+            renderer->text("Preparing hill", 525, 400, 27, colors::white, true);
+            renderer->text(hills()[hi].name, 525, 446, 16, colors::muted);
+            return;
+        }
         switch (screen) {
         case Screen::Menu:
             menu();
@@ -2004,6 +2026,25 @@ class App {
         clickButton(Action::Hills);
         if (screen != Screen::Hills)
             throw std::runtime_error("Home hill selector failed");
+        // Exercise ordinary asynchronous rendering: the smoke path normally
+        // waits for loading and would hide a one-frame menu disappearance.
+        const int previousHill = selectedHill;
+        smoke = false;
+        for (int venue : {hillCount() - 1, hillCount() - 2}) {
+            action(Action::SelectHill, venue);
+            render();
+            const bool hasSelection = std::any_of(buttons.begin(), buttons.end(), [](const Button &b) {
+                return b.action == Action::SelectHill;
+            });
+            const bool hasPractice = std::any_of(buttons.begin(), buttons.end(), [](const Button &b) {
+                return b.action == Action::Practice;
+            });
+            if (!hasSelection || !hasPractice || gfx::frameStats().submittedIndices == 0)
+                throw std::runtime_error("Loading a hill removed the menu or the previous scenery");
+            renderer->finish();
+        }
+        smoke = true;
+        action(Action::SelectHill, previousHill);
         clickButton(Action::Back);
         clickButton(Action::Records);
         if (screen != Screen::Records)

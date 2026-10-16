@@ -39,7 +39,9 @@ The existing scene construction code issues game-local drawing commands.
 `draw_commands.cpp` records vertex attributes, matrices, lighting, material and
 fog state in their existing order. The geometry builders retain the same hill,
 athlete, shadow, weather, scenery and interface calculations. Cached terrain
-meshes keep the existing two-venue limit. Cached commands replay against the
+meshes now use a 128 MiB LRU budget and prepare missing scenery on a CPU worker.
+The current renderer uses two independent GPU frame slots; see the development
+notes for resource reuse and synchronization. Cached commands replay against the
 current camera and lights, and temporary CPU vertices are released after upload.
 
 `vulkan_backend.cpp` submits these packets through SDL3's Vulkan backend. The

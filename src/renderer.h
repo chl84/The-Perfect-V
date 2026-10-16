@@ -9,6 +9,7 @@
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -52,6 +53,10 @@ class Renderer {
     void setEnvironment(environment::Conditions, bool restart = false);
     const environment::Conditions &environmentConditions() const { return sceneEnvironment; }
     void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
+    bool sceneReady() const { return terrainReady; }
+    bool sceneReadyFor(const Hill &hill) const { return terrainReady && sceneHill == hill.id; }
+    // Explicit diagnostics can wait for a complete scene before taking captures.
+    void waitForScene();
     int width = 1440, height = 900;
     float uiScale = 1, offsetX = 0, offsetY = 0;
     std::string device;
@@ -79,7 +84,33 @@ class Renderer {
     std::string recordMarkerHill;
     std::array<sjp::gfx::Id, HILL_COUNT> landscapes{};
     std::array<uint64_t, HILL_COUNT> landscapeUse{};
+    std::array<size_t, HILL_COUNT> landscapeBytes{};
+    static constexpr size_t landscapeBudget = 128 * 1024 * 1024;
     uint64_t landscapeClock = 0;
+    std::future<std::shared_ptr<gfx::PreparedList>> preparingLandscape;
+    size_t preparingVenue = 0;
+    bool terrainReady = false;
+    std::string sceneHill;
+    struct PresentedScene {
+        size_t venue;
+        Frame frame, ghostFrame;
+        double time;
+        int camera;
+        bool panorama, ghost;
+    };
+    std::optional<PresentedScene> presentedScene;
+    std::array<bool, HILL_COUNT> venueInitialized{};
+    std::array<gfx::Id, 4> previewMeshes{};
+    gfx::Id cartoonPreviewHead = 0;
+    struct ShadowCache;
+    std::unique_ptr<ShadowCache> shadowCache;
+    struct ContactCache {
+        bool valid = false;
+        std::string hill;
+        JumperAppearance appearance{};
+        Frame input{}, output{};
+    };
+    std::array<ContactCache, 2> contactCache;
     Vec3 eye{}, target{};
     bool cameraInit = false;
     double cameraTime = 0;
@@ -91,6 +122,13 @@ class Renderer {
     void loadFlagAtlas(const std::string &);
     void loadMountainPanorama(const std::string &);
     void terrain(const Hill &);
+    bool prepareTerrain(const Hill &);
+    void buildTerrain(const Hill &, size_t venue);
+    void installTerrain();
+    void drawScene(const Hill &, const Frame &, double time, int camera, bool panorama, bool ghost,
+                   const Frame *ghostFrame);
+    Frame cachedAthleteFrame(const Hill &, const Frame &, bool ghost);
+    void shadow(const Hill &, const Frame &, const visual::FloodlightField &, const visual::InrunLayout &);
     void hillRecordMarker(const Hill &);
     void inrunStructure(const Hill &, const visual::InrunLayout &);
     void startSignalHousing(const Hill &);

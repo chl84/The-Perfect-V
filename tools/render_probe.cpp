@@ -124,6 +124,10 @@ int run(const Options &o) {
     auto draw = [&](int hi, const sjp::Frame &f, int camera, bool panorama) {
         renderer.resetCamera();
         renderer.begin(sjp::hills()[hi], f, f.elapsed, camera, panorama);
+        if (!renderer.sceneReady()) {
+            renderer.waitForScene();
+            renderer.begin(sjp::hills()[hi], f, f.elapsed, camera, panorama);
+        }
         renderer.overlay();
         renderer.text(sjp::hills()[hi].name, 20, 20, 20);
         renderer.finish();

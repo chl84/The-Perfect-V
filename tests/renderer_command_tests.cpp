@@ -691,6 +691,32 @@ bool SDL_GetWindowSizeInPixels(SDL_Window *, int *w, int *h) {
 }
 void sjp::gfx::initialize(SDL_Window *, bool, bool, bool) {}
 void sjp::gfx::shutdown() noexcept {}
+namespace {
+struct AuditPreparedList : sjp::gfx::PreparedList {
+    sjp::gfx::Id id = 0;
+};
+size_t auditVenueBytes = 0;
+std::vector<sjp::gfx::Id> preparedVenues;
+} // namespace
+std::future<std::shared_ptr<sjp::gfx::PreparedList>> sjp::gfx::prepareList(std::function<void()> draw) {
+    // This audit deliberately executes preparation inline; the real isolated
+    // recorder/thread handoff is covered by the backend command tests.
+    auto prepared = std::make_shared<AuditPreparedList>();
+    prepared->id = genLists(1);
+    preparedVenues.push_back(prepared->id);
+    newList(prepared->id, COMPILE_AND_EXECUTE);
+    draw();
+    endList();
+    std::promise<std::shared_ptr<PreparedList>> promise;
+    promise.set_value(prepared);
+    return promise.get_future();
+}
+sjp::gfx::Id sjp::gfx::installList(std::shared_ptr<PreparedList> prepared) {
+    return std::dynamic_pointer_cast<AuditPreparedList>(prepared)->id;
+}
+size_t sjp::gfx::listBytes(Id id) {
+    return auditVenueBytes ? auditVenueBytes : audit::lists.at(id).vertices * 64;
+}
 void sjp::gfx::beginFrame(int, int) {}
 void sjp::gfx::captureImage(const std::string &) {}
 int sjp::gfx::sampleCount() { return 4; }
@@ -1253,29 +1279,41 @@ int main() {
                        "Renderer leaked graphics resources at destruction");
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            auditVenueBytes = 40 * 1024 * 1024;
+            preparedVenues.clear();
             auto visit = [&](int hi) {
                 sjp::Simulation s(hi, 0);
                 r.begin(s.hill(), s.frame(), 0, 0, false);
                 r.overlay();
                 r.finish();
                 audit::balanced();
-                audit::require(audit::lists.size() <= 2, "Cache limit exceeded");
+                size_t resident = 0;
+                for (auto id : preparedVenues)
+                    resident += audit::lists.count(id);
+                audit::require(resident <= 3, "Terrain cache exceeded byte budget");
             };
             visit(0);
-            const auto first = audit::nextList - 1;
+            const auto first = preparedVenues.back();
             visit(1);
-            const auto second = audit::nextList - 1;
+            const auto second = preparedVenues.back();
             visit(0);
-            audit::require(audit::nextList == second + 1, "Cache hit rebuilt the current venue");
+            audit::require(preparedVenues.size() == 2, "Cache hit rebuilt the current venue");
             visit(2);
-            const auto third = audit::nextList - 1;
+            const auto third = preparedVenues.back();
+            visit(0);
+            visit(1);
+            visit(2);
+            audit::require(preparedVenues.size() == 3, "Three-venue rotation rebuilt cached scenery");
+            visit(0);
+            visit(3);
             audit::require(audit::lists.count(first) && !audit::lists.count(second) &&
                                audit::lists.count(third),
-                           "Cache did not evict least recently used venue");
+                           "Byte budget did not evict least recently used venue");
             visit(1);
-            audit::require(audit::nextList == third + 2 && !audit::lists.count(first) &&
-                               audit::lists.count(third),
+            audit::require(preparedVenues.size() == 5 && audit::lists.count(first) &&
+                               !audit::lists.count(third),
                            "Evicted venue was not rebuilt correctly");
+            auditVenueBytes = 0;
             const auto beforeCompletion = audit::completedFrames;
             r.setSynchronousRendering(true);
             visit(0);
@@ -1489,6 +1527,8 @@ int main() {
                 r.setHillRecord(0);
                 r.begin(hill, sim.frame(), 0, 0, false);
                 r.finish();
+                r.begin(hill, sim.frame(), .1, 0, false);
+                r.finish(); // Promote the unchanged shadow before testing the record cache.
                 const auto terrainCache = audit::nextList;
                 const double distance = hill.k + 13.5;
                 r.setHillRecord(distance);
@@ -1496,6 +1536,7 @@ int main() {
                 audit::recordVertices.clear();
                 r.begin(hill, sim.frame(), 0, 0, false);
                 r.finish();
+                const auto firstMarker = audit::captureRecordList;
                 audit::captureRecordList = 0;
                 audit::require(audit::nextList == terrainCache + 1 && !audit::recordVertices.empty(),
                                "Record rebuilt terrain or did not create its small marker mesh");
@@ -1509,6 +1550,8 @@ int main() {
                 }
                 audit::require(std::abs((lowX + highX) / 2 - hill.atDistance(distance)) < 1e-7,
                                "Blue record marker is not at the measured record distance");
+                r.begin(hill, sim.frame(), .5, 0, false);
+                r.finish();
                 const auto cached = audit::nextList;
                 r.begin(hill, sim.frame(), 1, 0, false);
                 r.finish();
@@ -1516,12 +1559,12 @@ int main() {
                 r.setHillRecord(distance + .5);
                 r.begin(hill, sim.frame(), 2, 0, false);
                 r.finish();
-                audit::require(audit::nextList == cached + 1 && audit::lists.size() <= 3,
+                audit::require(audit::nextList == cached + 1 && !audit::lists.count(firstMarker),
                                "Improved record rebuilt terrain or leaked the previous marker");
                 r.setHillRecord(0);
                 r.begin(hill, sim.frame(), 3, 0, false);
                 r.finish();
-                audit::require(audit::lists.size() <= 2, "Empty record left its marker visible/cached");
+                audit::require(!audit::lists.count(cached), "Empty record left its marker visible/cached");
                 audit::balanced();
                 audit::require(audit::depth, "Record overlay leaked depth-write state");
             }
@@ -1546,7 +1589,6 @@ int main() {
         }
         audit::require(audit::lists.empty() && audit::textures.empty(), "Record marker leaked GPU resources");
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");
-        audit::require(audit::maximumLists <= 3, "Cache exceeds two venues and one small record marker");
         std::cout << "PASS: finite commands, balanced stacks, bounded cache, live current attributes, "
                      "zero-size window, resource cleanup, rectangular terrain-aligned advertisements "
                      "on all 32 hills; no GPU used\n";
