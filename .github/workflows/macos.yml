@@ -2,6 +2,11 @@ name: macOS
 
 on:
   workflow_dispatch:
+    inputs:
+      package_run_id:
+        description: 'Optional previous macOS run: retest its package without rebuilding'
+        required: false
+        type: string
   push:
     branches: [main]
     tags: ['v*']
@@ -9,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: macos-${{ github.ref }}
@@ -17,6 +23,7 @@ concurrency:
 jobs:
   shaders:
     name: Compile macOS Vulkan shaders
+    if: ${{ !inputs.package_run_id }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +42,7 @@ jobs:
 
   build:
     name: Build macOS universal
+    if: ${{ !inputs.package_run_id }}
     needs: shaders
     runs-on: macos-15
     timeout-minutes: 30
@@ -72,6 +80,7 @@ jobs:
   packaged:
     name: Test macOS ${{ matrix.arch }}
     needs: build
+    if: ${{ always() && (needs.build.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.package_run_id)) }}
     strategy:
       fail-fast: false
       matrix:
@@ -91,10 +100,14 @@ jobs:
         with:
           name: ThePerfectV-macos-universal
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.package_run_id || github.run_id }}
       - uses: actions/download-artifact@v4
         with:
           name: macOS-tests
           path: dist
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.package_run_id || github.run_id }}
       - name: Run all standalone suites on native architecture
         env:
           SDL_AUDIODRIVER: dummy
@@ -145,9 +158,13 @@ jobs:
             game_status=$?
             set -e
             if [ "$game_status" != 0 ]; then
-              lldb --batch -o run -o 'thread backtrace all' -- \
+              lldb --batch -o run -k 'thread backtrace all' -- \
                 "$app/Contents/MacOS/The Perfect V" --smoke-test --hidden \
                 --data-dir "$RUNNER_TEMP/macOS diagnostic saves ÆØÅ" || true
+              echo 'Checking whether legacy Metal descriptor binding avoids the startup failure'
+              MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 \
+                "$app/Contents/MacOS/The Perfect V" --smoke-test --hidden \
+                --data-dir "$RUNNER_TEMP/macOS legacy binding saves ÆØÅ" || true
               if [ -d "$HOME/Library/Logs/DiagnosticReports" ]; then
                 find "$HOME/Library/Logs/DiagnosticReports" -type f -name '*Perfect*' -exec cat {} +
               fi
