@@ -13,6 +13,10 @@ color treatment, mild baked detail blur, reduced contrast, resizing and a
 reflected wrap. It is not a geographic 360°
 photograph or a location-specific depiction of the ski venues.
 
+The prepared BMP also contains manual Photoshop retouching around the reflected
+join to break up the conspicuous symmetry. Regenerating recreates the base
+panorama and does not reproduce these manual edits.
+
 Regenerate with `python tools/prepare_mountain_panorama.py ORIGINAL.jpg`
 (development dependency: ImageMagick). The game only loads the prepared
 BMP once; it does not download or process photos.

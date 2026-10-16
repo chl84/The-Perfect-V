@@ -3,7 +3,7 @@
 A native Linux, Windows and macOS ski jumping game with 32 hills, local competitions and four distinct
 jumpers. Built with C++17, SDL3 and Vulkan.
 
-![Pro in flight above a snowy valley in daylight](docs/screenshots/daylight-flight.webp)
+![Pro in flight on Czech Rep. K135, with a snowy valley and mountain panorama](docs/screenshots/daylight-flight.webp)
 
 ## Features
 
