@@ -2547,6 +2547,14 @@ class App {
 } // namespace
 int main(int argc, char **argv) {
     try {
+#if defined(__APPLE__) && defined(__x86_64__)
+        // MoltenVK 1.4.2 queries an indirect argument encoder during startup;
+        // Intel's paravirtual Metal driver aborts in that query. Conventional
+        // descriptor binding passes the full renderer test. Set the process
+        // environment before SDL starts threads; honor an explicit user override.
+        if (SDL_setenv_unsafe("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "0", 0) != 0)
+            throw std::runtime_error("Could not configure MoltenVK descriptor binding");
+#endif
         App app(argc, argv);
         return app.run();
     } catch (const std::exception &e) {

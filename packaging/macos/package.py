@@ -28,6 +28,7 @@ report = {
     'architectures': ['arm64', 'x86_64'],
     'commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip(),
     'compiler': 'Apple Clang', 'SDL3': '3.4.16', 'FreeType': '2.14.1', 'MoltenVK': '1.4.2',
+    'Intel_MoltenVK_default': 'Conventional descriptor binding (Metal argument buffers disabled)',
     'MoltenVK_source': 'https://github.com/KhronosGroup/MoltenVK/tree/v1.4.2',
     'host_requirement': 'Metal-capable GPU', 'sources': 'Contents/Resources/docs/source/',
     'signing': 'Ad-hoc signature; not Developer ID signed or notarized',

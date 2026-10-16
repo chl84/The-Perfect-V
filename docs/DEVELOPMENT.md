@@ -95,6 +95,11 @@ SDL3. The existing SPIR-V shaders and Vulkan renderer are used through Metal;
 there is no separate macOS rendering implementation.
 Apple Clang uses `-ffp-contract=off` to preserve the original separate-operation
 rounding: fused grid increments otherwise add an extra snow row on England K50.
+The Intel game defaults `MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0` before SDL
+initialization. MoltenVK 1.4.2's indirect argument encoder query aborts inside
+Metal on the Intel runner's paravirtual GPU; conventional descriptor binding
+passes the full game test. An explicitly supplied environment value takes
+precedence. Apple Silicon retains MoltenVK's default binding path.
 
 On a Mac with Xcode command-line tools, CMake 3.24+, Python 3.11+ and a shader
 compiler, run `./package-macos.sh`. Alternatively, pass the directory containing
@@ -118,6 +123,9 @@ is available; runners without a GPU explicitly report the graphics check as
 untested. These checks do not establish performance or hardware compatibility
 on a physical Mac. The default save path is
 `~/Library/Application Support/the-perfect-v/saves/`; `--data-dir` overrides it.
+For workflow dispatch, `package_run_id` optionally retests a previous run's
+artifacts without rebuilding. Normal PR, main and tag builds always compile the
+current source. A graphics failure reruns under LLDB to record all thread stacks.
 
 ## AppImage builds
 

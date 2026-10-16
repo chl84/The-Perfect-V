@@ -161,10 +161,6 @@ jobs:
               lldb --batch -o run -k 'thread backtrace all' -- \
                 "$app/Contents/MacOS/The Perfect V" --smoke-test --hidden \
                 --data-dir "$RUNNER_TEMP/macOS diagnostic saves ÆØÅ" || true
-              echo 'Checking whether legacy Metal descriptor binding avoids the startup failure'
-              MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS=0 \
-                "$app/Contents/MacOS/The Perfect V" --smoke-test --hidden \
-                --data-dir "$RUNNER_TEMP/macOS legacy binding saves ÆØÅ" || true
               if [ -d "$HOME/Library/Logs/DiagnosticReports" ]; then
                 find "$HOME/Library/Logs/DiagnosticReports" -type f -name '*Perfect*' -exec cat {} +
               fi
