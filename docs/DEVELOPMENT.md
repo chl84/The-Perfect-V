@@ -573,6 +573,11 @@ Its on/off timing comparison explicitly renders and completes the offscreen GPU
 work, since hidden windows may have no drawable swapchain. No personal saves
 are read or written. Software-GPU timing does not predict hardware frame rates.
 
+Settings contains only category links: Graphics, Audio, Controls, Gameplay and
+Environment. Controls includes mouse sensitivity and the existing bindings;
+Gameplay contains camera, practice wind and ghost; Environment contains time
+and weather. Each category returns to Settings through Back or Escape.
+
 Settings → Graphics provides Fullscreen, Antialiasing (off/2×/4×/8× MSAA), and
 VSync (on/off) on one page. VSync defaults to on and follows the display, without
 a separate FPS cap. Off requests immediate presentation; unsupported immediate

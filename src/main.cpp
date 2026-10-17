@@ -19,6 +19,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
+#include <utility>
 
 using namespace sjp;
 namespace {
@@ -53,6 +54,9 @@ enum class Screen {
     Help,
     Settings,
     Graphics,
+    Audio,
+    Gameplay,
+    Environment,
     Records,
     Playing,
     Paused,
@@ -72,6 +76,9 @@ enum class Action {
     Help,
     Settings,
     Graphics,
+    Audio,
+    Gameplay,
+    Environment,
     Fullscreen,
     Antialiasing,
     Vsync,
@@ -835,6 +842,15 @@ class App {
         case Action::Graphics:
             changeScreen(Screen::Graphics);
             break;
+        case Action::Audio:
+            changeScreen(Screen::Audio);
+            break;
+        case Action::Gameplay:
+            changeScreen(Screen::Gameplay);
+            break;
+        case Action::Environment:
+            changeScreen(Screen::Environment);
+            break;
         case Action::Fullscreen:
             if (SDL_SetWindowFullscreen(window, !fullscreen)) {
                 fullscreen = !fullscreen;
@@ -869,7 +885,8 @@ class App {
             running = false;
             break;
         case Action::Back:
-            if (screen == Screen::Graphics) {
+            if (screen == Screen::Graphics || screen == Screen::Audio ||
+                screen == Screen::Gameplay || screen == Screen::Environment) {
                 changeScreen(Screen::Settings);
             } else if (screen == Screen::Help) {
                 changeScreen(helpReturn);
@@ -1458,45 +1475,53 @@ class App {
             r.text(shortcuts[i].action, x, y, 15, colors::muted);
             r.text(shortcuts[i].key, x + 170, y, 15, colors::white, true);
         }
+        r.glassPanel(64, 790, 1310, 64, 7, .9f);
+        r.text("Mouse sensitivity", 86, 812, 18, colors::white, true);
+        smallButton("Reset", 758, 805, 130, Action::SensitivityReset);
+        smallButton("-", 1000, 805, 56, Action::SensitivityDown);
+        r.text(number(records.sensitivity) + "x", 1081, 812, 18, colors::teal, true);
+        smallButton("+", 1298, 805, 56, Action::SensitivityUp);
     }
     void settings() {
         top("Settings");
-        auto &r = *renderer;
+        const std::array<std::pair<const char *, Action>, 5> categories{{
+            {"Graphics", Action::Graphics}, {"Audio", Action::Audio}, {"Controls", Action::Help},
+            {"Gameplay", Action::Gameplay}, {"Environment", Action::Environment}}};
+        for (size_t i = 0; i < categories.size(); ++i)
+            button(categories[i].first, 64, 253 + i * 68, 420, categories[i].second, 0, false, 54, 18);
+    }
+    void settingRow(const std::string &title, const std::string &value, Action action, size_t row = 0) {
+        const float y = 253 + row * 87;
+        renderer->glassPanel(64, y, 870, 74, 7, .9f);
+        renderer->text(title, 86, y + 25, 18, colors::white, true);
+        button(value, 652, y + 12, 260, action);
+    }
+    void audioSettings() {
+        top("Audio");
+        settingRow("Sound", records.sound ? "On" : "Off", Action::Sound);
+    }
+    void gameplaySettings() {
+        top("Gameplay");
         const char *cams[] = {"Side follow", "Chase", "Wide"};
         const char *winds[] = {"Variable", "Calm", "Headwind", "Tailwind"};
-        struct Setting {
-            std::string title, value;
-            Action action;
-        };
-        const Setting rows[] = {{"Camera", cams[camera], Action::Camera},
-                                {"Sound", records.sound ? "On" : "Off", Action::Sound},
-                                {"Practice wind", winds[windMode], Action::Wind},
-                                {"Last jump ghost", ghost ? "On" : "Off", Action::Ghost}};
-        for (int i = 0; i < 4; ++i) {
-            const float y = 253 + i * 87;
-            r.glassPanel(64, y, 644, 74, 7, .9f);
-            r.text(rows[i].title, 86, y + 25, 18, colors::white, true);
-            button(rows[i].value, 456, y + 12, 230, rows[i].action);
-        }
-        r.glassPanel(738, 253, 636, 185, 7, .9f);
-        r.text("Time of day", 758, 271, 19, colors::white, true);
+        settingRow("Camera", cams[camera], Action::Camera);
+        settingRow("Practice wind", winds[windMode], Action::Wind, 1);
+        settingRow("Last jump ghost", ghost ? "On" : "Off", Action::Ghost, 2);
+    }
+    void environmentSettings() {
+        top("Environment");
+        auto &r = *renderer;
+        r.glassPanel(64, 253, 870, 185, 7, .9f);
+        r.text("Time of day", 86, 271, 19, colors::white, true);
         for (int i = 0; i <= 4; ++i)
-            button(environment::name(environment::TimeOfDay(i)), 758 + (i % 3) * 205, 307 + (i / 3) * 59, 186,
+            button(environment::name(environment::TimeOfDay(i)), 86 + (i % 3) * 276, 307 + (i / 3) * 59, 256,
                    Action::TimeOfDay, i, int(records.environment.time) == i);
-        r.glassPanel(738, 456, 636, 185, 7, .9f);
-        r.text("Weather", 758, 474, 19, colors::white, true);
+        r.glassPanel(64, 456, 870, 185, 7, .9f);
+        r.text("Weather", 86, 474, 19, colors::white, true);
         for (int i = 0; i <= 4; ++i)
-            button(environment::name(environment::Weather(i)), 758 + (i % 3) * 205, 510 + (i / 3) * 59, 186,
+            button(environment::name(environment::Weather(i)), 86 + (i % 3) * 276, 510 + (i / 3) * 59, 256,
                    Action::Weather, i, int(records.environment.weather) == i);
-        r.glassPanel(64, 619, 644, 123, 7, .9f);
-        r.text("Mouse sensitivity", 86, 636, 19, colors::white, true);
-        smallButton("Reset", 86, 690, 130, Action::SensitivityReset);
-        smallButton("-", 326, 690, 56, Action::SensitivityDown);
-        r.text(number(records.sensitivity) + "x", 430, 697, 18, colors::teal, true);
-        smallButton("+", 630, 690, 56, Action::SensitivityUp);
-        smallButton("Day & sun", 1202, 662, 151, Action::EnvironmentReset);
-        button("Controls", 64, 803, 210, Action::Help);
-        button("Graphics", 290, 803, 210, Action::Graphics);
+        smallButton("Day & sun", 64, 662, 151, Action::EnvironmentReset);
     }
     void graphicsSettings() {
         top("Graphics");
@@ -1509,12 +1534,8 @@ class App {
             {"Fullscreen", fullscreen ? "On" : "Off", Action::Fullscreen},
             {"Antialiasing", gfx::sampleCount() ? std::to_string(gfx::sampleCount()) + "x MSAA" : "Off", Action::Antialiasing},
             {"VSync", gfx::vsyncEnabled() ? "On" : "Off", Action::Vsync}}};
-        for (size_t i = 0; i < rows.size(); ++i) {
-            const float y = 253 + i * 87;
-            renderer->glassPanel(64, y, 870, 74, 7, .9f);
-            renderer->text(rows[i].title, 86, y + 25, 18, colors::white, true);
-            button(rows[i].value, 652, y + 12, 260, rows[i].action);
-        }
+        for (size_t i = 0; i < rows.size(); ++i)
+            settingRow(rows[i].title, rows[i].value, rows[i].action, i);
     }
     void recordScreen() {
         top("Records");
@@ -1894,7 +1915,8 @@ class App {
     void render() {
         buttons.clear();
         bool panorama = screen == Screen::Menu || screen == Screen::Hills || screen == Screen::Help ||
-                        screen == Screen::Graphics ||
+                        screen == Screen::Graphics || screen == Screen::Audio ||
+                        screen == Screen::Gameplay || screen == Screen::Environment ||
                         screen == Screen::Settings || screen == Screen::Records ||
                         screen == Screen::Standings || screen == Screen::CupSetup ||
                         screen == Screen::ReplayFiles || screen == Screen::SkiJumper;
@@ -1950,6 +1972,15 @@ class App {
             break;
         case Screen::Graphics:
             graphicsSettings();
+            break;
+        case Screen::Audio:
+            audioSettings();
+            break;
+        case Screen::Gameplay:
+            gameplaySettings();
+            break;
+        case Screen::Environment:
+            environmentSettings();
             break;
         case Screen::Records:
             recordScreen();
@@ -2126,6 +2157,10 @@ class App {
         clickButton(Action::Settings);
         if (screen != Screen::Settings)
             throw std::runtime_error("Home Settings link failed");
+        render();
+        if (buttons.size() != 6)
+            throw std::runtime_error("Settings must contain only Back and the five category links");
+        renderer->finish();
         const auto savedGraphics = records.graphics;
         const bool savedNoMsaa = noMsaa;
         const auto graphicsBaseline = sim.frame();
@@ -2171,9 +2206,49 @@ class App {
         clickButton(Action::Back);
         if (screen != Screen::Settings)
             throw std::runtime_error("Graphics Back did not return to Settings");
+        clickButton(Action::Audio);
+        if (screen != Screen::Audio)
+            throw std::runtime_error("Settings Audio link failed");
+        const bool savedSound = records.sound;
+        clickButton(Action::Sound);
+        if (records.sound == savedSound)
+            throw std::runtime_error("Audio sound control failed");
+        clickButton(Action::Sound);
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/audio.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Audio Back did not return to Settings");
+        clickButton(Action::Gameplay);
+        if (screen != Screen::Gameplay)
+            throw std::runtime_error("Settings Gameplay link failed");
+        const int savedCamera = camera, savedWind = windMode;
+        const bool savedGhost = ghost;
+        for (int i = 0; i < 3; ++i)
+            clickButton(Action::Camera);
+        for (int i = 0; i < 4; ++i)
+            clickButton(Action::Wind);
+        for (int i = 0; i < 2; ++i)
+            clickButton(Action::Ghost);
+        if (camera != savedCamera || windMode != savedWind || ghost != savedGhost)
+            throw std::runtime_error("Gameplay setting cycles failed");
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/gameplay.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Gameplay Back did not return to Settings");
         clickButton(Action::Help);
         if (screen != Screen::Help)
             throw std::runtime_error("Settings Controls link failed");
+        clickButton(Action::SensitivityUp);
+        clickButton(Action::SensitivityDown);
+        clickButton(Action::SensitivityReset);
+        if (records.sensitivity != 1)
+            throw std::runtime_error("Controls mouse sensitivity reset failed");
         render();
         if (!captureDir.empty())
             renderer->capture(captureDir + "/controls.ppm");
@@ -2401,7 +2476,7 @@ class App {
         }
         for (Screen s : {Screen::Hills, Screen::Help, Screen::Settings, Screen::Records, Screen::Paused}) {
             changeScreen(s);
-            if (s == Screen::Settings) {
+            if (s == Screen::Help) {
                 action(Action::SensitivityReset);
                 if (records.sensitivity != 1)
                     throw std::runtime_error("Original mouse calibration reset failed");
@@ -2412,6 +2487,9 @@ class App {
             renderer->finish();
         }
         changeScreen(Screen::Settings);
+        clickButton(Action::Environment);
+        if (screen != Screen::Environment)
+            throw std::runtime_error("Settings Environment link failed");
         for (int dayTime = 0; dayTime <= 4; ++dayTime) {
             clickButton(Action::TimeOfDay, dayTime);
             for (int weather = 0; weather <= 4; ++weather) {
@@ -2427,6 +2505,13 @@ class App {
         if (records.environment.time != environment::TimeOfDay::Day ||
             records.environment.weather != environment::Weather::Sunny)
             throw std::runtime_error("Day and sun defaults failed");
+        render();
+        if (!captureDir.empty())
+            renderer->capture(captureDir + "/environment.ppm");
+        renderer->finish();
+        clickButton(Action::Back);
+        if (screen != Screen::Settings)
+            throw std::runtime_error("Environment Back did not return to Settings");
         // Verify every page has selectable entries and keyboard navigation reaches the final hill.
         for (Screen s : {Screen::Hills, Screen::Records}) {
             changeScreen(s);
