@@ -155,8 +155,11 @@ checksums are in `packaging/appimage/dependencies.json`. The builder verifies al
 downloads, packages SDL/FreeType and X11/Wayland client libraries with their
 transitive dependencies and license notices, and rejects ELF symbol requirements
 above glibc 2.35 or GLIBCXX 3.4.29. Host glibc, the GCC C++ runtime, Vulkan
-loader/GPU drivers and audio services are used rather than shipping host-specific
-drivers. X11 and Wayland are enabled; SDL libdecor is disabled to avoid tying
+loader/GPU drivers, Wayland/xkbcommon and audio services are used rather than
+shipping host-specific drivers. Wayland libraries stay with the host compositor and Mesa: an older
+bundled client library can hide symbols required by a newer Vulkan driver,
+preventing GPU discovery even when the driver is installed. X11 and Wayland are
+enabled; SDL libdecor is disabled to avoid tying
 window decorations to a bundled GTK stack.
 
 Outputs in `dist/` are `ThePerfectV-<version>-x86_64.AppImage`, its SHA-256 checksum,

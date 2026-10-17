@@ -16,13 +16,14 @@ notices = appdir / "usr/share/doc/the-perfect-v/third-party"
 notices.mkdir(parents=True, exist_ok=True)
 # Base OS/toolchain and graphics drivers stay on the host. The build uses GCC 11
 # and glibc 2.35, verified below, rather than copying the build host's libc/driver.
-host_libraries = re.compile(r"^(ld-linux.*|lib(c|m|dl|pthread|rt|resolv|util|gcc_s|stdc\+\+)\.so.*|lib(GL|EGL|GLX|GLdispatch|vulkan|drm|gbm).*\.so.*)$")
+# Mesa also links to Wayland. Bundling an older libwayland-client can prevent
+# newer host Vulkan drivers from loading (for example wl_fixes_interface).
+# Keep the Wayland stack and keyboard library with the compositor/driver.
+host_libraries = re.compile(r"^(ld-linux.*|lib(c|m|dl|pthread|rt|resolv|util|gcc_s|stdc\+\+)\.so.*|lib(GL|EGL|GLX|GLdispatch|vulkan|drm|gbm|wayland-|xkbcommon).*\.so.*)$")
 window_libraries = [
     "libX11.so.6", "libXext.so.6", "libXrandr.so.2", "libXcursor.so.1",
     "libXi.so.6", "libXfixes.so.3", "libXrender.so.1", "libXss.so.1",
     "libXtst.so.6", "libXinerama.so.1",
-    "libwayland-client.so.0", "libwayland-cursor.so.0", "libwayland-egl.so.1",
-    "libxkbcommon.so.0",
 ]
 
 def output(*args):
@@ -94,7 +95,8 @@ report = {
     "glibcxx_required": ".".join(map(str, required_glibcxx)),
     "compiler": output(os.environ.get("CXX", "g++"), "--version").splitlines()[0],
     "bundled_libraries": sorted(bundled),
-    "host_components": ["glibc", "GCC C++ runtime", "Vulkan loader and GPU driver", "audio services"],
+    "host_components": ["glibc", "GCC C++ runtime", "Vulkan loader and GPU driver",
+                        "Wayland and xkbcommon", "audio services"],
     "license_packages": sorted(packages),
 }
 report_path.write_text(json.dumps(report, indent=2) + "\n")
