@@ -1,6 +1,7 @@
 #include "original_skeleton.h"
 #include "renderer.h"
 #include "visual_weather.h"
+#include "visual_ski_spray.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -169,6 +170,34 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
                 const double z = contact.z + (pattern(seed + 3) - .5) * age * 3.4;
                 powder({x, y, z}, right, up, .035 + life * .14, strength * .33 * (1 - life), powderColor);
             }
+    }
+
+    // Braking powder follows the front working edge of each inward-turned
+    // ski. Short, low fans move outward; their density fades with wedge angle,
+    // snow contact and speed. A fixed 2 * 32 candidates needs no emitted state,
+    // so pause/seek and different display cadences retain the same picture.
+    const Vec3 brakePowderColor = lighting.moon ? Vec3{.73, .82, .95} : Vec3{.99, .995, 1};
+    for (size_t leg = 0; leg < 2; ++leg) {
+        const auto spray = visual::brakingSkiSpray(h, f, skeleton, leg);
+        if (spray.strength <= .001)
+            continue;
+        for (int i = 0; i < 32; ++i) {
+            const double seed = 3790 + leg * 227 + i * 7;
+            const double lifetime = .18 + pattern(seed) * .18;
+            const double age = std::fmod(clock + pattern(seed + 1) * lifetime, lifetime);
+            const double life = age / lifetime;
+            const Vec3 edge = spray.ankle + (spray.front - spray.ankle) * (.35 + pattern(seed + 2) * .55) +
+                              spray.outward * .065;
+            const double spread = age * (1.7 + pattern(seed + 3) * 2.6);
+            const double x = edge.x - double(f.vx) * age * .22 + spray.outward.x * spread + wind.x * age * .08;
+            const double z = edge.z + spray.outward.z * spread;
+            const double y = visual::terrainSnowHeight(h, x, z) + .045 +
+                             age * (1.15 + pattern(seed + 4) * 1.9) - age * age * 2.4;
+            const bool cloud = i < 12;
+            const double radius = cloud ? .10 + life * .23 : .025 + pattern(seed + 5) * .055;
+            const double fade = std::pow(1 - life, 1.2);
+            powder({x, y, z}, right, up, radius, spray.strength * fade * (cloud ? .52 : .70), brakePowderColor);
+        }
     }
 
     // A fallen skier ploughs snow with the body as well as the skis. These

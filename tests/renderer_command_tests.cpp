@@ -10,6 +10,7 @@
 #include "visual_contact_shadow.h"
 #include "visual_mountains.h"
 #include "visual_cartoon_hair.h"
+#include "visual_ski_spray.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -24,6 +25,65 @@ namespace audit {
 void require(bool ok, const char *message) {
     if (!ok)
         throw std::runtime_error(message);
+}
+void brakingSkiPowder() {
+    using namespace sjp;
+    for (int hill = 0; hill < int(HILL_COUNT); ++hill) {
+        bool checked = false;
+        for (double wind : {0.0, 1.5, 2.5}) {
+            Simulation sim(hill, wind);
+            sim.resetOriginal(hill, 12345, 98765);
+            sim.setWind(wind, PI);
+            for (int tick = 0; tick < 20000 && sim.phase != Phase::Finished; ++tick) {
+                sim.step(ORIGINAL_TICK, autopilot(sim));
+                if (sim.crashed)
+                    break;
+                const Frame frame = sim.frame();
+                if (sim.phase != Phase::Outrun || frame.pose[0] > -.2 || sim.vx < 3)
+                    continue;
+                const auto skeleton = originalSkeleton(frame.pose, frame.leadingLeg);
+                for (size_t leg = 0; leg < 2; ++leg) {
+                    const auto spray = visual::brakingSkiSpray(sim.hill(), frame, skeleton, leg);
+                    require(spray.strength > 0 && spray.strength <= 1, "Braking ski lacks bounded powder");
+                    require(spray.front.x > spray.ankle.x && spray.outward.z * (leg ? -1 : 1) > 0,
+                            "Braking powder does not follow the front edge outward on both skis");
+                    auto altered = frame;
+                    altered.crashed = 1;
+                    require(visual::brakingSkiSpray(sim.hill(), altered, skeleton, leg).strength == 0,
+                            "Standing braking powder appears during a fall");
+                    altered = frame;
+                    altered.phase = int(Phase::Flight);
+                    require(visual::brakingSkiSpray(sim.hill(), altered, skeleton, leg).strength == 0,
+                            "Braking powder appears in flight");
+                    altered = frame;
+                    altered.y += 2;
+                    require(visual::brakingSkiSpray(sim.hill(), altered, skeleton, leg).strength == 0,
+                            "Airborne outrun skis spray snow");
+                    altered = frame;
+                    altered.vx = altered.vy = 0;
+                    require(visual::brakingSkiSpray(sim.hill(), altered, skeleton, leg).strength == 0,
+                            "Stationary skis spray snow");
+                    altered = frame;
+                    altered.vx *= .5f;
+                    altered.vy *= .5f;
+                    require(visual::brakingSkiSpray(sim.hill(), altered, skeleton, leg).strength < spray.strength,
+                            "Braking powder ignores decreasing speed");
+                    altered = frame;
+                    altered.pose[0] = altered.pose[9] = 0;
+                    const auto parallel = originalSkeleton(altered.pose, altered.leadingLeg);
+                    require(visual::brakingSkiSpray(sim.hill(), altered, parallel, leg).strength == 0,
+                            "Parallel skis produce braking powder");
+                }
+                require(sim.frame().pose == frame.pose && sim.frame().x == frame.x,
+                        "Braking powder altered the original pose or simulation");
+                checked = true;
+                break;
+            }
+            if (checked)
+                break;
+        }
+        require(checked, "Braking powder fixture did not cover a venue");
+    }
 }
 void cartoonHairMotion() {
     using namespace sjp;
@@ -1151,6 +1211,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 
 int main() {
     try {
+        audit::brakingSkiPowder();
         audit::contactShadowDecals();
         audit::startSignalLighting();
         audit::singleShadow();

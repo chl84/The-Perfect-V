@@ -48,8 +48,10 @@ inline JumpFeedback jumpFeedback(const Simulation &sim) {
         }
         if (frame.vx > .1) {
             const double remaining = -frame.x / frame.vx;
-            feedback.takeoff = remaining > .25   ? FeedbackItem{"Early", FeedbackTone::Improve}
-                               : remaining < .14 ? FeedbackItem{"Late", FeedbackTone::Improve}
+            feedback.takeoff = remaining > .32   ? FeedbackItem{"Early", FeedbackTone::Improve}
+                               : remaining > .25 ? FeedbackItem{"Slightly early", FeedbackTone::Improve}
+                               : remaining < .07 ? FeedbackItem{"Too late", FeedbackTone::Improve}
+                               : remaining < .14 ? FeedbackItem{"Slightly too late", FeedbackTone::Improve}
                                                  : FeedbackItem{"On time", FeedbackTone::Good};
         }
     }

@@ -642,7 +642,9 @@ and landing. `jump_feedback.h` reads the finished simulation once: timing comes
 from the recorded takeoff input and frame position, balance from the original
 style accumulator, and fall causes from the original landing classification.
 Timing uses a practical 0.14–0.25 second band before the edge, not an exact
-prediction of the best possible jump. Scores, physics and replay/save formats
+prediction of the best possible jump. The adjacent 0.25–0.32 second and
+0.07–0.14 second bands show `Slightly early` and `Slightly too late`;
+larger deviations show `Early` or `Too late`. Scores, physics and replay/save formats
 are unaffected. Missing stages display `--`; inrun falls and start timeouts do
 not receive a flight or landing assessment for a jump that did not happen.
 
@@ -759,7 +761,14 @@ with weak wind drift and a mostly downward fall. Soft volume and lifetime fades
 prevent popping. Flake animation uses the frame/replay clock, so pause freezes it
 and seeking is repeatable. Menus preview lighting/fog without snowfall particles.
 
+Successful outrun braking adds low outward powder fans along the front working
+edge of each ski. The displayed skeleton controls the inward wedge, independent
+snow contact and speed fade; parallel skis, airborne skiers, falls and stopped
+skiers do not generate this effect. At most 64 analytic particles use the replay
+clock and existing snow receiver, without changing physics, poses or save data.
+
 ## Camera 2 rails
+
 
 Chase (camera 2 in the interface) follows a separate fixed spline for each of
 the 32 hills. All rails are calculated at startup from the existing snow
