@@ -75,7 +75,7 @@ bool importLegacySaves(const std::string &source, const std::string &destination
     }
 }
 bool updateHillRecord(Records &records, int hill, const Result &result, bool human) {
-    if (!human || hill < 0 || size_t(hill) >= records.best.size() || result.crashed || result.disqualified ||
+    if (!human || result.adjustedSuit || hill < 0 || size_t(hill) >= records.best.size() || result.crashed || result.disqualified ||
         result.beforeTakeoff || !std::isfinite(result.distance) || result.distance <= 0 ||
         result.distance > 1000 || result.distance <= records.best[size_t(hill)])
         return false;
@@ -102,6 +102,7 @@ bool saveRecords(const std::string &path, const Records &r) {
     out << "GRAPHICS 5 " << r.graphics.fullscreen << ' ' << r.graphics.msaaSamples << ' '
         << r.graphics.vsync << ' ' << r.graphics.resolution.width << ' ' << r.graphics.resolution.height << '\n';
     out << "MUSIC 1 " << r.music << '\n';
+    out << "CHEATS 1 " << r.adjustedSuit << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -179,6 +180,10 @@ Records loadRecords(const std::string &path) {
             if (version >= 1 && version <= 5 && fullscreen >= 0 && fullscreen <= 1 &&
                 validMsaaSamples(samples) && vsync >= 0 && vsync <= 1 && validResolution(resolution))
                 r.graphics = {fullscreen == 1, samples, vsync == 1, resolution};
+        } else if (tag == "CHEATS") {
+            int enabled;
+            if (!(in >> version >> enabled)) break;
+            if (version == 1 && (enabled == 0 || enabled == 1)) r.adjustedSuit = enabled != 0;
         } else if (tag == "MUSIC") {
             int enabled;
             if (!(in >> version >> enabled))
@@ -199,6 +204,7 @@ Records loadRecords(const std::string &path) {
     return r;
 }
 bool saveReplay(const std::string &path, const Replay &r) {
+    if (r.result.adjustedSuit && !r.originalRpl.empty()) return false;
     if (!validJumperAppearance(r.jumper) || (r.hasEnvironment && !environment::valid(r.environment)))
         return false;
     if ((r.originalRpl.size() != 0 && r.originalRpl.size() != 1222) || r.frames.size() < 2 ||
@@ -231,6 +237,7 @@ bool saveReplay(const std::string &path, const Replay &r) {
         out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << ' '
             << r.environment.seed << '\n';
     out << "JUMPER 1 " << int(r.jumper) << '\n';
+    if (r.result.adjustedSuit) out << "CHEATS 1 1\n";
     return replaceFile(path, out);
 }
 bool loadReplay(const std::string &path, Replay &output) {
@@ -294,7 +301,7 @@ bool loadReplay(const std::string &path, Replay &output) {
             byte = uint8_t(value);
         }
     }
-    bool hasJumper = false;
+    bool hasJumper = false, hasCheats = false;
     while (true) {
         in >> std::ws;
         if (in.eof())
@@ -312,6 +319,11 @@ bool loadReplay(const std::string &path, Replay &output) {
             if (!environment::valid(r.environment))
                 return false;
             r.hasEnvironment = true;
+        } else if (tag == "CHEATS") {
+            int enabled;
+            if (hasCheats || !(in >> enabled) || (enabled != 0 && enabled != 1)) return false;
+            r.result.adjustedSuit = enabled != 0;
+            hasCheats = true;
         } else if (tag == "JUMPER") {
             int value;
             if (hasJumper || !(in >> value) || !validJumperAppearance(JumperAppearance(value)))
@@ -321,6 +333,7 @@ bool loadReplay(const std::string &path, Replay &output) {
         } else
             return false;
     }
+    if (r.result.adjustedSuit && !r.originalRpl.empty()) return false;
     output = std::move(r);
     return true;
 }

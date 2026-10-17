@@ -26,10 +26,12 @@ template <typename T> bool readArray(std::istream &in, T &array) {
     for (auto &value : array) if (!(in >> value)) return false;
     return true;
 }
-void writeResult(std::ostream &out, const Result &r) {
+void writeResult(std::ostream &out, const Result &r, bool cheatsFormat) {
     out << r.distance << ' ' << r.distancePoints << ' ' << r.stylePoints << ' ' << r.total << ' '
         << r.takeoff << ' ' << r.crashed << ' ' << r.disqualified << ' ' << r.beforeTakeoff << ' ' << int(r.landing) << ' '
-        << r.telemarkWidth << ' ' << r.crashKind << ' ' << std::quoted(r.feedback) << '\n';
+        << r.telemarkWidth << ' ' << r.crashKind << ' ' << std::quoted(r.feedback);
+    if (cheatsFormat) out << ' ' << r.adjustedSuit;
+    out << '\n';
     writeArray(out, r.judges);
 }
 bool readResult(std::istream &in, Result &r, int version) {
@@ -37,8 +39,9 @@ bool readResult(std::istream &in, Result &r, int version) {
     if (!(in >> r.distance >> r.distancePoints >> r.stylePoints >> r.total >> r.takeoff >> r.crashed
              >> r.disqualified)) return false;
     if (version >= 2 && !(in >> r.beforeTakeoff)) return false;
-    if (!(in >> landing >> r.telemarkWidth >> r.crashKind >> std::quoted(r.feedback)) ||
-        !readArray(in, r.judges)) return false;
+    if (!(in >> landing >> r.telemarkWidth >> r.crashKind >> std::quoted(r.feedback))) return false;
+    if (version >= 4 && !(in >> r.adjustedSuit)) return false;
+    if (!readArray(in, r.judges)) return false;
     if (landing < 0 || landing > 2 || r.crashKind < 0 || r.crashKind > 5 || r.feedback.size() > 4096)
         return false;
     r.landing = Landing(landing);
@@ -69,7 +72,11 @@ bool saveCompetition(const std::string &path, const Competition &cup) {
     std::ostringstream out;
     out.imbue(std::locale::classic());
     out << std::setprecision(std::numeric_limits<double>::max_digits10);
-    out << int(cup.config.mode) << ' ' << cup.config.doubleSeason << ' ' << cup.config.skipCpu << '\n';
+    const bool cheatsFormat = cup.config.adjustedSuit || std::any_of(cup.competitors.begin(), cup.competitors.end(),
+        [](const CupEntry &entry) { return entry.results[0].adjustedSuit || entry.results[1].adjustedSuit; });
+    out << int(cup.config.mode) << ' ' << cup.config.doubleSeason << ' ' << cup.config.skipCpu;
+    if (cheatsFormat) out << ' ' << cup.config.adjustedSuit;
+    out << '\n';
     writeVector(out, cup.config.hills);
     out << cup.config.teams.size() << '\n';
     for (const auto &team : cup.config.teams)
@@ -82,7 +89,7 @@ bool saveCompetition(const std::string &path, const Competition &cup) {
         out << entry.skills.level << ' '; writeArray(out, entry.skills.values);
         out << entry.eventTotal << ' ' << entry.cupPoints << ' ' << entry.completed[0] << ' '
             << entry.completed[1] << '\n';
-        for (const auto &result : entry.results) writeResult(out, result);
+        for (const auto &result : entry.results) writeResult(out, result, cheatsFormat);
     }
     out << cup.teamScores.size() << '\n';
     for (const auto &team : cup.teamScores) out << team.eventTotal << ' ' << team.cupPoints << '\n';
@@ -101,7 +108,7 @@ bool saveCompetition(const std::string &path, const Competition &cup) {
     const std::string payload = out.str(), temporary = path + ".tmp";
     std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
     if (!file) return false;
-    file << "SJP_COMPETITION_3\n" << checksum(payload) << '\n' << payload;
+    file << (cheatsFormat ? "SJP_COMPETITION_4\n" : "SJP_COMPETITION_3\n") << checksum(payload) << '\n' << payload;
     file.flush();
     if (!file) { file.close(); std::error_code ec; std::filesystem::remove(temporary, ec); return false; }
     file.close();
@@ -120,9 +127,9 @@ bool loadCompetition(const std::string &path, Competition &cup, std::string *err
     std::ifstream file(path, std::ios::binary);
     std::string magic, hashLine;
     if (!std::getline(file, magic) || (magic != "SJP_COMPETITION_1" && magic != "SJP_COMPETITION_2" &&
-                                     magic != "SJP_COMPETITION_3") ||
+                                     magic != "SJP_COMPETITION_3" && magic != "SJP_COMPETITION_4") ||
         !std::getline(file, hashLine)) return fail();
-    const int version = magic == "SJP_COMPETITION_3" ? 3 : magic == "SJP_COMPETITION_2" ? 2 : 1;
+    const int version = magic == "SJP_COMPETITION_4" ? 4 : magic == "SJP_COMPETITION_3" ? 3 : magic == "SJP_COMPETITION_2" ? 2 : 1;
     uint64_t hash;
     std::istringstream hashInput(hashLine);
     if (!(hashInput >> hash) || (hashInput >> std::ws && !hashInput.eof())) return fail();
@@ -132,8 +139,9 @@ bool loadCompetition(const std::string &path, Competition &cup, std::string *err
     in.imbue(std::locale::classic());
     Competition next;
     int mode;
-    if (!(in >> mode >> next.config.doubleSeason >> next.config.skipCpu) || mode < 0 || mode > 1 ||
-        !readVector(in, next.config.hills, HILL_COUNT)) return fail();
+    if (!(in >> mode >> next.config.doubleSeason >> next.config.skipCpu) || mode < 0 || mode > 1) return fail();
+    if (version >= 4 && !(in >> next.config.adjustedSuit)) return fail();
+    if (!readVector(in, next.config.hills, HILL_COUNT)) return fail();
     next.config.mode = CupMode(mode);
     size_t count;
     if (!(in >> count) || count > 4) return fail();

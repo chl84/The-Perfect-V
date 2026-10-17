@@ -58,6 +58,7 @@ enum class Screen {
     Audio,
     Gameplay,
     Environment,
+    Cheats,
     Records,
     Playing,
     Paused,
@@ -80,6 +81,8 @@ enum class Action {
     Audio,
     Gameplay,
     Environment,
+    Cheats,
+    AdjustedSuit,
     Fullscreen,
     Resolution,
     Antialiasing,
@@ -334,7 +337,7 @@ class App {
         replayDirectory = dataDir;
         SDL_SetEventEnabled(SDL_EVENT_DROP_FILE, true);
         hasReplay = loadReplay(dataDir + "/latest-dsj2.pvr", lastReplay);
-        if (hasReplay && !lastReplay.originalRpl.empty())
+        if (hasReplay && !lastReplay.result.adjustedSuit && !lastReplay.originalRpl.empty())
             canExportOriginal =
                 decodeOriginalReplay(lastReplay.originalRpl, originalReplayData, &replayExportError);
         if (!replayArgument.empty())
@@ -448,6 +451,7 @@ class App {
         case Screen::Audio:
         case Screen::Gameplay:
         case Screen::Environment:
+        case Screen::Cheats:
         case Screen::Records:
         case Screen::CupSetup:
         case Screen::ReplayFiles:
@@ -536,6 +540,8 @@ class App {
         sim.resetWithWeather(selectedHill, sessionWeather,
                              competition ? cup.preparedJumpSeed() : originalClockSeed());
         sim.pose.auxiliary = sessionAuxiliary;
+        sim.setAdjustedSuit((!competition || !activeComputer()) &&
+                            (competition ? cup.setup().adjustedSuit : records.adjustedSuit));
         if (competition)
             sim.configureAi(cup.entries()[size_t(cup.currentJumper())].skills, activeComputer(), false);
         if (windMode != 0 && !competition)
@@ -556,7 +562,9 @@ class App {
     }
     void beginCup() {
         std::string error;
-        if (!cup.start(editableSetup(), originalClockSeed(), originalClockSeed(), originalClockSeed(),
+        auto setup = editableSetup();
+        setup.adjustedSuit = records.adjustedSuit;
+        if (!cup.start(setup, originalClockSeed(), originalClockSeed(), originalClockSeed(),
                        &error, records.environment)) {
             message = error;
             return;
@@ -747,8 +755,8 @@ class App {
             message = "Replay file is invalid or uses an unsupported format.";
             return false;
         }
-        canExportOriginal = original || (!loaded.originalRpl.empty() &&
-                                         decodeOriginalReplay(loaded.originalRpl, data, &error));
+        canExportOriginal = !loaded.result.adjustedSuit && (original || (!loaded.originalRpl.empty() &&
+                                         decodeOriginalReplay(loaded.originalRpl, data, &error)));
         if (canExportOriginal)
             originalReplayData = data;
         replayExportError = "This replay does not contain an original input recording.";
@@ -962,6 +970,13 @@ class App {
         case Action::Environment:
             changeScreen(Screen::Environment);
             break;
+        case Action::Cheats:
+            changeScreen(Screen::Cheats);
+            break;
+        case Action::AdjustedSuit:
+            records.adjustedSuit = !records.adjustedSuit;
+            savePreferences();
+            break;
         case Action::Fullscreen: {
             auto requested = records.graphics;
             requested.fullscreen = !fullscreen;
@@ -1003,7 +1018,7 @@ class App {
             break;
         case Action::Back:
             if (screen == Screen::Graphics || screen == Screen::Audio ||
-                screen == Screen::Gameplay || screen == Screen::Environment) {
+                screen == Screen::Gameplay || screen == Screen::Environment || screen == Screen::Cheats) {
                 changeScreen(Screen::Settings);
             } else if (screen == Screen::Help) {
                 changeScreen(helpReturn);
@@ -1607,9 +1622,9 @@ class App {
     }
     void settings() {
         top("Settings");
-        const std::array<std::pair<const char *, Action>, 5> categories{{
+        const std::array<std::pair<const char *, Action>, 6> categories{{
             {"Graphics", Action::Graphics}, {"Audio", Action::Audio}, {"Controls", Action::Help},
-            {"Gameplay", Action::Gameplay}, {"Environment", Action::Environment}}};
+            {"Gameplay", Action::Gameplay}, {"Environment", Action::Environment}, {"Cheats", Action::Cheats}}};
         for (size_t i = 0; i < categories.size(); ++i)
             button(categories[i].first, 64, 253 + i * 68, 420, categories[i].second, 0, false, 54, 18);
     }
@@ -1623,6 +1638,10 @@ class App {
         top("Audio");
         settingRow("Sound", records.sound ? "On" : "Off", Action::Sound);
         settingRow("Music", records.music ? "On" : "Off", Action::Music, 1);
+    }
+    void cheatSettings() {
+        top("Cheats");
+        settingRow("Adjusted suit", records.adjustedSuit ? "On" : "Off", Action::AdjustedSuit);
     }
     void gameplaySettings() {
         top("Gameplay");
@@ -1697,6 +1716,7 @@ class App {
         const auto &h = sim.hill();
         r.glassPanel(32, 28, 320, 48, 7, .86f);
         r.text(h.name + " / K" + std::to_string(h.k), 50, 41, 18, colors::white, true);
+        if (sim.result.adjustedSuit) r.pill("Adjusted suit", 32, 133, colors::orange);
         if (competition) {
             r.glassPanel(470, 28, 490, 67, 7, .86f);
             const std::string name = jumperName();
@@ -1746,6 +1766,7 @@ class App {
                               : "RESULT",
                326, 154, s.crashed || s.disqualified ? colors::orange : colors::teal);
         r.textRight(sim.hill().name + " / K" + std::to_string(sim.hill().k), 1114, 161, 13, colors::muted);
+        if (s.adjustedSuit) r.pill("Adjusted suit", 326, 198, colors::orange);
         const std::string distance = number(measuredJumpDistance(), 2);
         r.text(distance, 321, 282, 82, s.crashed ? colors::white : colors::teal, true);
         r.text("m", 321 + r.textWidth(distance, 82, true) + 16, 344, 18, colors::muted);
@@ -1986,6 +2007,7 @@ class App {
                     detailX = left + padding + titleWidth + 28;
         r.glassPanel(left, top, detailX + detailWidth + padding - left, 88, 12, .86f);
         r.pill("REPLAY", left + padding, top + 14);
+        if (lastReplay.result.adjustedSuit) r.pill("Adjusted suit", left + padding + 105, top + 14, colors::orange);
         r.text(title, left + padding, top + 52,
                std::min(15.f, titleWidth / std::max(1.f, r.textWidth(title, 1, true))), colors::white, true);
         if (canExportOriginal)
@@ -2045,7 +2067,7 @@ class App {
         buttons.clear();
         bool panorama = screen == Screen::Menu || screen == Screen::Hills || screen == Screen::Help ||
                         screen == Screen::Graphics || screen == Screen::Audio ||
-                        screen == Screen::Gameplay || screen == Screen::Environment ||
+                        screen == Screen::Gameplay || screen == Screen::Environment || screen == Screen::Cheats ||
                         screen == Screen::Settings || screen == Screen::Records ||
                         screen == Screen::Standings || screen == Screen::CupSetup ||
                         screen == Screen::ReplayFiles || screen == Screen::SkiJumper;
@@ -2111,6 +2133,9 @@ class App {
         case Screen::Environment:
             environmentSettings();
             break;
+        case Screen::Cheats:
+            cheatSettings();
+            break;
         case Screen::Records:
             recordScreen();
             break;
@@ -2165,7 +2190,7 @@ class App {
         const bool originalMusic = records.music;
         records.music = true;
         for (Screen menu : {Screen::Menu, Screen::Hills, Screen::Settings, Screen::Graphics,
-                            Screen::Audio, Screen::Help, Screen::Gameplay, Screen::Environment,
+                            Screen::Audio, Screen::Help, Screen::Gameplay, Screen::Environment, Screen::Cheats,
                             Screen::Records, Screen::CupSetup, Screen::ReplayFiles, Screen::SkiJumper}) {
             changeScreen(menu);
             if (!audio->menuMusicRequested())
@@ -2308,8 +2333,8 @@ class App {
         if (screen != Screen::Settings)
             throw std::runtime_error("Home Settings link failed");
         render();
-        if (buttons.size() != 6)
-            throw std::runtime_error("Settings must contain only Back and the five category links");
+        if (buttons.size() != 7)
+            throw std::runtime_error("Settings must contain only Back and the six category links");
         renderer->finish();
         const auto savedGraphics = records.graphics;
         const bool savedNoMsaa = noMsaa;
@@ -2987,6 +3012,58 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/replay-library.ppm");
         renderer->finish();
+        // Exercise the actual menu, human cup path and record guard together.
+        const bool oldSuit = records.adjustedSuit;
+        records.adjustedSuit = false;
+        changeScreen(Screen::Settings);
+        render();
+        clickButton(Action::Cheats);
+        if (screen != Screen::Cheats) throw std::runtime_error("Settings Cheats link failed");
+        clickButton(Action::AdjustedSuit);
+        if (!records.adjustedSuit || !loadRecords(dataDir + "/records-dsj2.dat").adjustedSuit)
+            throw std::runtime_error("Adjusted suit setting was not saved");
+        render();
+        if (!captureDir.empty()) renderer->capture(captureDir + "/cheats.ppm");
+        renderer->finish();
+        action(Action::Back);
+        if (screen != Screen::Settings) throw std::runtime_error("Cheats Back left Settings");
+        const auto priorBest = records.best;
+        CupSetup cheatSetup = defaultCupSetup(123);
+        cheatSetup.participants.resize(1);
+        cheatSetup.hills = {4};
+        cheatSetup.adjustedSuit = records.adjustedSuit;
+        if (!cup.start(cheatSetup, 123, 456, 789)) throw std::runtime_error("Cheat cup start failed");
+        competition = true;
+        for (int turn = 0; turn < 2; ++turn) {
+            nextCupJumper();
+            action(Action::StartTurn);
+            bool airCaptured = false;
+            for (int tick = 0; tick < 14000 && sim.phase != Phase::Finished && sim.phase != Phase::Disqualified; ++tick) {
+                sim.step(ORIGINAL_TICK, autopilot(sim));
+                if (!airCaptured && sim.phase == Phase::Flight && sim.phaseTime > .5) {
+                    render();
+                    if (!captureDir.empty()) renderer->capture(captureDir + "/adjusted-suit-flight.ppm");
+                    renderer->finish();
+                    airCaptured = true;
+                }
+            }
+            if (sim.phase != Phase::Finished || !sim.result.adjustedSuit)
+                throw std::runtime_error("Adjusted suit cup jump did not finish");
+            completeJump();
+            if (newRecord || records.best != priorBest || canExportOriginal ||
+                !lastReplay.result.adjustedSuit || !lastReplay.originalRpl.empty())
+                throw std::runtime_error("Cheated cup jump affected records or original replay export");
+            render();
+            if (!captureDir.empty()) renderer->capture(captureDir + "/adjusted-suit-result.ppm");
+            renderer->finish();
+        }
+        Competition cheatReloaded;
+        if (!cup.eventComplete() || !loadCompetition(dataDir + "/cup.sjc", cheatReloaded) ||
+            !cheatReloaded.setup().adjustedSuit || !cheatReloaded.entries()[0].results[1].adjustedSuit)
+            throw std::runtime_error("Cheat cup checkpoint lost its setting or results");
+        records.adjustedSuit = oldSuit;
+        savePreferences();
+        std::cout << "Smoke test: Cheats menu, two-round cup, replay metadata and record isolation passed\n";
         sjp::gfx::finish();
         std::cout << "Smoke test: all " << hillCount() << " venues, screens, replay and " << hillCount() * 2
                   << "-jump cup passed (" << cupFalls << " falls). Vulkan submissions completed\n";

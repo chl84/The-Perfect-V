@@ -257,6 +257,7 @@ bool Competition::submitResult(const Result &result, std::string *error) {
     auto &entry = competitors[jumper];
     if (entry.completed[roundIndex]) return fail(error, "This jump already has a result");
     entry.results[roundIndex] = result;
+    entry.results[roundIndex].adjustedSuit |= config.adjustedSuit && !entry.participant.computer;
     entry.completed[roundIndex] = true;
     // Complete Simulation results carry distance/judge details. The backend
     // also accepts numeric-only externally supplied scores for tournament

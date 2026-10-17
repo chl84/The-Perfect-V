@@ -259,6 +259,8 @@ bool OriginalReplayRecording::finish(OriginalReplayData &output,std::string *err
     output=std::move(packed);if(error)error->clear();return true;
 }
 bool buildOriginalReplay(const Simulation &simulation, OriginalReplayData &output, std::string *error) {
+    if (simulation.result.adjustedSuit)
+        return failure(error,"Adjusted suit jumps cannot be exported to the original replay format.");
     if (simulation.phase!=Phase::Finished || simulation.result.disqualified)
         return failure(error,"A complete jump is required for original export.");
     OriginalReplayRecording recording;

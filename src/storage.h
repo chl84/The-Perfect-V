@@ -10,6 +10,7 @@ struct Records {
     int camera = 0;
     bool sound = true;
     bool music = true;
+    bool adjustedSuit = false;
     double sensitivity = 1;
     environment::Selection environment;
     JumperAppearance jumper = JumperAppearance::Pro;

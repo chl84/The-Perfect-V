@@ -21,6 +21,7 @@ struct CupSetup {
     std::vector<CupTeam> teams;
     std::vector<int> hills; // Normalized to original hill-index order by start().
     bool doubleSeason = false, skipCpu = true;
+    bool adjustedSuit = false; // Human participants; retained for the whole cup.
 };
 struct CupEntry {
     CupParticipant participant;

@@ -20,7 +20,7 @@ which points to `~/.local/bin/the-perfect-v`. Check that this executable matches
 `build-vulkan/the-perfect-v` before reporting the build as updated. Installation
 updates game resources without replacing personal saves.
 
-Without external fixtures, CTest registers fifteen standalone suites, including:
+Without external fixtures, CTest registers seventeen standalone suites, including:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
 - `environment`: manual/random choices, atmospheric lighting, preference/replay compatibility and fixed conditions through both rounds and all participants in World/Team Cup events.
@@ -30,6 +30,8 @@ Without external fixtures, CTest registers fifteen standalone suites, including:
 - `fall-presentation`: deterministic display contact, unchanged physics/poses and no GL calls in the contact calculation.
 - `physics-and-storage`: native jumps on all 32 hills, controls, scoring and storage.
 - `storage-migration`: stable hill identifiers and compatibility with older saves.
+- `cheats`: unchanged overrun/takeoff inputs, adjusted-suit trials on all 32 hills,
+  record isolation, marked native replays and resumable World/Team cups.
 - `platform-files`: replacing existing saves and preserving data after a failed replacement, including Unicode paths on Windows.
 - `crowd-audio`: approach/flight envelopes on all hills, distant and nearby falls, replay seeking/speed, one-shot reactions, smooth fades, valid sample mixing and the sound toggle through a dummy SDL audio device.
 - `mesh-geometry`: exact attribute sharing, preserved triangle order, bounded ranges, camera transforms and conservative near/side/far clipping without initializing a GPU.
@@ -605,6 +607,31 @@ Only levels supported by both color and depth targets are offered. Saved levels
 unsupported on another GPU fall back to the nearest lower supported level.
 The default is 4× when available. F uses and saves the same fullscreen
 setting.
+
+Settings → Cheats contains one Adjusted suit toggle, off by default. It multiplies
+the body's aerodynamic contribution by 1.5 only during the flight phase; the
+original force calculation still accounts for both lift and drag. Overrun,
+takeoff input, mass, gravity, timing, landing assessment and braking are unchanged.
+The setting is retained on the Result when a jump starts and cannot be toggled
+mid-jump. Every marked result is excluded from hill records independently of the
+current preference. The HUD, result and replay show a compact Adjusted suit tag.
+Native replay metadata retains the flag; modified jumps cannot be exported as
+original DSJ2 input recordings.
+
+The stronger suit was compared against ordinary physics over 480 autopilot jumps
+(all 32 hills, winds of -2/0/+2 m/s and five seeds). Measured length gains ranged
+from 10.12% to 46.75%, with a median of 23.22%. This is a measured test range,
+not a guaranteed gain for arbitrary player input. Ordinary-mode measurements were
+unchanged. Landing rules are also unchanged: the same autopilot fell on 319 of
+480 stronger-suit jumps versus 12 ordinary jumps, as longer flights can carry
+the jumper beyond the safe landing slope. The cheat suite requires at least
+10% extra length on each hill's still-air reference jump.
+
+New cups snapshot the setting for human participants; CPU jumpers retain original
+physics. Cup points and rankings accept these jumps normally. Cheat cups use
+checkpoint version 4 to retain the setting and per-result markers, including
+across resume; ordinary cups retain version 3 and older checkpoints remain
+readable. Older preferences/replays default to the original suit.
 
 Jump lengths and personal records display two decimal places. Result/record
 presentation uses the existing centimeter measurement retained for original

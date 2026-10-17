@@ -264,7 +264,8 @@ void Simulation::setWind(double speed, double angle) {
         baseWind = wind;
 }
 OriginalAirState Simulation::airState(double q) const {
-    return {vx,           -vy, q, pose.footAngle1(), pose.footAngle2(), windSpeed, windAngle, pose.bodyFactor,
+    const double body = phase == Phase::Flight && result.adjustedSuit ? pose.bodyFactor * 1.5 : pose.bodyFactor;
+    return {vx,           -vy, q, pose.footAngle1(), pose.footAngle2(), windSpeed, windAngle, body,
             ORIGINAL_MASS};
 }
 double Simulation::optimalPitch() const {

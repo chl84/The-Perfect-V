@@ -85,6 +85,7 @@ struct Result {
     double telemarkWidth = 0;
     int crashKind = 0;
     std::string feedback;
+    bool adjustedSuit = false;
 };
 struct Frame {
     float x = 0, y = 0, vx = 0, vy = 0, pitch = 0, elapsed = 0;
@@ -141,6 +142,8 @@ class Simulation {
     void configureAi(const OriginalAiSkills &skills, bool computer = true, bool fastAdvance = false);
     void step(double dt, const Input &input);
     void setWind(double speed, double angle); // fixed vector for measured comparisons
+    // Lock the setting when the jump starts; records/replays use this retained flag.
+    void setAdjustedSuit(bool enabled) { if (phase == Phase::Ready) result.adjustedSuit = enabled; }
     double clearance() const { return y - hill().ground(x); }
     double optimalPitch() const;
     double efficiency() const;
