@@ -1096,13 +1096,15 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
                      {xx, yy + .021, z - .09}, {.19f, .42f, .53f, 1});
             }
             if (xx > -.16) {
-                // A narrow metal-colored transverse edge, like a real takeoff
-                // table. Follow the existing snow triangle, without changing it.
+                // The muted table trim stops at both ski grooves, which remain
+                // continuous to the edge. Keep the original snow profile intact.
                 const double edgeX = std::max(x, -.16);
                 const double edgeY = y + (yy - y) * (edgeX - x) / (xx - x);
                 if (xx - edgeX > 1e-8)
-                    quad({edgeX, edgeY + .018, -2.3}, {edgeX, edgeY + .018, 2.3},
-                         {xx, yy + .018, 2.3}, {xx, yy + .018, -2.3}, {.16f, .19f, .22f, 1});
+                    for (const auto &span : std::array<std::pair<double,double>,3>{{
+                             {-2.3,-.22-.055}, {-.22+.055,.22-.055}, {.22+.055,2.3}}})
+                        quad({edgeX, edgeY + .018, span.first}, {edgeX, edgeY + .018, span.second},
+                             {xx, yy + .018, span.second}, {xx, yy + .018, span.first}, {.46f, .55f, .59f, 1});
             }
         }
     }
