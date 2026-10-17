@@ -620,8 +620,13 @@ SDL3's GPU API with Vulkan selected explicitly, embedded SPIR-V shaders and at
 most two frames in flight. Each slot owns its transfer/vertex buffers, color/depth
 targets and fence, and retains referenced meshes/textures until completion. CPU
 scene building overlaps the previous submission; waiting happens only before
-reusing a GPU slot. Minimized windows wait for events without rendering, and an
-unavailable swapchain skips offscreen drawing and uploads. `--graphics-compat`
+reusing a GPU slot. Offscreen uploads and draw commands are recorded before
+waiting for the swapchain; only the final blit and submission follow that wait.
+This keeps variable command-recording work out of the post-VSync interval.
+Minimized windows wait for events without rendering. If swapchain acquisition
+returns no image, the already recorded offscreen work is still submitted and
+retained until its fence completes, preserving newly uploaded cached resources.
+`--graphics-compat`
 and `--sync-rendering` wait for each
 submitted frame immediately. `--no-msaa` disables multisample antialiasing;
 `--gpu-validation` enables SDL GPU/Vulkan validation explicitly. Actual graphics

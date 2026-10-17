@@ -664,20 +664,21 @@ void VulkanBackend::render(int width, int height, const std::array<float, 4> &ba
     // Only wait when reusing this slot's transfer buffers and attachments.
     b.waitFrame(f);
     CommandBuffer command(b.device);
+    b.resize(width, height);
+    std::unique_ptr<Transfer> readback;
+    if (!b.rendered)
+        b.draw(command.buffer, background, packets, dynamic);
+    // Record the independent offscreen work before the potentially blocking
+    // swapchain acquisition. Only the final blit/submission follows that wait,
+    // so variable scene uploads and command recording do not delay presentation.
     SDL_GPUTexture *swapchain = nullptr;
     uint32_t swapWidth = 0, swapHeight = 0;
     if (present) {
         if (!SDL_WaitAndAcquireGPUSwapchainTexture(command.buffer, b.window, &swapchain, &swapWidth,
                                                    &swapHeight))
             fail("swapchain acquisition");
-        if (!swapchain)
-            return; // No offscreen drawing/upload when the window is unavailable.
-        command.acquiredSwapchain = true;
+        command.acquiredSwapchain = swapchain != nullptr;
     }
-    b.resize(width, height);
-    std::unique_ptr<Transfer> readback;
-    if (!b.rendered)
-        b.draw(command.buffer, background, packets, dynamic);
     if (capture) {
         readback = std::make_unique<Transfer>(b.device, bytes(size_t(width) * height * 4),
                                               SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD);
@@ -695,6 +696,9 @@ void VulkanBackend::render(int width, int height, const std::array<float, 4> &ba
         blit.filter = SDL_GPU_FILTER_NEAREST;
         SDL_BlitGPUTexture(command.buffer, &blit);
     }
+    // Even without a swapchain image, submit the recorded offscreen work:
+    // cancelling it would discard uploads whose cached resources are now marked
+    // ready. Retain their owners until this frame's fence completes as usual.
     f.packets = packets;
     f.fence = command.submit();
     if (synchronous || capture)

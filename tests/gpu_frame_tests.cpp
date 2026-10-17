@@ -24,6 +24,7 @@ struct Resource {
 int resources = 0, waits = 0, submits = 0, draws = 0, uploads = 0, blits = 0, acquisitions = 0;
 int pipelineCreations = 0;
 bool available = true;
+bool requirePreparedScene = false;
 bool immediateAvailable = true, multisampleAvailable = true;
 int maxColorSamples = 8, maxDepthSamples = 8;
 SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_VSYNC;
@@ -60,6 +61,7 @@ struct SDL_GPUTransferBuffer : audit::Resource {
 struct SDL_GPUCommandBuffer {
     std::vector<audit::Resource *> uses;
     bool acquired = false;
+    int draws = 0;
 };
 struct SDL_GPUCopyPass {
     SDL_GPUCommandBuffer *command;
@@ -221,6 +223,8 @@ bool SDLCALL SDL_WaitAndAcquireGPUSwapchainTexture(SDL_GPUCommandBuffer *c, SDL_
                                                    Uint32 *w, Uint32 *h) {
     static SDL_GPUTexture swapchain;
     ++audit::acquisitions;
+    audit::require(!audit::requirePreparedScene || c->draws > 0,
+                   "Scene recording was delayed until after swapchain acquisition");
     *t = audit::available ? &swapchain : nullptr;
     *w = 1440;
     *h = 900;
@@ -291,10 +295,12 @@ void SDLCALL SDL_BindGPUFragmentSamplers(SDL_GPURenderPass *p, Uint32, const SDL
 void SDLCALL SDL_PushGPUVertexUniformData(SDL_GPUCommandBuffer *, Uint32, const void *, Uint32) {}
 void SDLCALL SDL_DrawGPUPrimitives(SDL_GPURenderPass *p, Uint32, Uint32, Uint32, Uint32) {
     ++audit::draws;
+    ++p->command->draws;
     audit::blending.push_back(p->pipeline->blend);
 }
 void SDLCALL SDL_DrawGPUIndexedPrimitives(SDL_GPURenderPass *p, Uint32, Uint32, Uint32, Sint32, Uint32) {
     ++audit::draws;
+    ++p->command->draws;
     audit::blending.push_back(p->pipeline->blend);
 }
 void SDLCALL SDL_BlitGPUTexture(SDL_GPUCommandBuffer *c, const SDL_GPUBlitInfo *b) {
@@ -436,6 +442,7 @@ int main() {
             preparedFlightEffects();
             enable(BLEND);
             const auto baseline = audit::waits;
+            audit::requirePreparedScene = true;
             for (int i = 0; i < 3; ++i) {
                 beginFrame(1440, 900);
                 triangle();
@@ -444,6 +451,7 @@ int main() {
                 audit::require(audit::waits == baseline + (i == 2 ? 1 : 0),
                                "Did not wait only on reused frame slot");
             }
+            audit::requirePreparedScene = false;
             audit::require(!audit::blending.back(), "Opaque geometry retained blending");
             for (int samples : {2, 4, 8, 0, 8, 2, 0}) {
                 configureGraphics(samples, samples != 0);
@@ -516,12 +524,25 @@ int main() {
             present(false);
             deleteLists(mesh, 1); // Prior frame must retain its buffers until completion.
             audit::available = false;
+            Id unavailableTexture;
+            genTextures(1, &unavailableTexture);
+            bindTexture(TEXTURE_2D, unavailableTexture);
+            texImage2D(TEXTURE_2D, 0, RGBA, 1, 1, 0, RGBA, UNSIGNED_BYTE, pixel);
+            enable(TEXTURE_2D);
+            const Id unavailableMesh = installList(prepareList([] { triangle(); }).get());
             const auto draws = audit::draws, uploads = audit::uploads, submits = audit::submits;
+            const auto blits = audit::blits;
             beginFrame(800, 600);
-            triangle();
+            callList(unavailableMesh);
+            audit::requirePreparedScene = true;
             present(false);
-            audit::require(audit::draws == draws && audit::uploads == uploads && audit::submits == submits,
-                           "Unavailable window still drew or uploaded offscreen");
+            audit::requirePreparedScene = false;
+            audit::require(audit::draws > draws && audit::uploads > uploads && audit::submits == submits + 1,
+                           "Unavailable swapchain discarded prepared drawing or new resource uploads");
+            audit::require(audit::blits == blits, "Unavailable swapchain received a presentation blit");
+            deleteLists(unavailableMesh, 1);
+            deleteTextures(1, &unavailableTexture);
+            disable(TEXTURE_2D);
             audit::available = true;
             beginFrame(64, 48);
             triangle();
