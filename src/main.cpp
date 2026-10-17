@@ -2363,14 +2363,24 @@ class App {
             renderer->jumperPreview(JumperAppearance::Hero, 690, 775, 270, 125);
             renderer->capture(captureDir + "/hero-back.ppm");
             renderer->finish();
-            for (auto appearance : {JumperAppearance::President, JumperAppearance::Actor, JumperAppearance::Cartoon}) {
-                render();
+            for (auto appearance : {JumperAppearance::Pro, JumperAppearance::President,
+                                    JumperAppearance::Actor, JumperAppearance::Cartoon}) {
+                renderer->begin(hills()[selectedHill], sim.frame(), time, camera, true);
+                renderer->overlay();
                 renderer->glassPanel(330, 128, 780, 704, 12, .98f);
                 renderer->text(jumperAppearanceName(appearance), 365, 155, 32, colors::white, true);
                 renderer->jumperPreview(appearance, 690, 775, 270);
                 renderer->capture(captureDir + "/jumper-" + jumperAppearanceName(appearance) + ".ppm");
                 renderer->finish();
-
+                if (appearance == JumperAppearance::Pro) {
+                    renderer->begin(hills()[selectedHill], sim.frame(), time, camera, true);
+                    renderer->overlay();
+                    renderer->glassPanel(330, 128, 780, 704, 12, .98f);
+                    renderer->text("Pro", 365, 155, 32, colors::white, true);
+                    renderer->jumperPreview(appearance, 690, 775, 270, 125);
+                    renderer->capture(captureDir + "/jumper-Pro-back.ppm");
+                    renderer->finish();
+                }
             }
             const double savedTime = time;
             for (int frame = 0; frame < 5; ++frame) {

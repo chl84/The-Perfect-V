@@ -345,8 +345,8 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
     for (size_t ring = 0; ring + 1 < ringCount; ++ring)
         for (int face = 0; face < sides; ++face) {
             const double left = face * 2 * PI / sides, right = (face + 1) * 2 * PI / sides;
-            const bool frontPanel = face == 0 || face == 7;
-            Color panel = bib && frontPanel && ring >= 1 && ring <= 3
+            const bool bibPanel = face == 0 || face == 7 || face == 3 || face == 4;
+            Color panel = bib && bibPanel && ring >= 1 && ring <= 3
                               ? bibColor
                               : shade(tint, face == 2 || face == 5 ? .9 : 1);
             quad(ringPoint(ring, left), ringPoint(ring + 1, left), ringPoint(ring + 1, right),
@@ -361,6 +361,41 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
         vertex(end ? b : a);
         for (int face = 0; face <= sides; ++face)
             vertex(ringPoint(end ? ringCount - 1 : 0, (end ? -face : face) * 2 * PI / sides));
+        emitEnd();
+    }
+    if (bib) {
+        // A small geometric print follows the existing faceted bib on both
+        // sides. Reverse the lateral axis on the front so neither 32 is mirrored.
+        constexpr double digitWidth = .068, digitHeight = .15, stroke = .023, gap = .016;
+        struct Stroke { double left, bottom, right, top; };
+        constexpr std::array<Stroke, 7> strokes{{
+            {0, digitHeight - stroke, digitWidth, digitHeight},
+            {digitWidth - stroke, digitHeight * .5, digitWidth, digitHeight},
+            {digitWidth - stroke, 0, digitWidth, digitHeight * .5},
+            {0, 0, digitWidth, stroke},
+            {0, 0, stroke, digitHeight * .5},
+            {0, digitHeight * .5, stroke, digitHeight},
+            {0, (digitHeight - stroke) * .5, digitWidth, (digitHeight + stroke) * .5}}};
+        constexpr std::array<unsigned, 2> digits{0x4f, 0x5b}; // seven-segment 3, 2
+        const double length = (b - a).length();
+        emitBegin(gfx::QUADS);
+        for (double side : {1., -1.})
+            for (size_t digit = 0; digit < digits.size(); ++digit) {
+                const double left = -(2 * digitWidth + gap) * .5 + digit * (digitWidth + gap);
+                const auto printed = [&](double x, double y) {
+                    const double t = .39 + y / length, lateral = -side * (left + x);
+                    const double depth = frontA + (frontB - frontA) * t,
+                                 width = sideA + (sideB - sideA) * t;
+                    const double surface = depth * (1 - (std::sqrt(2.) - 1) * std::abs(lateral) / width);
+                    return a + (b - a) * t + basis.side * lateral + basis.forward * (side * (surface + .002));
+                };
+                for (size_t i = 0; i < strokes.size(); ++i)
+                    if (digits[digit] & (1u << i)) {
+                        const auto &s = strokes[i];
+                        quad(printed(s.left, s.bottom), printed(s.right, s.bottom),
+                             printed(s.right, s.top), printed(s.left, s.top), {.035f, .065f, .085f, tint.a});
+                    }
+            }
         emitEnd();
     }
 }

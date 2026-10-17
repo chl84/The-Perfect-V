@@ -355,10 +355,12 @@ flutter. Menu previews cache the static body/head and redraw only moving cloth.
 Hero is appended to the appearance IDs, preserving existing saved selections.
 
 Complete cosmetic models, including skis, boots and clothing, have a fixed
-3,000–4,000 triangle budget: Pro 3,288 (unchanged), President 3,728, Actor 3,958,
+3,000–4,000 triangle budget: Pro 3,328, President 3,728, Actor 3,958,
 Cartoon 3,718 and Hero 3,964. Non-Pro models reduce subdivisions on small spheres
 and nearly linear limb segments; sphere poles use fans instead of zero-area
 triangles. Facial features, costume patterns and procedural animation remain.
+Pro wears the number 32 on white bib panels at the front and back; its print
+adds 40 triangles to the original 3,288-triangle model and follows the torso pose.
 The CPU renderer audit enforces the budget and compares complete jumps against
 an unrendered reference to verify identical flight, wind, poses, timing, length
 and scoring for every appearance. Appearance never enters the physics model.

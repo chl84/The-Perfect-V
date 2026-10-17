@@ -1906,7 +1906,7 @@ int main() {
             audit::require(triangles >= 3000 && triangles <= 4000,
                            "Jumper model exceeded its 3000-4000 triangle budget");
             if (appearance == sjp::JumperAppearance::Pro)
-                audit::require(triangles == 3288, "Pro geometry changed during cosmetic mesh simplification");
+                audit::require(triangles == 3328, "Pro geometry or its front/back number 32 changed");
             std::cout << "Jumper triangles: " << sjp::jumperAppearanceName(appearance) << '=' << triangles << '\n';
             r.finish();
             audit::balanced();
