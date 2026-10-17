@@ -280,15 +280,16 @@ void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) 
     if (snowfall && showWeather) {
         const uint32_t venue = venuePattern(h.id) ^ snowfallSeed;
         constexpr double cellSize = 8;
-        // A compact 3D volume covers the view at the gate, in flight and in
-        // every camera. Its world-space cells never move with the athlete.
+        // Center the fixed volume in the foreground of the current camera,
+        // including during camera smoothing and viewport/aspect changes.
+        // Cell coordinates and flake paths remain fixed in world space.
         // At most 5 * 5 * 3 * 3 = 225 flakes are considered; only visible ones
         // reach the existing billboard batch. No textures or emitted state.
-        const Vec3 center = (eye + target) * .5;
+        const double halfFov = std::tan(48 * PI / 360), aspect = double(width) / height;
+        const Vec3 center = visual::snowfallCenter(eye, forward, aspect);
         const int cellX = int(std::floor(center.x / cellSize)),
                   cellY = int(std::floor(center.y / cellSize)),
                   cellZ = int(std::floor(center.z / cellSize));
-        const double halfFov = std::tan(48 * PI / 360), aspect = double(width) / height;
         for (int xCell = cellX - 2; xCell <= cellX + 2; ++xCell)
             for (int zCell = cellZ - 2; zCell <= cellZ + 2; ++zCell)
                 for (int yCell = cellY - 1; yCell <= cellY + 1; ++yCell)

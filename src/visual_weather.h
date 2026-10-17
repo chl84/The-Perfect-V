@@ -1,5 +1,6 @@
 #pragma once
 #include "physics.h"
+#include <algorithm>
 #include <cstring>
 
 namespace sjp::visual {
@@ -29,6 +30,14 @@ inline Vec3 snowDrift(Vec3 wind, double age) {
     // Retain a mostly downward fall: only a small fraction of the air velocity
     // carries flakes horizontally or lifts/slows their descent.
     return {wind.x * age * .08, wind.y * age * .04, 0};
+}
+inline Vec3 snowfallCenter(Vec3 eye, Vec3 forward, double aspect) {
+    // Snow is foreground weather, not a cloud around the camera's distant
+    // subject. Keep the visible frustum inside the fixed world-cell volume;
+    // ultrawide views bring it closer instead of increasing particle count.
+    const double halfFov = std::tan(48 * PI / 360);
+    const double distance = std::min(10.0, 10.0 / (halfFov * std::max(1.0, aspect)));
+    return eye + forward * distance;
 }
 inline Vec3 windsockPoint(const Frame &frame, double time, double fraction) {
     const double speed = clamp(double(frame.windSpeed), 0.0, 18.0);

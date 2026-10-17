@@ -589,10 +589,15 @@ int inrunColumns = 0;
 float fogStart = 0, fogEnd = 0;
 bool captureBoards = false;
 bool captureCamera = false;
-sjp::Vec3 cameraEye;
+sjp::Vec3 cameraEye, cameraForward, cameraRight, cameraUp;
+bool captureSnowCenters = false;
+std::vector<sjp::Vec3> snowCenters;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 std::vector<sjp::Vec3> standTops, spectatorSoles;
 void position(double x, double y, double z) {
+    if (captureSnowCenters && !compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN && drawVertices == 0 &&
+        current.color[0] == .91f && current.color[1] == .97f && current.color[2] == 1 && current.color[3] > .02f)
+        snowCenters.push_back({x, y, z});
     if (captureBoards && compiling &&
         currentEmission == std::array<float, 4>{.28f, .27f, .22f, 1})
         ++floodlightGlassVertices;
@@ -1039,6 +1044,11 @@ void sjp::gfx::matrixMode(sjp::gfx::Enum mode) {
 }
 void sjp::gfx::multMatrixf(const float *m) {
     audit::command("sjp::gfx::multMatrixf inside sjp::gfx::begin", false);
+    if (audit::captureCamera && !audit::compiling) {
+        audit::cameraRight = {m[0], m[4], m[8]};
+        audit::cameraUp = {m[1], m[5], m[9]};
+        audit::cameraForward = {-m[2], -m[6], -m[10]};
+    }
     for (int i = 0; i < 16; ++i)
         audit::finite(m[i]);
 }
@@ -1491,6 +1501,55 @@ int main() {
                                input.windAngle == after.windAngle && input.windSpeed == after.windSpeed &&
                                sim.originalCounter == 1,
                            "Visual weather mutated the simulation");
+        }
+        {
+            // Count real submitted flake centres at the screen edges. A test
+            // that only counts visible flakes misses camera 3's central cloud.
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(12, 0);
+            while (sim.phase != sjp::Phase::Flight || sim.phaseTime < 1)
+                sim.step(sjp::ORIGINAL_TICK, sjp::autopilot(sim));
+            const auto original = sim.frame();
+            audit::drawableHeight = 1080;
+            for (int width : {1920, 3840}) {
+                audit::drawableWidth = width;
+                const double aspect = double(width) / audit::drawableHeight;
+                for (int camera = 0; camera < 3; ++camera) {
+                    std::array<size_t, 4> edges{};
+                    r.setEnvironment({sjp::environment::TimeOfDay::Day, sjp::environment::Weather::Snowfall, 76543}, true);
+                    for (int sample = 0; sample < 8; ++sample) {
+                        auto frame = original;
+                        frame.elapsed += sample * .5f;
+                        r.resetCamera();
+                        r.begin(sim.hill(), frame, frame.elapsed, camera, false);
+                        r.resetCamera();
+                        audit::snowCenters.clear();
+                        audit::captureSnowCenters = audit::captureCamera = true;
+                        r.begin(sim.hill(), frame, frame.elapsed, camera, false);
+                        audit::captureSnowCenters = false;
+                        audit::balanced();
+                        audit::require(!audit::snowCenters.empty() && audit::snowCenters.size() <= 225,
+                                       "Snowfall is missing or exceeds the fixed particle budget");
+                        for (const auto &point : audit::snowCenters) {
+                            const auto relative = point - audit::cameraEye;
+                            const double depth = sjp::dot(relative, audit::cameraForward);
+                            const double halfHeight = depth * std::tan(48 * sjp::PI / 360);
+                            const double u = .5 + sjp::dot(relative, audit::cameraRight) / (2 * halfHeight * aspect);
+                            const double v = .5 - sjp::dot(relative, audit::cameraUp) / (2 * halfHeight);
+                            edges[0] += u < .15;
+                            edges[1] += u > .85;
+                            edges[2] += v < .15;
+                            edges[3] += v > .85;
+                        }
+                    }
+                    audit::require(std::all_of(edges.begin(), edges.end(), [](size_t count) { return count > 0; }),
+                                   "Snow volume leaves an edge of the camera view uncovered");
+                }
+            }
+            audit::drawableWidth = 960;
+            audit::drawableHeight = 600;
+            audit::require(sim.frame().x == original.x && sim.frame().pose == original.pose,
+                           "Snow-volume adaptation changed the simulation");
         }
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);

@@ -760,6 +760,10 @@ as the HUD arrow. Snowfall uses the existing compact world-space volume: at most
 with weak wind drift and a mostly downward fall. Soft volume and lifetime fades
 prevent popping. Flake animation uses the frame/replay clock, so pause freezes it
 and seeking is repeatable. Menus preview lighting/fog without snowfall particles.
+The fixed snow volume sits ahead of the actual camera rather than halfway to
+its subject, so the distant camera 3 retains coverage at the top and edges.
+Ultrawide views bring the volume closer instead of adding cells; all cameras
+still consider at most 225 candidates and submit at most 1800 powder vertices.
 
 Successful outrun braking adds low outward powder fans along the front working
 edge of each ski. The displayed skeleton controls the inward wedge, independent
