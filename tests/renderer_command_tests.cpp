@@ -11,6 +11,7 @@
 #include "visual_mountains.h"
 #include "visual_cartoon_hair.h"
 #include "visual_hero_cloth.h"
+#include "visual_snow_accumulation.h"
 #include "visual_ski_spray.h"
 #include "presentation_cache.h"
 #include <algorithm>
@@ -27,6 +28,114 @@ namespace audit {
 void require(bool ok, const char *message) {
     if (!ok)
         throw std::runtime_error(message);
+}
+void accumulatedSnowGeometry() {
+    using namespace sjp;
+    visual::SnowAccumulation snow;
+    snow.cap({0,2,8}, {1,2.2,8}, .2,.22,42);
+    require(snow.triangles.size() == 24, "Snow cap exceeded its 24-triangle budget");
+    const auto ground = [](double x, double z) { return -.35*x + .08*z; };
+    snow.bank({0,3,8}, {8,1,8}, {0,0,1}, .8,.4,42,ground);
+    snow.footing(10,8,1.1,1.1,ground(10,8)+.6,42,ground);
+    visual::SnowAccumulation repeat;
+    repeat.cap({0,2,8}, {1,2.2,8}, .2,.22,42);
+    repeat.bank({0,3,8}, {8,1,8}, {0,0,1}, .8,.4,42,ground);
+    repeat.footing(10,8,1.1,1.1,ground(10,8)+.6,42,ground);
+    require(snow.triangles.size() == repeat.triangles.size() && snow.triangles.size() < 250,
+            "Snow accumulation lost deterministic bounded topology");
+    bool buriedEdge = false, raisedBank = false;
+    for (size_t i=0;i<snow.triangles.size();++i) {
+        const auto &t = snow.triangles[i];
+        require(cross(t[1].position-t[0].position,t[2].position-t[0].position).length()>1e-9,
+                "Snow accumulation contains degenerate triangles");
+        for (size_t c=0;c<3;++c) {
+            const auto &v=t[c];
+            require(std::isfinite(v.position.x) && std::isfinite(v.position.y) && std::isfinite(v.position.z) &&
+                        std::abs(v.normal.length()-1)<1e-8 && v.normal.y>=0 &&
+                        (v.position-repeat.triangles[i][c].position).length()==0,
+                    "Static snow flickers, has invalid normals or nonfinite geometry");
+            if(i>=24) {
+                const double height=v.position.y-ground(v.position.x,v.position.z);
+                require(height>=-.026 && height<=.45,"Snow bank floats or exceeds its height budget");
+                buriedEdge |= height<-.024;
+                raisedBank |= height>.15;
+            }
+        }
+    }
+    require(buriedEdge && raisedBank,"Snow bank lacks a buried rim or raised contact at its wall");
+    size_t underBridge = 0;
+    for (const auto &hill : hills()) {
+        visual::InrunLayout inrun;
+        inrun.build(hill);
+        for (const auto &support : inrun.supports) {
+            if (!support.exposed()) continue;
+            for (int side : {-1,1}) {
+                visual::SnowAccumulation foundation;
+                foundation.footing(hill,support.x,side*visual::inrunColumnZ,.55,.55,support.footingTop,
+                                   support.x+side*visual::inrunColumnZ*7);
+                for (const auto &triangle : foundation.triangles)
+                    for (const auto &v : triangle) {
+                        const double ground = visual::terrainSnowHeight(hill,v.position.x,v.position.z);
+                        const double rise = v.position.y-ground;
+                        require(rise>=-.026 && rise<=.45,
+                                "Foundation snow rises to the bridge deck instead of the underlying ground");
+                        if (std::abs(v.position.z)<2.3 && hill.inrun(v.position.x)-ground>1)
+                            ++underBridge;
+                    }
+            }
+        }
+    }
+    require(underBridge>100,"Snow regression did not cross beneath raised inrun decks");
+    double shortest=1000,longest=0,narrowest=1000,widest=0,longestGap=0;
+    for (int seed=0;seed<8;++seed) {
+        visual::SnowAccumulation whole,divided;
+        whole.caps({0,2,8},{120,2,8},.14,.16,seed*8.13);
+        std::vector<Vec3> nodes;
+        for(double x=0;x<120;x+=1.35) nodes.push_back({x,2,8});
+        nodes.push_back({120,2,8});
+        divided.caps(nodes,.14,.16,seed*8.13);
+        require(whole.triangles.size()==divided.triangles.size() && whole.triangles.size()/24<35,
+                "Top-edge snow is too dense or follows the repeating rail bays");
+        double previousEnd=0;
+        for(size_t i=0;i<whole.triangles.size();i+=24) {
+            double low=1000,high=-1000,left=1000,right=-1000;
+            for(size_t j=i;j<i+24;++j)
+                for(size_t c=0;c<3;++c) {
+                    const auto p=whole.triangles[j][c].position;
+                    require((p-divided.triangles[j][c].position).length()<1e-10,
+                            "Subdividing a rail changes the snow pattern");
+                    low=std::min(low,p.x);high=std::max(high,p.x);
+                    left=std::min(left,p.z);right=std::max(right,p.z);
+                }
+            shortest=std::min(shortest,high-low);longest=std::max(longest,high-low);
+            narrowest=std::min(narrowest,right-left);widest=std::max(widest,right-left);
+            longestGap=std::max(longestGap,low-previousEnd);previousEnd=high;
+        }
+    }
+    require(longest>shortest*8 && widest>narrowest*4 && longestGap>4,
+            "Snow clumps lack strong length/width variation and long bare gaps");
+    double lowDrift=1000,highDrift=0,sumDrift=0;
+    size_t crests=0;
+    for (int seed=0;seed<8;++seed) {
+        visual::SnowAccumulation stand;
+        const auto ceiling=[](double x,double) { return x<6?1.6:3.0; };
+        stand.standBank({0,0,8},{12,0,8},{0,0,1},seed*9.17,
+                        [](double,double) { return 0.; },ceiling);
+        require(stand.triangles.size()<180,"Stand drifts exceeded their small static mesh budget");
+        for (const auto &triangle:stand.triangles)
+            for (const auto &v:triangle) {
+                require(std::isfinite(v.position.y) && std::abs(v.normal.length()-1)<1e-8 &&
+                            v.position.y<=ceiling(v.position.x,v.position.z)+1e-9 &&
+                            v.position.y>=-.026 && v.position.y<=2.7,
+                        "Tall stand snow exceeds the floor or has invalid geometry");
+                if (v.position.z==8 && v.position.x>1 && v.position.x<11) {
+                    lowDrift=std::min(lowDrift,v.position.y);highDrift=std::max(highDrift,v.position.y);
+                    sumDrift+=v.position.y;++crests;
+                }
+            }
+    }
+    require(crests && highDrift>1.5 && highDrift-lowDrift>1.2 && sumDrift/crests>.6,
+            "Stand snow is too low or lacks strong height variation");
 }
 void brakingSkiPowder() {
     using namespace sjp;
@@ -739,6 +848,7 @@ std::array<sjp::gfx::SpotLight, sjp::gfx::ARENA_LIGHT_COUNT> inrunSpots{};
 float inrunStrength = 0;
 int inrunColumns = 0;
 float fogStart = 0, fogEnd = 0;
+float snowGlitterMaterial = 0;
 bool captureBoards = false;
 bool captureCamera = false;
 sjp::Vec3 cameraEye, cameraForward, cameraRight, cameraUp;
@@ -760,7 +870,9 @@ void position(double x, double y, double z) {
         ++floodlightGlassVertices;
     if (captureRecordList && compiling == captureRecordList)
         recordVertices.push_back({x, y, z});
-    if (captureSnow && compiling && textureEnabled &&
+    // Freeze the original sparkling terrain/track, independently of matte
+    // decorative snow that reuses the same texture on nearby constructions.
+    if (captureSnow && compiling && textureEnabled && snowGlitterMaterial == 1 &&
         (boundTexture == protectedTexture || boundTexture == protectedTexture + 1)) {
         ++snowVertices;
         snowLighting.push_back({{x, y, z}, {current.normal[0], current.normal[1], current.normal[2]}});
@@ -1197,6 +1309,8 @@ void sjp::gfx::snowSunlight(float strength) {
 void sjp::gfx::materialf(sjp::gfx::Enum face, sjp::gfx::Enum pname, float param) {
     audit::command("sjp::gfx::materialf inside sjp::gfx::begin", false);
     audit::finite(param);
+    if (pname == sjp::gfx::SNOW_GLITTER)
+        audit::snowGlitterMaterial = param;
 }
 void sjp::gfx::materialfv(sjp::gfx::Enum face, sjp::gfx::Enum pname, const float *params) {
     audit::command("sjp::gfx::materialfv inside sjp::gfx::begin", false);
@@ -1393,6 +1507,7 @@ void sjp::gfx::viewport(int x, int y, int width, int height) {
 
 int main() {
     try {
+        audit::accumulatedSnowGeometry();
         audit::brakingSkiPowder();
         audit::contactShadowDecals();
         audit::startSignalLighting();

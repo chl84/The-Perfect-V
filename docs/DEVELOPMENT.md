@@ -261,6 +261,43 @@ or changes to landing/spectator positions. Terrain and physics remain unchanged.
 Native Vulkan captures cover five hill sizes in day, snowfall, night and evening
 at 1920×1080/MSAA4; the environment and renderer command suites pass.
 
+## Snow against constructions
+
+`visual_snow_accumulation.h` generates static, deterministic banks along stand
+and advertising-board bases, around floodlight/inrun/stair footings and sign
+posts. Foundation banks wrap the entire footprint; irregular cross-sections
+follow the existing rendered snow and bury their outer rims. The original
+terrain, track, collision profile, spectator floors and camera paths are unchanged.
+Stand banks have strongly varying height, with low pockets and broad crests
+up to 2.7 m where wall height permits. Every crest is capped below the actual
+stepped floor; the footprint widens with height to avoid steep snow walls.
+Footings explicitly sample `terrainSnowHeight`, including where their outer
+skirts extend beneath the raised inrun. The camera surface includes the deck
+and must never be used as the receiver for these ground-level banks.
+
+Upper sign edges, floodlight casings and stand/inrun handrails carry separated, asymmetric snow
+caps (24 triangles each). Inrun placement follows whole rail polylines, preserving
+openings without inheriting the repeating post spacing. Long irregular bare gaps
+separate sparse caps; independent hashes strongly vary length, width, height,
+crest position, taper and lateral asymmetry. Their dimensions and gaps use stable placement hashes,
+never simulation RNG or per-frame animation. One opaque material group reuses
+the existing natural-snow texture and world UVs. Rim normals blend into terrain
+normals; packed decorative snow omits the terrain's extra glitter calculation.
+All geometry is compiled into the existing venue cache and uses its bounded
+indexed ranges and frustum culling. No new texture, shadow map or render pass
+is introduced, and no snow geometry is generated while playing.
+Small inrun floodlights use the same sparse distribution at fixture scale;
+snow rests on the upper casing behind the unobstructed lens. Lamp emission,
+lighting positions, beam directions and intensity remain unchanged.
+Large floodlight housings carry one substantial asymmetric drift, 2.3–3.2 m
+long with a 0.44–0.66 m crest-height parameter, sized independently of small fixtures.
+
+The CPU audit checks bounded cap topology, deterministic/finite geometry,
+unit normals and buried bank rims. Its frozen terrain/track baselines still
+check the original textured sparkling snow separately from the matte additions.
+Before/after Vulkan captures and timing diagnostics are under
+`captures/snow-accumulation/` (local, ignored artifacts).
+
 ## Crowd audio
 
 The spectator bed and cheering loop follow the athlete's proximity to the actual

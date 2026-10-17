@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "render_batch.h"
 #include "visual_start_signal.h"
+#include "visual_snow_accumulation.h"
 #include <algorithm>
 
 namespace sjp {
@@ -37,7 +38,7 @@ void beam(Vec3 a, Vec3 b, double radius, Color color) {
 double level(const visual::InrunSupport &s, double t) {
     return s.footingTop + .07 + (s.height() - .07) * t;
 }
-void accessStairs(const Hill &h, int side) {
+void accessStairs(const Hill &h, int side, visual::SnowAccumulation &snowCaps) {
     const visual::CameraSurface snow(h);
     const double x = -1.45, top = h.inrun(x) - .04;
     const double ground = snow.height(x, side * (visual::inrunWalkOuter + 1.5));
@@ -54,6 +55,7 @@ void accessStairs(const Hill &h, int side) {
                 beam({xx, y - .035, z}, {xx, y + .98, z}, .028, brace);
     }
     box({x, ground - .06, side * (end + .12)}, {1.4, .26, .60}, {.49f, .52f, .53f, 1});
+    snowCaps.footing(h, x, side * (end + .12), .7, .3, ground + .07, x + end * 7);
     for (double xx : {x - .47, x + .47})
         beam({xx, top - .14, side * visual::inrunWalkOuter}, {xx, ground - .16, side * end}, .065, steel);
     for (double xx : {x - .57, x + .57}) {
@@ -61,7 +63,7 @@ void accessStairs(const Hill &h, int side) {
         beam({xx, ground, side * end}, {xx, ground + 1.01, side * end}, .028, brace);
     }
 }
-void lightHousing(const gfx::SpotLight &light) {
+void lightHousing(const gfx::SpotLight &light, visual::SnowAccumulation &snow) {
     const auto &p = light.positionRange, &d = light.directionCone;
     const Vec3 center{p[0], p[1], p[2]}, aim{d[0], d[1], d[2]};
     const Vec3 right = cross(aim, {0, 1, 0}).normalized() * .25;
@@ -74,6 +76,10 @@ void lightHousing(const gfx::SpotLight &light) {
     quad(c, e, e + back, c + back, casing);
     quad(e, a, a + back, e + back, casing);
     quad(a + back, b + back, c + back, e + back, casing);
+    // Rest on the upper casing, behind the lens. Use the same irregular
+    // distribution scaled to this smaller fixture; light/glass stay clear.
+    snow.caps(e+back*.65,c+back*.65,.055,.065,
+              center.x*2.3+center.z*5.7,.30);
 }
 void lightGlass(const gfx::SpotLight &light) {
     const auto &p = light.positionRange, &d = light.directionCone;
@@ -86,7 +92,7 @@ void lightGlass(const gfx::SpotLight &light) {
 }
 } // namespace
 
-void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) {
+void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout, visual::SnowAccumulation &snowCaps) {
     // This assembly surrounds the original track. Its snow, grooves, start
     // seat and collision profile are constructed separately and remain fixed.
     const double first = h.inrunStart(), last = -.75;
@@ -147,10 +153,32 @@ void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) 
                 beam({x, y + height * .52, z}, {end, endY + height * .52, z}, .023, steel);
             }
     }
+    // Place snow over complete rail runs, so the 1.35 m posts cannot impose
+    // their repeating rhythm on the clumps. Preserve the existing openings.
+    for (double z : {serviceSide * 2.2, serviceSide * 3.68}) {
+        const bool outer = std::abs(z) > 3;
+        const double height = outer ? 1.08 : .72;
+        std::vector<Vec3> run;
+        const auto emit = [&] {
+            if (run.size() >= 2)
+                snowCaps.caps(run, .14, .16, run.front().x * 3.1 + z * 7.7);
+        };
+        for (size_t i = 0; i+1 < railNodes.size(); ++i) {
+            const double a = railNodes[i], b = railNodes[i+1];
+            if (outer && opening((a+b)*.5)) {
+                emit(); run.clear(); continue;
+            }
+            if (run.empty()) run.push_back({a,h.inrun(a)+height+.035,z});
+            run.push_back({b,h.inrun(b)+height+.035,z});
+        }
+        emit();
+    }
     {
         const double y = h.inrun(last);
         beam({last, y - .27, serviceSide * 2.45}, {last, y + 1.12, serviceSide * 2.45}, .035, brace);
         beam({last, y + 1.08, serviceSide * 2.45}, {last, y + 1.08, serviceSide * 3.68}, .040, brace);
+        snowCaps.caps({last, y + 1.115, serviceSide * 2.45}, {last, y + 1.115, serviceSide * 3.68},
+                      .14, .16, last * 3.1);
         beam({last, y + .56, serviceSide * 2.45}, {last, y + .56, serviceSide * 3.68}, .023, steel);
     }
     for (const auto &support : layout.supports) {
@@ -163,6 +191,7 @@ void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) 
             const double z = side * visual::inrunColumnZ;
             box({x, (support.footingBottom + support.footingTop) * .5, z},
                 {1.10, support.footingTop - support.footingBottom, 1.10}, {.49f, .52f, .53f, 1});
+            snowCaps.footing(h, x, z, .55, .55, support.footingTop, x + z * 7);
             box({x, support.footingTop + .04, z}, {radius * 2 + .15, .08, radius * 2 + .15}, steel);
             beam({x, level(support, 0), z}, {x, support.deck, z}, radius, steel);
             box({x, support.deck, z}, {.26, .27, .30}, brace);
@@ -197,14 +226,14 @@ void Renderer::inrunStructure(const Hill &h, const visual::InrunLayout &layout) 
             }
         }
     }
-    accessStairs(h, serviceSide);
+    accessStairs(h, serviceSide, snowCaps);
     // Small shielded fixtures are attached to the outer service girder.
     // Their faces and real vertex lights share precisely the same positions.
     for (int column = 0; column < layout.lightColumns; ++column) {
         const double x = layout.firstLightX + column * layout.lightSpacing, y = h.inrun(x);
         beam({x, y - .27, serviceSide * 3.65}, {x, y + 2.55, serviceSide * 3.65}, .037, steel);
         beam({x, y + 2.55, serviceSide * 3.65}, {x, y + 2.49, serviceSide * 3.28}, .032, steel);
-        lightHousing(layout.lights[size_t(column)]);
+        lightHousing(layout.lights[size_t(column)], snowCaps);
     }
     visual::pushAttrib(gfx::LIGHTING_BIT);
     const float emission[]{.20f, .19f, .16f, 1};

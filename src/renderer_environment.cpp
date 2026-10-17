@@ -4,6 +4,7 @@
 #include "visual_floodlights.h"
 #include "visual_mountains.h"
 #include "visual_weather.h"
+#include "visual_snow_accumulation.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -515,14 +516,15 @@ void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double
     face(aa, bb, b, a, .94);
     face(dd, d, e, ee, .94);
 }
-void standGuard(Vec3 a, Vec3 b) {
+void standGuard(Vec3 a, Vec3 b, visual::SnowAccumulation &snow) {
     const Color post{.44f, .54f, .58f, 1}, rail{.55f, .64f, .68f, 1};
     beam(a, a + Vec3{0, 1.12, 0}, .028, post);
     beam(b, b + Vec3{0, 1.12, 0}, .028, post);
     beam(a + Vec3{0, 1.08, 0}, b + Vec3{0, 1.08, 0}, .033, rail);
+    snow.caps(a + Vec3{0, 1.11, 0}, b + Vec3{0, 1.11, 0}, .15, .18, a.x * 1.3 + a.z * 4.7);
     beam(a + Vec3{0, .55, 0}, b + Vec3{0, .55, 0}, .020, post);
 }
-void standEndGuard(const visual::StandTerrace &t, double x, int side, double near) {
+void standEndGuard(const visual::StandTerrace &t, double x, int side, double near, visual::SnowAccumulation &snow) {
     const Color post{.44f, .54f, .58f, 1}, rail{.55f, .64f, .68f, 1};
     // One continuous stair railing across the three lateral seating tiers.
     // Each post starts on its own horizontal landing, including the turns.
@@ -536,6 +538,8 @@ void standEndGuard(const visual::StandTerrace &t, double x, int side, double nea
         beam(p, p + Vec3{0, 1.12, 0}, .028, post);
     for (size_t i = 1; i < feet.size(); ++i) {
         beam(feet[i - 1] + Vec3{0, 1.08, 0}, feet[i] + Vec3{0, 1.08, 0}, .033, rail);
+        snow.caps(feet[i - 1] + Vec3{0, 1.11, 0}, feet[i] + Vec3{0, 1.11, 0},
+                  .15, .18, x * 1.3 + i * 4.7 + side);
         beam(feet[i - 1] + Vec3{0, .55, 0}, feet[i] + Vec3{0, .55, 0}, .020, post);
     }
 }
@@ -692,7 +696,7 @@ void boardText(const BoardFrame &frame, const std::string &text, double x, doubl
     }
 }
 void advertisement(const Hill &h, double x, double width, double front, int side, Color accent,
-                   const std::string &text) {
+                   const std::string &text, visual::SnowAccumulation &snow) {
     // Rotate a rigid rectangle along the existing terrain's local tangent.
     // The valley term is the x derivative of terrainY, not a terrain change.
     const double edge = std::max(0.0, std::abs(front) - 19 * h.scale());
@@ -711,6 +715,14 @@ void advertisement(const Hill &h, double x, double width, double front, int side
             lift = std::max(lift, terrainY(h, p.x, p.z) + .08 - p.y);
         }
     frame.origin.y += lift;
+    snow.caps(frame.point(left, 1.82, front), frame.point(right, 1.82, front),
+              .27, .24, x * 1.3 + front * 4.7, 1.8);
+    for (int face : {-1, 1}) {
+        const double z = front + face * .15;
+        snow.bank(frame.point(left, .60, z), frame.point(right, .60, z), {0,0,double(face)},
+                  .72, .46, x + front * 2 + face,
+                  [&](double xx, double zz) { return terrainY(h, xx, zz); });
+    }
     const Vec3 ta = frame.point(left, 1.79, zFront), tb = frame.point(left, 1.79, zBack),
                tc = frame.point(right, 1.79, zBack), td = frame.point(right, 1.79, zFront);
     const Vec3 ba = frame.point(left, .16, zFront), bb = frame.point(right, .16, zFront),
@@ -849,14 +861,22 @@ void flag(Vec3 poleBase, double size, double time, double seed) {
                  point(columns[x + 1], rows[y + 1]), point(columns[x], rows[y + 1]),
                  x == 1 || y == 1 ? crossColor : base);
 }
-void floodlight(const Hill &h, double x, double z, double size) {
+void floodlight(const Hill &h, double x, double z, double size, visual::SnowAccumulation &snow) {
     const double y = terrainY(h, x, z), height = 18 * size + 2;
     // Double all foundation dimensions, keeping the original top at y + .60.
     // The added depth extends downward to y - .60, into the snow.
     box({x, y, z}, {2.2, 1.20, 2.2}, {.48f, .54f, .56f, 1});
+    snow.footing(h, x, z, 1.1, 1.1, y + .60, x + z * 7);
     beam({x, y + .3, z}, {x, y + height, z}, .13, {.40f, .48f, .53f, 1});
     beam({x, y + height - 1, z}, {x + 1.4, y + height, z}, .08, {.36f, .43f, .48f, 1});
     box({x, y + height, z}, {3.4, 1.25, .60}, {.12f, .20f, .25f, 1});
+    // Size a substantial, asymmetric drift to the broad floodlight housing.
+    const double seed = x*2.3+z*5.7;
+    const double snowLength = 2.3+.9*visual::SnowAccumulation::variation(seed+1.3);
+    const double snowLeft = x-1.7+(3.4-snowLength)*visual::SnowAccumulation::variation(seed+7.1);
+    snow.cap({snowLeft,y+height+.625,z}, {snowLeft+snowLength,y+height+.625,z},
+             .34+.14*visual::SnowAccumulation::variation(seed+13.7),
+             .44+.22*visual::SnowAccumulation::variation(seed+21.9),seed);
     for (int lamp = 0; lamp < 6; ++lamp) {
         const double xx = x + (lamp % 3 - 1) * 1.02, yy = y + height + (lamp / 3 - .5) * .49;
         box({xx, yy, z}, {.82, .38, .67}, {.51f, .59f, .63f, 1});
@@ -955,6 +975,7 @@ void Renderer::terrain(const Hill &h) {
 void Renderer::buildTerrain(const Hill &h, size_t index) {
     const double s = h.scale();
     visual::StaticBatch staticBatch;
+    visual::SnowAccumulation accumulatedSnow;
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::LIGHTING_BIT | sjp::gfx::CURRENT_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::POLYGON_BIT);
     const float matte[]{.025f, .035f, .045f, 1};
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::SPECULAR, matte);
@@ -1085,7 +1106,7 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             }
         }
     }
-    inrunStructure(h, inrunLayouts[index]);
+    inrunStructure(h, inrunLayouts[index], accumulatedSnow);
     startSignalHousing(h);
     // The continuous service stairs share these short seat-area outriggers.
     // No additional overlapping/sloping platform covers their treads.
@@ -1182,6 +1203,9 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             const double postTop = panelY + height * .5 + .12;
             beam({x, y - .30, z}, {x, postTop, z}, .08, c);
             box({x, panelY, z}, {width, height, depth}, {.68f, .31f, .29f, 1});
+            accumulatedSnow.caps({x-width*.5, panelY+height*.5, z}, {x+width*.5, panelY+height*.5, z},
+                                 .18, .20, x+z*3, 1.6);
+            accumulatedSnow.footing(h, x, z, .10, .10, y+.30, x+z*7);
             signText("K" + std::to_string(h.k), {x, panelY + .01, z - side * (depth * .5 + .006)}, 1.38, .43,
                      side, {.98f, .97f, .92f, 1});
             box({x, postTop, z}, {.24, .20, .24}, {.94f, .95f, .90f, 1});
@@ -1214,9 +1238,32 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             const auto &stand = stands.section(side, section);
             const double x = stand.center, width = stand.width;
             const Color accent = section % 3 == 0 ? Color{.86f, .37f, .25f, 1} : Color{.25f, .68f, .65f, 1};
-            advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "THE PERFECT V");
+            advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "THE PERFECT V", accumulatedSnow);
+            for (int edge : {0,1}) {
+                const double z = side * (arenaNear + (edge ? 4.95 : 1.35));
+                const auto &first = stand.terraces.front(), &last = stand.terraces.back();
+                accumulatedSnow.standBank({first.x0,0,z}, {last.x1,0,z}, {0,0,double(side*(edge?1:-1))},
+                                         x+z*3,
+                                         [&](double xx,double zz) { return visual::terrainSnowHeight(h,xx,zz); },
+                                         [&](double xx,double) {
+                                             // Cover a whole mesh cell beside each floor step.
+                                             return std::min({stand.at(xx-1).floor(edge?2:0),
+                                                              stand.at(xx).floor(edge?2:0),
+                                                              stand.at(xx+1).floor(edge?2:0)})-.08;
+                                         });
+            }
             for (size_t bay = 0; bay < stand.terraces.size(); ++bay) {
                 const auto &t = stand.terraces[bay];
+                for (int end : {-1,1}) {
+                    if ((end<0 && bay) || (end>0 && bay+1!=stand.terraces.size())) continue;
+                    for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row) {
+                        const double xx = end<0 ? t.x0 : t.x1, top = t.floor(row) - .08;
+                        const double za = side * (arenaNear + 1.35 + row * 1.2), zb = za + side * 1.2;
+                        accumulatedSnow.standBank({xx,0,za}, {xx,0,zb}, {double(end),0,0}, xx+za*3,
+                                                 [&](double a,double b) { return visual::terrainSnowHeight(h,a,b); },
+                                                 [&](double,double) { return top; });
+                    }
+                }
                 const auto *left = bay ? &stand.terraces[bay - 1] :
                     (section ? &stands.section(side, section - 1).terraces.back() : nullptr);
                 const auto *right = bay + 1 < stand.terraces.size() ? &stand.terraces[bay + 1] :
@@ -1231,16 +1278,16 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
                 // Lower tiers remain open; substantial drops get one shared
                 // edge railing instead of separate barriers around each row.
                 if (!left || t.base - left->base > 1.0)
-                    standEndGuard(t, t.x0 + .06, side, arenaNear);
+                    standEndGuard(t, t.x0 + .06, side, arenaNear, accumulatedSnow);
                 if (!right || t.base - right->base > 1.0)
-                    standEndGuard(t, t.x1 - .06, side, arenaNear);
+                    standEndGuard(t, t.x1 - .06, side, arenaNear, accumulatedSnow);
                 const double back = side * (arenaNear + 4.90);
-                standGuard({t.x0 + .08, t.floor(2), back}, {t.x1 - .08, t.floor(2), back});
+                standGuard({t.x0 + .08, t.floor(2), back}, {t.x1 - .08, t.floor(2), back}, accumulatedSnow);
                 const double lip = side * (arenaNear + 1.39);
                 const double frontDrop = t.floor(0) - std::min(arenaSnow.height(t.x0, lip),
                                                              arenaSnow.height(t.x1, lip));
                 if (frontDrop > 1.15)
-                    standGuard({t.x0 + .08, t.floor(0), lip}, {t.x1 - .08, t.floor(0), lip});
+                    standGuard({t.x0 + .08, t.floor(0), lip}, {t.x1 - .08, t.floor(0), lip}, accumulatedSnow);
             }
             for (int row = 0; row < visual::GrandstandLayout::rowCount; ++row)
                 for (int person = 0; person < 4; ++person)
@@ -1248,9 +1295,28 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
         }
         for (int mast = 0; mast < visual::floodlightColumns(h); ++mast) {
             const auto fixture = visual::floodlightMast(h, mast, side);
-            floodlight(h, fixture.base.x, fixture.base.z, fixture.size);
+            floodlight(h, fixture.base.x, fixture.base.z, fixture.size, accumulatedSnow);
         }
     }
+    // One opaque snow group, compiled into the venue's existing cached mesh.
+    // Reuse terrain UVs/albedo. Blend rim normals into the original terrain;
+    // buried edges then join without a bright outline or an alpha-blended pass.
+    visual::enable(gfx::TEXTURE_2D);
+    visual::bindTexture(gfx::TEXTURE_2D, naturalSnowTexture);
+    visual::disable(gfx::BLEND);
+    visual::begin(gfx::TRIANGLES);
+    for (const auto &triangle : accumulatedSnow.triangles)
+        for (const auto &v : triangle) {
+            const Color c = snowColor(h, v.position.x, v.position.z);
+            const double elevation = v.position.y - visual::terrainSnowHeight(h,v.position.x,v.position.z);
+            const double raised = smoothRange(.015,.14,elevation);
+            const Vec3 normal = (terrainSnowNormal(h,v.position)*(1-raised)+v.normal*raised).normalized();
+            col(c);
+            visual::normal(normal.x, normal.y, normal.z);
+            visual::texCoord(v.position.x/13.,v.position.z/13.);
+            vertex(v.position);
+        }
+    visual::end();
     staticBatch.finish();
     // Finish writes current attributes, so restore the caller's state last.
     sjp::visual::popAttrib();

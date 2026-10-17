@@ -14,6 +14,7 @@
 #include <vector>
 
 namespace sjp {
+namespace visual { class SnowAccumulation; }
 // Fall contact correction is presentation only. Never feed this Frame to physics,
 // input, camera tracking, scoring or replay storage.
 Frame displayedAthleteFrame(const Hill &, const Frame &, JumperAppearance = JumperAppearance::Pro);
@@ -134,7 +135,7 @@ class Renderer {
     Frame cachedAthleteFrame(const Hill &, const Frame &, bool ghost);
     void shadow(const Hill &, const Frame &, const visual::FloodlightField &, const visual::InrunLayout &);
     void hillRecordMarker(const Hill &);
-    void inrunStructure(const Hill &, const visual::InrunLayout &);
+    void inrunStructure(const Hill &, const visual::InrunLayout &, visual::SnowAccumulation &);
     void startSignalHousing(const Hill &);
     void startSignalLenses(const Hill &, const Frame &);
     void scenery(const Hill &, const Frame &, double time);
