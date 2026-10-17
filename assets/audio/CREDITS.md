@@ -1,4 +1,6 @@
-# Crowd recordings
+# Audio assets
+
+## Crowd recordings
 
 All source recordings are dedicated to the public domain under
 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/).
@@ -18,3 +20,12 @@ The opening gasp is attenuated by a further 50% to balance the crowd background.
 Rebuild with `tools/prepare_crowd_audio.py` and the four original previews.
 The samples are converted to 48 kHz float once at startup, then mixed without
 runtime decompression, audio-thread allocation, or per-spectator sound sources.
+
+## Menu music
+
+`menu-theme.wav` is the project owner's selected theme, supplied as
+`tpv_theme_music.wav` and edited into the approved `tpv_theme_music_loop.wav`.
+Stereo 48 kHz / 16-bit PCM; 50.726729 seconds. The loop omits the original
+opening silence and joins matching passages with a 2.30575-second circular
+crossfade. Pitch, tempo and the body outside that crossfade are unchanged.
+The edit is reproducible with `tools/make_music_loop.py` and the original file.

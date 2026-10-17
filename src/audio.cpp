@@ -2,9 +2,34 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
+#include <stdexcept>
 
 namespace sjp {
-Audio::Audio(const std::string &assets) : mixer(loadCrowdSamples(assets)) {
+namespace {
+std::vector<float> loadMenuMusic(const std::string &assets) {
+    const auto path = assets + "/audio/menu-theme.wav";
+    SDL_AudioSpec source{}, destination{SDL_AUDIO_F32, 2, 48000};
+    Uint8 *bytes = nullptr, *converted = nullptr;
+    Uint32 length = 0;
+    if (!SDL_LoadWAV(path.c_str(), &source, &bytes, &length))
+        throw std::runtime_error("Cannot load menu music: " + path + ": " + SDL_GetError());
+    int convertedLength = 0;
+    const bool ok = SDL_ConvertAudioSamples(&source, bytes, int(length), &destination, &converted, &convertedLength);
+    SDL_free(bytes);
+    if (!ok)
+        throw std::runtime_error("Cannot convert menu music: " + path + ": " + SDL_GetError());
+    if (convertedLength <= 0 || convertedLength % (2 * sizeof(float)) != 0) {
+        SDL_free(converted);
+        throw std::runtime_error("Invalid stereo menu music: " + path);
+    }
+    std::vector<float> samples(size_t(convertedLength) / sizeof(float));
+    std::memcpy(samples.data(), converted, size_t(convertedLength));
+    SDL_free(converted);
+    return samples;
+}
+} // namespace
+Audio::Audio(const std::string &assets) : musicSamples(loadMenuMusic(assets)), mixer(loadCrowdSamples(assets)) {
     SDL_AudioSpec spec{};
     spec.freq = 48000;
     spec.format = SDL_AUDIO_F32;
@@ -12,6 +37,10 @@ Audio::Audio(const std::string &assets) : mixer(loadCrowdSamples(assets)) {
     stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, callback, this);
     if (stream)
         SDL_ResumeAudioStreamDevice(stream);
+    spec.channels = 2;
+    musicStream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, musicCallback, this);
+    if (musicStream)
+        SDL_ResumeAudioStreamDevice(musicStream);
 }
 void Audio::publish(const CrowdAudioState &state) {
     murmur = state.murmur;
@@ -60,6 +89,8 @@ void Audio::stop() {
     remaining = 0;
 }
 Audio::~Audio() {
+    if (musicStream)
+        SDL_DestroyAudioStream(musicStream);
     if (stream)
         SDL_DestroyAudioStream(stream);
 }
@@ -75,6 +106,36 @@ void Audio::callback(void *data, SDL_AudioStream *stream, int additional, int) {
         if (!SDL_PutAudioStreamData(stream, samples.data(), count * int(sizeof(float))))
             break;
         remaining -= count;
+    }
+}
+void Audio::musicCallback(void *data, SDL_AudioStream *stream, int additional, int) {
+    auto &audio = *static_cast<Audio *>(data);
+    std::array<float, 1024> samples{};
+    constexpr int frameBytes = 2 * sizeof(float);
+    int remaining = additional > 0 ? (additional + frameBytes - 1) / frameBytes : 0;
+    while (remaining > 0) {
+        const int frames = std::min(remaining, int(samples.size() / 2));
+        audio.generateMusic(samples.data(), frames);
+        if (!SDL_PutAudioStreamData(stream, samples.data(), frames * frameBytes))
+            break;
+        remaining -= frames;
+    }
+}
+void Audio::generateMusic(float *stereo, int frames) {
+    constexpr float level = .55f;
+    constexpr float fadeStep = level / (48000 * .4f);
+    const float target = musicActive.load() ? level : 0;
+    for (int frame = 0; frame < frames; ++frame) {
+        musicGain = musicGain < target ? std::min(target, musicGain + fadeStep)
+                                       : std::max(target, musicGain - fadeStep);
+        if (musicGain == 0 || musicSamples.empty()) {
+            stereo[frame * 2] = stereo[frame * 2 + 1] = 0;
+            continue;
+        }
+        stereo[frame * 2] = musicSamples[musicPosition * 2] * musicGain;
+        stereo[frame * 2 + 1] = musicSamples[musicPosition * 2 + 1] * musicGain;
+        if (++musicPosition == musicSamples.size() / 2)
+            musicPosition = 0;
     }
 }
 void Audio::generate(float *out, int n) {

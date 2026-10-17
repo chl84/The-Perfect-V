@@ -7,10 +7,21 @@
 namespace sjp {
 struct AudioTestAccess {
     static void freeze(Audio &audio) {
-        if (!audio.stream || !SDL_PauseAudioStreamDevice(audio.stream) || !SDL_LockAudioStream(audio.stream))
+        if (!audio.stream || !audio.musicStream || !SDL_PauseAudioStreamDevice(audio.stream) ||
+            !SDL_PauseAudioStreamDevice(audio.musicStream) || !SDL_LockAudioStream(audio.stream) ||
+            !SDL_LockAudioStream(audio.musicStream))
             throw std::runtime_error("Dummy audio device failed");
     }
-    static void unfreeze(Audio &audio) { SDL_UnlockAudioStream(audio.stream); }
+    static void unfreeze(Audio &audio) {
+        SDL_UnlockAudioStream(audio.musicStream);
+        SDL_UnlockAudioStream(audio.stream);
+    }
+    static void music(Audio &audio, std::vector<float> &stereo) {
+        audio.generateMusic(stereo.data(), int(stereo.size() / 2));
+    }
+    static size_t musicPosition(const Audio &audio) { return audio.musicPosition; }
+    static const std::vector<float> &musicSamples(const Audio &audio) { return audio.musicSamples; }
+    static void nearLoopEnd(Audio &audio) { audio.musicPosition = audio.musicSamples.size() / 2 - 2; }
     static void generate(Audio &audio, float *out, int count) { audio.generate(out, count); }
     static CrowdAudioState state(const Audio &audio) {
         CrowdAudioState state;
@@ -216,6 +227,49 @@ int main() {
         {
             Audio audio(SJP_TEST_ASSET_DIR);
             AudioFreeze freeze(audio);
+            std::vector<float> music(48000 * 2);
+            const auto &theme = AudioTestAccess::musicSamples(audio);
+            require(theme.size() > 48000 * 2 * 45 && energy(theme) > .04,
+                    "Menu theme is missing, truncated or silent");
+            AudioTestAccess::music(audio, music);
+            require(energy(music) == 0 && AudioTestAccess::musicPosition(audio) == 0,
+                    "Inactive music advances its cursor or produces sound");
+            audio.setMenuMusic(true);
+            AudioTestAccess::music(audio, music);
+            require(energy(music) > .025 && std::abs(music.front()) < .0001 &&
+                        AudioTestAccess::musicPosition(audio) == 48000,
+                    "Menu music does not fade in and advance at its original sample rate");
+            auto position = AudioTestAccess::musicPosition(audio);
+            audio.setMenuMusic(true); // Navigation must preserve the cursor and gain.
+            audio.stop(); // Game sound cleanup must not stop menu music.
+            audio.update({}, .016, CrowdPlayback::Off, false);
+            AudioTestAccess::music(audio, music);
+            require(energy(music) > .025 && std::abs(music[0] - theme[position * 2] * .55f) < 1e-6 &&
+                        std::abs(music[1] - theme[position * 2 + 1] * .55f) < 1e-6 &&
+                        AudioTestAccess::musicPosition(audio) == 96000,
+                    "Navigation or Sound Off restarts, mutes or downmixes the stereo theme");
+            AudioTestAccess::nearLoopEnd(audio);
+            std::vector<float> boundary(16);
+            AudioTestAccess::music(audio, boundary);
+            require(AudioTestAccess::musicPosition(audio) == 6 &&
+                        std::abs(boundary[0] - theme[theme.size() - 4] * .55f) < 1e-6 &&
+                        std::abs(boundary[4] - theme[0] * .55f) < 1e-6 &&
+                        std::abs(boundary[5] - theme[1] * .55f) < 1e-6,
+                    "Music loop inserts silence, skips samples or loses a stereo channel");
+            audio.setMenuMusic(false);
+            AudioTestAccess::music(audio, music);
+            require(std::all_of(music.end() - 48000, music.end(), [](float s) { return s == 0; }),
+                    "Music Off or gameplay fails to fade to complete silence");
+            position = AudioTestAccess::musicPosition(audio);
+            AudioTestAccess::music(audio, music);
+            require(energy(music) == 0 && AudioTestAccess::musicPosition(audio) == position,
+                    "Muted music continues advancing or leaks sound");
+            audio.setMenuMusic(true);
+            AudioTestAccess::music(audio, boundary);
+            require(AudioTestAccess::musicPosition(audio) == position + 8 &&
+                        std::abs(boundary[0]) < .0001,
+                    "Returning to menus fails to fade in from the previous music position");
+            audio.setMenuMusic(false);
             audio.beginJump(hill);
             auto f = replay.front();
             f.vx = 30;

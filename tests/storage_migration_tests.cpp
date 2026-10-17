@@ -147,6 +147,32 @@ int main() {
                     "Appearance persistence changed records or environment preferences");
         }
         const auto appearanceFile = contents(newPath);
+        require(loadRecords(oldPath.string()).music, "Old saves must default to music on");
+        Records audioRecords = appearanceRecords;
+        for (bool sound : {true, false}) for (bool music : {true, false}) {
+            audioRecords.sound = sound;
+            audioRecords.music = music;
+            require(saveRecords(newPath.string(), audioRecords), "Save independent audio preferences");
+            const auto restored = loadRecords(newPath.string());
+            require(restored.music == music && restored.sound == sound &&
+                        restored.best == audioRecords.best && restored.jumper == audioRecords.jumper &&
+                        restored.graphics.msaaSamples == audioRecords.graphics.msaaSamples &&
+                        restored.environment.time == audioRecords.environment.time &&
+                        restored.environment.weather == audioRecords.environment.weather,
+                    "Music preference failed to persist independently or lost personal data");
+        }
+        const auto beforeMusic = appearanceFile.substr(0, appearanceFile.find("MUSIC "));
+        write(newPath, beforeMusic);
+        require(loadRecords(newPath.string()).music,
+                "Current saves without a music tag must default to music on");
+        for (const auto &tag : {"MUSIC 1 2\n", "MUSIC 1 -1\n", "MUSIC 2 0\n", "MUSIC 1\n"}) {
+            write(newPath, beforeMusic + tag);
+            const auto restored = loadRecords(newPath.string());
+            require(restored.music && restored.best == audioRecords.best &&
+                        restored.sound == appearanceRecords.sound,
+                    "Malformed optional music preference lost records or used an invalid value");
+        }
+
         Records graphicsRecords = appearanceRecords;
         require(!loadRecords(oldPath.string()).graphics.fullscreen &&
                     loadRecords(oldPath.string()).graphics.msaaSamples == 4 &&

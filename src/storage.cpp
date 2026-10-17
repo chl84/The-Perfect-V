@@ -101,6 +101,7 @@ bool saveRecords(const std::string &path, const Records &r) {
     out << "JUMPER 1 " << int(r.jumper) << '\n';
     out << "GRAPHICS 5 " << r.graphics.fullscreen << ' ' << r.graphics.msaaSamples << ' '
         << r.graphics.vsync << ' ' << r.graphics.resolution.width << ' ' << r.graphics.resolution.height << '\n';
+    out << "MUSIC 1 " << r.music << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -178,6 +179,12 @@ Records loadRecords(const std::string &path) {
             if (version >= 1 && version <= 5 && fullscreen >= 0 && fullscreen <= 1 &&
                 validMsaaSamples(samples) && vsync >= 0 && vsync <= 1 && validResolution(resolution))
                 r.graphics = {fullscreen == 1, samples, vsync == 1, resolution};
+        } else if (tag == "MUSIC") {
+            int enabled;
+            if (!(in >> version >> enabled))
+                break;
+            if (version == 1 && (enabled == 0 || enabled == 1))
+                r.music = enabled != 0;
         } else if (tag == "JUMPER") {
             int value;
             if (!(in >> version >> value))

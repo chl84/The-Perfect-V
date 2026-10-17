@@ -9,6 +9,7 @@ struct Records {
     std::array<double, HILL_COUNT> best{}; // All-time standing human records, shared per hill.
     int camera = 0;
     bool sound = true;
+    bool music = true;
     double sensitivity = 1;
     environment::Selection environment;
     JumperAppearance jumper = JumperAppearance::Pro;

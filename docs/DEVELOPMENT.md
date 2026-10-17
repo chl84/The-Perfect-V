@@ -574,7 +574,14 @@ work, since hidden windows may have no drawable swapchain. No personal saves
 are read or written. Software-GPU timing does not predict hardware frame rates.
 
 Settings contains only category links: Graphics, Audio, Controls, Gameplay and
-Environment. Controls includes mouse sensitivity and the existing bindings;
+Environment. Audio has separate Sound and Music on/off controls. Music defaults
+on and persists in the optional `MUSIC 1` records tag (absent/invalid tags default
+on without affecting records or other preferences). The stereo menu theme is
+loaded and converted once at startup, with a separate fixed-block SDL audio
+stream, no callback allocations, and a 400 ms fade. Menu navigation preserves
+the playback cursor. Hops, pause, results, standings, jump-ready and replays fade
+music out; a return to the main menus resumes it. Sound affects gameplay audio
+independently. Controls includes mouse sensitivity and the existing bindings;
 Gameplay contains camera, practice wind and ghost; Environment contains time
 and weather. Each category returns to Settings through Back or Escape.
 
@@ -594,6 +601,13 @@ Only levels supported by both color and depth targets are offered. Saved levels
 unsupported on another GPU fall back to the nearest lower supported level.
 The default is 4× when available. F uses and saves the same fullscreen
 setting.
+
+Jump lengths and personal records display two decimal places. Result/record
+presentation uses the existing centimeter measurement retained for original
+replay recording, while the simulation's half-meter scoring distance and cup
+arithmetic remain unchanged. New native replays store the centimeter length;
+original replay headers use their recorded distance. Existing saved records
+retain the precision with which they were originally stored.
 
 Camera smoothing uses elapsed presentation
 time, retaining the previous 16 percent response per frame at 60 FPS. The

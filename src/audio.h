@@ -15,6 +15,8 @@ class Audio {
     void seekCrowd() { crowd.seek(); }
     void update(const Frame &, double dt, CrowdPlayback, bool soundOn, float rate = 1);
     void stop();
+    void setMenuMusic(bool play) { musicActive = play; }
+    bool menuMusicRequested() const { return musicActive.load(); }
     void cue(int cue) {
         tone = cue;
         remaining = cue == 3 ? 24000 : 6000;
@@ -22,7 +24,12 @@ class Audio {
 
   private:
     friend struct AudioTestAccess;
-    SDL_AudioStream *stream = nullptr;
+    SDL_AudioStream *stream = nullptr, *musicStream = nullptr;
+    // Only the audio callback changes the cursor and gain. Main thread publishes a target.
+    std::vector<float> musicSamples;
+    size_t musicPosition = 0;
+    float musicGain = 0;
+    std::atomic<bool> musicActive{false};
     std::atomic<float> volume{0};
     std::atomic<bool> enabled{true};
     std::atomic<int> tone{0}, remaining{0};
@@ -39,5 +46,7 @@ class Audio {
     uint32_t noise = 0xdeadbeef;
     static void callback(void *, SDL_AudioStream *, int, int);
     void generate(float *, int);
+    static void musicCallback(void *, SDL_AudioStream *, int, int);
+    void generateMusic(float *stereo, int frames);
 };
 } // namespace sjp

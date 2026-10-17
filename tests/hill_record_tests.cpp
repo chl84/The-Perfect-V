@@ -65,6 +65,14 @@ int main() {
                 "Record on another hill changed the previous hill");
         require(saveRecords(path, restarted) && loadRecords(path).best == restarted.best,
                 "Updated records did not survive another restart");
+        jump.distance = 152.12;
+        require(updateHillRecord(restarted, 2, jump, true) && restarted.best[2] == 152.12,
+                "Centimeter improvement did not replace the half-meter record");
+        jump.distance = 152.13;
+        require(updateHillRecord(restarted, 2, jump, true),
+                "A one-centimeter improvement within the same half meter was ignored");
+        require(saveRecords(path, restarted) && loadRecords(path).best[2] == 152.13,
+                "Centimeter record lost precision across restart");
         std::filesystem::remove_all(directory);
         std::cout << "PASS: standing Humans only, shared per-hill maxima and restart persistence\n";
     } catch (const std::exception &e) {

@@ -6,6 +6,7 @@
 #include "jump_feedback.h"
 #include "presentation_timing.h"
 #include "storage.h"
+#include "world_records.h"
 #include "visual_weather.h"
 #include "draw_commands.h"
 #include <SDL3/SDL.h>
@@ -98,6 +99,7 @@ enum class Action {
     ReplaySeek,
     Camera,
     Sound,
+    Music,
     SensitivityDown,
     SensitivityUp,
     SensitivityReset,
@@ -314,6 +316,7 @@ class App {
                                               !smoke && records.graphics.vsync, gpuValidation);
         renderer->setSynchronousRendering(synchronousRendering);
         audio = std::make_unique<Audio>(assets);
+        syncMenuMusic();
         Competition saved;
         if (loadCompetition(dataDir + "/cup.sjc", saved)) {
             hasCupSave = saved.active();
@@ -434,6 +437,28 @@ class App {
     }
 
   private:
+    void syncMenuMusic() {
+        bool menu = false;
+        switch (screen) {
+        case Screen::Menu:
+        case Screen::Hills:
+        case Screen::Help:
+        case Screen::Settings:
+        case Screen::Graphics:
+        case Screen::Audio:
+        case Screen::Gameplay:
+        case Screen::Environment:
+        case Screen::Records:
+        case Screen::CupSetup:
+        case Screen::ReplayFiles:
+        case Screen::SkiJumper:
+            menu = true;
+            break;
+        default:
+            break;
+        }
+        audio->setMenuMusic(menu && records.music);
+    }
     void updateAudio(double dt) {
         if (screen == Screen::Replay) {
             const auto mode = replayPlaying && replayTime < replayDuration()
@@ -497,6 +522,7 @@ class App {
     }
     void changeScreen(Screen s) {
         screen = s;
+        syncMenuMusic();
         if (s != Screen::Playing && s != Screen::Paused && s != Screen::Result && s != Screen::Replay)
             audio->stop();
         if (s == Screen::Hills || s == Screen::Records)
@@ -577,6 +603,11 @@ class App {
         // Capture begins only when the player starts the turn.
         newJump(Screen::JumpReady);
     }
+    double measuredJumpDistance() const {
+        // The original recording retains centimeters; Result::distance is the
+        // half-meter value used by the original individual and cup scoring.
+        return std::round(double(sim.originalRecordedDistance()) * 100) / 100;
+    }
     void completeJump() {
         completedFeedback = visual::jumpFeedback(sim);
         completedName = jumperName();
@@ -586,13 +617,16 @@ class App {
         sessionWeather = sim.weatherState();
         sessionAuxiliary = sim.pose.auxiliary;
         bool human = !competition || !activeComputer();
-        if (updateHillRecord(records, selectedHill, sim.result, human)) {
+        Result measured = sim.result;
+        measured.distance = measuredJumpDistance();
+        if (updateHillRecord(records, selectedHill, measured, human)) {
             newRecord = true;
             if (!saveRecords(dataDir + "/records-dsj2.dat", records))
                 storageError = true;
         }
         if (sim.frames.size() > 2) {
             lastReplay = sim.replay();
+            lastReplay.result.distance = measured.distance;
             lastReplay.jumper = records.jumper;
             lastReplay.hasEnvironment = true;
             lastReplay.environment = activeEnvironment;
@@ -1179,6 +1213,11 @@ class App {
         case Action::Sound:
             records.sound = !records.sound;
             break;
+        case Action::Music:
+            records.music = !records.music;
+            syncMenuMusic();
+            savePreferences();
+            break;
         case Action::SensitivityDown:
             records.sensitivity = std::max(.3, records.sensitivity - .2);
             break;
@@ -1523,7 +1562,8 @@ class App {
             r.text("K" + std::to_string(h.k), x + 20, y + 91, 34, selected ? colors::teal : colors::white,
                    true);
             if (records.best[i] > 0)
-                r.text("Record " + number(records.best[i]) + " m", x + 21, y + 187, 12, colors::muted);
+                r.text("Record " + number(records.best[i], 2) + " m", x + 21, y + 167, 12, colors::muted);
+            r.text("World record " + number(worldRecord(h.id), 2) + " m", x + 21, y + 187, 12, colors::muted);
             buttons.push_back({x, y, 314, 216, Action::SelectHill, i});
         }
         hillPagination(722);
@@ -1582,6 +1622,7 @@ class App {
     void audioSettings() {
         top("Audio");
         settingRow("Sound", records.sound ? "On" : "Off", Action::Sound);
+        settingRow("Music", records.music ? "On" : "Off", Action::Music, 1);
     }
     void gameplaySettings() {
         top("Gameplay");
@@ -1642,7 +1683,7 @@ class App {
             r.countryFlag(hills()[i].country, 89, y + 12, 30, 21);
             r.text(hills()[i].name, 136, y + 13, 17, colors::white, true);
             r.text("K" + std::to_string(hills()[i].k), 870, y + 16, 13, colors::muted);
-            r.textRight(records.best[i] ? number(records.best[i]) + " m" : "--", 1334, y + 10, 21,
+            r.textRight(records.best[i] ? number(records.best[i], 2) + " m" : "--", 1334, y + 10, 21,
                         records.best[i] ? colors::teal : colors::muted, true);
             buttons.push_back({64, y, 1310, 47, Action::SelectHill, i});
         }
@@ -1680,8 +1721,8 @@ class App {
         r.textRight("km/h", 188, 829, 12, colors::muted);
         if (sim.phase == Phase::Flight || sim.phase == Phase::Outrun) {
             r.glassPanel(220, 801, 184, 57, 7, .86f);
-            const double distance = sim.phase == Phase::Flight ? h.distance(sim.x) : sim.result.distance;
-            r.text(number(distance), 236, 811, 30, colors::white, true);
+            const double distance = sim.phase == Phase::Flight ? h.distance(sim.x) : measuredJumpDistance();
+            r.text(number(distance, 2), 236, 811, 30, colors::white, true);
             r.textRight("m", 386, 829, 12, colors::muted);
         }
     }
@@ -1705,8 +1746,9 @@ class App {
                               : "RESULT",
                326, 154, s.crashed || s.disqualified ? colors::orange : colors::teal);
         r.textRight(sim.hill().name + " / K" + std::to_string(sim.hill().k), 1114, 161, 13, colors::muted);
-        r.text(number(s.distance), 321, 282, 82, s.crashed ? colors::white : colors::teal, true);
-        r.text("m", 611, 344, 18, colors::muted);
+        const std::string distance = number(measuredJumpDistance(), 2);
+        r.text(distance, 321, 282, 82, s.crashed ? colors::white : colors::teal, true);
+        r.text("m", 321 + r.textWidth(distance, 82, true) + 16, 344, 18, colors::muted);
         r.textRight(number(s.total), 1114, 301, 56, colors::white, true);
         r.textRight("TOTAL POINTS", 1112, 369, 11, colors::muted, true);
         r.line(326, 410, 1114, 410, {.3f, .42f, .48f, .55f});
@@ -1932,7 +1974,8 @@ class App {
         auto &r = *renderer;
         constexpr float left = ReplayLayout::left, right = ReplayLayout::right,
                         top = ReplayLayout::top, padding = 20, buttonWidth = 142;
-        const std::string title = hills()[lastReplay.hill].name + " / " + number(lastReplay.result.distance) + " m";
+        const double measuredDistance = canExportOriginal ? originalReplayData.recordedDistance : lastReplay.result.distance;
+        const std::string title = hills()[lastReplay.hill].name + " / " + number(measuredDistance, 2) + " m";
         const std::string metadata = canExportOriginal
             ? originalReplayData.athleteName + " / " + originalReplayData.date + " / " + originalReplayData.author
             : std::string{};
@@ -2119,6 +2162,27 @@ class App {
         }
     }
     int smokeTest() {
+        const bool originalMusic = records.music;
+        records.music = true;
+        for (Screen menu : {Screen::Menu, Screen::Hills, Screen::Settings, Screen::Graphics,
+                            Screen::Audio, Screen::Help, Screen::Gameplay, Screen::Environment,
+                            Screen::Records, Screen::CupSetup, Screen::ReplayFiles, Screen::SkiJumper}) {
+            changeScreen(menu);
+            if (!audio->menuMusicRequested())
+                throw std::runtime_error("Main menu screen failed to request music");
+        }
+        for (Screen scene : {Screen::Playing, Screen::Paused, Screen::Result, Screen::Standings,
+                             Screen::JumpReady, Screen::Replay}) {
+            changeScreen(scene);
+            if (audio->menuMusicRequested())
+                throw std::runtime_error("Gameplay or replay screen requested menu music");
+        }
+        records.music = false;
+        changeScreen(Screen::Menu);
+        if (audio->menuMusicRequested())
+            throw std::runtime_error("Music Off still requests audio on the main menu");
+        records.music = originalMusic;
+        syncMenuMusic();
         size_t cupButtonClicks = 0;
         auto requireCapture = [&](bool expected) {
             if (smokeMouseCapture && bool(SDL_GetWindowRelativeMouseMode(window)) != expected)
@@ -2337,10 +2401,21 @@ class App {
         clickButton(Action::Audio);
         if (screen != Screen::Audio)
             throw std::runtime_error("Settings Audio link failed");
-        const bool savedSound = records.sound;
+        const bool savedSound = records.sound, savedMusic = records.music;
+        clickButton(Action::Music);
+        const auto mutedMusic = loadRecords(dataDir + "/records-dsj2.dat");
+        if (records.music == savedMusic || mutedMusic.music != records.music || mutedMusic.sound != savedSound)
+            throw std::runtime_error("Music control must persist independently of Sound");
+        clickButton(Action::Back);
+        clickButton(Action::Audio);
+        if (records.music != mutedMusic.music)
+            throw std::runtime_error("Music preference changed during menu navigation");
+        clickButton(Action::Music);
+        if (loadRecords(dataDir + "/records-dsj2.dat").music != savedMusic)
+            throw std::runtime_error("Music control failed to restore the saved preference");
         clickButton(Action::Sound);
-        if (records.sound == savedSound)
-            throw std::runtime_error("Audio sound control failed");
+        if (records.sound == savedSound || records.music != savedMusic)
+            throw std::runtime_error("Audio sound control failed or changed Music");
         clickButton(Action::Sound);
         render();
         if (!captureDir.empty())
@@ -2496,9 +2571,13 @@ class App {
                       << ", landing=" << mouseLanding << '\n';
             return 1;
         }
-        if (records.best[size_t(selectedHill)] != std::max(practiceRecordBefore, sim.result.distance) ||
+        if (records.best[size_t(selectedHill)] != std::max(practiceRecordBefore, measuredJumpDistance()) ||
             loadRecords(dataDir + "/records-dsj2.dat").best != records.best)
             throw std::runtime_error("Standing practice jump did not persist its all-time human record");
+        if (lastReplay.result.distance != measuredJumpDistance())
+            throw std::runtime_error("Completed replay lost centimeter precision");
+        if (sim.result.distance != std::trunc(double(sim.originalRecordedDistance()) * 2) / 2)
+            throw std::runtime_error("Centimeter presentation changed original scoring distance");
         const auto replayRecords = records.best;
         const auto selectedAppearance = records.jumper;
         if (lastReplay.jumper != selectedAppearance)
@@ -2520,6 +2599,7 @@ class App {
                 exportedPath == previousExport || !loadReplay(exportedPath, exported) ||
                 !exported.hasEnvironment || !(exported.environment == replayEnvironment) ||
                 exported.hill != lastReplay.hill || exported.frames.size() != lastReplay.frames.size() ||
+                exported.result.distance != measuredJumpDistance() ||
                 exported.originalRpl != lastReplay.originalRpl || exported.jumper != selectedAppearance)
                 throw std::runtime_error("Native replay export lost atmosphere, character, input recording or uniqueness");
             for (size_t i = 0; i < exported.frames.size(); ++i)
