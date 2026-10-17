@@ -286,7 +286,7 @@ credits and the reproducible preparation script accompany the assets.
 
 ## Fall model visibility
 
-The main menu's Ski Jumper screen uses the existing panels, buttons and four native
+The main menu's Ski Jumper screen uses the existing panels, buttons and five native
 3D previews. Pro keeps its competition suit and helmet. President adds a navy suit,
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
 President's reference-based face uses a continuous cheek/jaw mesh, a tapering
@@ -316,13 +316,28 @@ also covers the extended hair, without changing terrain or physical collision.
 
 All skins wrap the exact same original skeleton, including interpolated joints
 and fall poses; ski outlines and binding positions retain their geometry. All wear the same
-light boot shells with red closures, metal buckles and dark flat soles, making
+light boot shells with red closures, metal buckles and dark flat soles (Hero
+uses red shells with gold closures), making
 the boots distinct from the trousers and colored bindings. Boot cuffs follow
 the lower legs, with trouser hems tucked inside instead of covering the shells.
 The appearance
 enum stays outside simulation, AI, input, scoring and replay physics. Native
 replays preserve their recorded skin independently of the current preference;
 ghosts use the currently selected skin.
+
+Hero adds a fitted glossy blue bodice, red pleated short skirt, gold chevron
+belt, red knee-high boots with gold trim, a scarlet cape and a helmet-free face
+with a centre-parted, uniformly near-black hairstyle. Scalp and flowing locks
+use the same hair colour without root/tip gradients or painted streaks.
+The red/gold shield and S motif are
+curved geometry on the bodice. Hair is one connected 14-row, 20-column surface
+(260 quads), replacing 1,776 quads of separate scalp, ribbons and locks. Its
+upper seven rows cover the crown, back of the head and nape and stay pinned to
+the head. Only the lower lengths bend with velocity, wind and recorded elapsed
+time. The cape retains its small grid pinned to the shoulders. No physical forces or accumulated
+cloth simulation are introduced. Paused/seeked replays reproduce the same
+flutter. Menu previews cache the static body/head and redraw only moving cloth.
+Hero is appended to the appearance IDs, preserving existing saved selections.
 
 The optional `JUMPER 1` preferences tag preserves the choice while retaining the
 existing records format; older saves default to Pro. The fall-contact display

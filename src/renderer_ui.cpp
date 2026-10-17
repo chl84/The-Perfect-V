@@ -211,7 +211,7 @@ void Renderer::finish() {
 void Renderer::capture(const std::string &path) {
     sjp::gfx::captureImage(path);
 }
-void Renderer::jumperPreview(JumperAppearance appearance, float x, float y, float scale) {
+void Renderer::jumperPreview(JumperAppearance appearance, float x, float y, float scale, float yawDegrees) {
     gfx::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::LIGHTING_BIT | gfx::TEXTURE_BIT |
                     gfx::COLOR_BUFFER_BIT | gfx::DEPTH_BUFFER_BIT);
     gfx::disable(gfx::TEXTURE_2D);
@@ -245,7 +245,7 @@ void Renderer::jumperPreview(JumperAppearance appearance, float x, float y, floa
     gfx::lightfv(gfx::LIGHT1, gfx::POSITION, fillDirection);
     gfx::translatef(offsetX + x * uiScale, offsetY + y * uiScale, 0);
     gfx::scalef(scale * uiScale, -scale * uiScale, scale * uiScale);
-    constexpr float c = .57357644f, s = -.81915204f;
+    const float c = float(std::cos(yawDegrees * PI / 180)), s = float(std::sin(yawDegrees * PI / 180));
     const float rotation[]{c, 0, -s, 0, 0, 1, 0, 0, s, 0, c, 0, 0, 0, 0, 1};
     // Look down at the deck as well as across the athlete. This transform
     // belongs only to the selection preview, never the gameplay skeleton.

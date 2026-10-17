@@ -1539,13 +1539,15 @@ class App {
         for (size_t i = 0; i < JUMPER_APPEARANCES.size(); ++i) {
             const auto appearance = JUMPER_APPEARANCES[i];
             const bool selected = records.jumper == appearance;
-            const float x = 64 + i * 334;
-            r.glassPanel(x, 214, 310, 566, 12, .94f);
+            constexpr float gap = 24;
+            const float cardWidth = (1312 - gap * (JUMPER_APPEARANCES.size() - 1)) / JUMPER_APPEARANCES.size();
+            const float x = 64 + i * (cardWidth + gap);
+            r.glassPanel(x, 214, cardWidth, 566, 12, .94f);
             if (selected)
                 r.rect(x + 22, 214, 58, 3, colors::teal, 1);
             r.text(jumperAppearanceName(appearance), x + 22, 244, 27, colors::white, true);
-            r.jumperPreview(appearance, x + 132, 618, 145);
-            button(selected ? "Selected" : "Select", x + 22, 720, 266,
+            r.jumperPreview(appearance, x + cardWidth * .43f, 618, std::min(145.f, cardWidth * .47f));
+            button(selected ? "Selected" : "Select", x + 22, 720, cardWidth - 44,
                    Action::SelectJumper, int(appearance), selected, 40, 14);
         }
     }
@@ -2286,7 +2288,7 @@ class App {
         if (screen != Screen::SkiJumper)
             throw std::runtime_error("Home Ski Jumper button failed");
         const Simulation appearanceBaseline = sim;
-        for (int choice : {1, 2, 3, 0, 3}) {
+        for (int choice : {1, 2, 3, 4, 0, 4}) {
             clickButton(Action::SelectJumper, choice);
             if (int(records.jumper) != choice ||
                 int(loadRecords(dataDir + "/records-dsj2.dat").jumper) != choice ||
@@ -2301,6 +2303,20 @@ class App {
         if (!captureDir.empty())
             renderer->capture(captureDir + "/ski-jumper.ppm");
         renderer->finish();
+        if (!captureDir.empty()) {
+            render();
+            renderer->glassPanel(330, 128, 780, 704, 12, .98f);
+            renderer->text("Hero", 365, 155, 32, colors::white, true);
+            renderer->jumperPreview(JumperAppearance::Hero, 690, 775, 270);
+            renderer->capture(captureDir + "/hero-preview.ppm");
+            renderer->finish();
+            render();
+            renderer->glassPanel(330, 128, 780, 704, 12, .98f);
+            renderer->text("Hero", 365, 155, 32, colors::white, true);
+            renderer->jumperPreview(JumperAppearance::Hero, 690, 775, 270, 125);
+            renderer->capture(captureDir + "/hero-back.ppm");
+            renderer->finish();
+        }
         clickButton(Action::Back);
         clickButton(Action::Hills);
         if (screen != Screen::Hills)

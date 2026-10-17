@@ -43,7 +43,7 @@ class Renderer {
     void pill(const std::string &, float x, float y, Color c = colors::teal);
     void countryFlag(const std::string &country, float x, float y, float w = 32, float h = 22);
     void windArrow(float x, float y, double speed, double angle);
-    void jumperPreview(JumperAppearance, float x, float y, float scale);
+    void jumperPreview(JumperAppearance, float x, float y, float scale, float yawDegrees = -55);
     void finish();
     void capture(const std::string &path);
     void resetCamera() { cameraInit = false; }
@@ -103,8 +103,9 @@ class Renderer {
     };
     std::optional<PresentedScene> presentedScene;
     std::array<bool, HILL_COUNT> venueInitialized{};
-    std::array<gfx::Id, 4> previewMeshes{};
+    std::array<gfx::Id, JUMPER_APPEARANCES.size()> previewMeshes{};
     gfx::Id cartoonPreviewHead = 0;
+    gfx::Id heroPreviewHead = 0;
     struct ShadowCache;
     std::unique_ptr<ShadowCache> shadowCache;
     struct ContactCache {

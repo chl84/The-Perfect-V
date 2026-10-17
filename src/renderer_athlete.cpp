@@ -1,6 +1,7 @@
 #include "original_skeleton.h"
 #include "renderer.h"
 #include "visual_cartoon_hair.h"
+#include "visual_hero_cloth.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -397,6 +398,10 @@ void ski(Vec3 rear, Vec3 front, Vec3 tip, Vec3 ankle, const SkiLivery &paint,
                         break;
                     case JumperAppearance::Cartoon:
                         if (row % 2 == 0)
+                            ink = paint.accent;
+                        break;
+                    case JumperAppearance::Hero:
+                        if (row == 1 || row == 2 || row == 7 || row == 8)
                             ink = paint.accent;
                         break;
                     }
@@ -1191,6 +1196,242 @@ void cartoonDress(const OriginalSkeleton &skeleton, Color purple, Color pink, Co
     emitEnd();
 }
 
+// Hero's tailored surface is also sampled by the emblem, so its red/gold
+// artwork follows the chest without floating decals or a new texture upload.
+constexpr std::array<double, 8> heroRows{0, .10, .28, .47, .66, .80, .92, 1};
+constexpr std::array<double, 8> heroWidths{.142, .142, .124, .137, .178, .192, .185, .167};
+constexpr std::array<double, 8> heroFronts{.095, .111, .113, .137, .164, .151, .115, .079};
+constexpr std::array<double, 8> heroBacks{.099, .113, .101, .102, .114, .112, .101, .079};
+Vec3 heroTorsoPoint(Vec3 hip, Vec3 shoulder, const Basis &b, double t, double angle, double offset = 0) {
+    size_t row = 1;
+    while (row + 1 < heroRows.size() && heroRows[row] < t) ++row;
+    const double u = (t - heroRows[row - 1]) / (heroRows[row] - heroRows[row - 1]);
+    const auto blend = [&](const auto &values) { return values[row - 1] * (1 - u) + values[row] * u; };
+    const double c = std::cos(angle), depth = c >= 0 ? blend(heroFronts) : blend(heroBacks);
+    return hip + (shoulder - hip) * t + b.forward * ((depth + offset) * c) +
+           b.side * ((blend(heroWidths) + offset) * std::sin(angle));
+}
+void heroBodice(const OriginalSkeleton &s, Color blue, Color red, Color gold) {
+    using J = OriginalJoint;
+    const Vec3 hip = s[J::HipCenter], shoulder = s[J::ShoulderCenter];
+    const Basis b = segmentBasis(shoulder - hip);
+    material(Finish::Metal);
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < heroRows.size(); ++r)
+        for (int i = 0; i < 24; ++i) {
+            const double a = i * PI / 12, z = a + PI / 12;
+            quad(heroTorsoPoint(hip, shoulder, b, heroRows[r], a),
+                 heroTorsoPoint(hip, shoulder, b, heroRows[r + 1], a),
+                 heroTorsoPoint(hip, shoulder, b, heroRows[r + 1], z),
+                 heroTorsoPoint(hip, shoulder, b, heroRows[r], z), blue);
+        }
+    // Curved chest coordinates interpolate the same faceted surface as the mesh.
+    const auto emblem = [&](double x, double y, double layer = 0) {
+        const double t = .655 + y * .184, lateral = -x * .150;
+        size_t r = 1;
+        while (r + 1 < heroRows.size() && heroRows[r] < t) ++r;
+        const double u = (t - heroRows[r - 1]) / (heroRows[r] - heroRows[r - 1]);
+        const auto front = [&](size_t row) {
+            const double angle = std::asin(clamp(lateral / heroWidths[row], -1.0, 1.0));
+            const double a = std::floor(angle / (PI / 12)) * PI / 12, z = a + PI / 12;
+            const double v = (lateral / heroWidths[row] - std::sin(a)) / (std::sin(z) - std::sin(a));
+            return heroFronts[row] * (std::cos(a) * (1 - v) + std::cos(z) * v);
+        };
+        return hip + (shoulder - hip) * t + b.side * lateral +
+               b.forward * (front(r - 1) * (1 - u) + front(r) * u + .003 + layer);
+    };
+    // Five-sided red shield, golden field and the broad, angular red S.
+    constexpr std::array<std::array<double, 2>, 5> outline{{{-.62, 1}, {.62, 1}, {1, .57}, {0, -1}, {-1, .57}}};
+    for (int layer = 0; layer < 2; ++layer) {
+        const double scale = layer ? .82 : 1, depth = .003 + layer * .002;
+        for (size_t i = 0; i < outline.size(); ++i) {
+            const auto a = outline[i], z = outline[(i + 1) % outline.size()];
+            // Short radial/angular cells follow the chest facets. A single large
+            // badge polygon would sink into the curved bodice between its corners.
+            for (int edge = 0; edge < 8; ++edge)
+                for (int strip = 0; strip < 10; ++strip) {
+                    const double u = strip / 10.0, v = (strip + 1) / 10.0;
+                    const double left = edge / 8.0, right = (edge + 1) / 8.0;
+                    const double ax = a[0] * (1 - left) + z[0] * left, ay = a[1] * (1 - left) + z[1] * left;
+                    const double bx = a[0] * (1 - right) + z[0] * right, by = a[1] * (1 - right) + z[1] * right;
+                    quad(emblem(ax * scale * u, ay * scale * u, depth),
+                         emblem(bx * scale * u, by * scale * u, depth),
+                         emblem(bx * scale * v, by * scale * v, depth),
+                         emblem(ax * scale * v, ay * scale * v, depth), layer ? gold : red);
+                }
+        }
+    }
+    constexpr std::array<std::array<double, 2>, 12> letter{{
+        {.59, .50}, {.37, .67}, {-.37, .67}, {-.61, .43}, {-.43, .23}, {-.22, .17},
+        {.25, .04}, {.40, -.12}, {.20, -.40}, {-.04, -.46}, {-.24, -.32}, {-.35, -.18}}};
+    for (size_t i = 0; i + 1 < letter.size(); ++i) {
+        const auto a = letter[i], z = letter[i + 1];
+        const double dx = z[0] - a[0], dy = z[1] - a[1], length = std::hypot(dx, dy);
+        const double nx = -dy / length * .105, ny = dx / length * .105;
+        for (int cell = 0; cell < 8; ++cell) {
+            const double u = cell / 8.0, v = (cell + 1) / 8.0;
+            const double ax = a[0] + dx * u, ay = a[1] + dy * u, bx = a[0] + dx * v, by = a[1] + dy * v;
+            quad(emblem(ax - nx, ay - ny, .008), emblem(bx - nx, by - ny, .008),
+                 emblem(bx + nx, by + ny, .008), emblem(ax + nx, ay + ny, .008), red);
+        }
+    }
+    emitEnd();
+    // The shallow gold chevron belt continues around the waist.
+    material(Finish::Metal);
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 32; ++i) {
+        const double a = i * PI / 16, z = a + PI / 16;
+        const auto belt = [&](double angle, double height) {
+            const double dip = .047 * std::max(0.0, std::cos(angle));
+            return heroTorsoPoint(hip, shoulder, b, .055 + height - dip, angle, .007);
+        };
+        quad(belt(a, 0), belt(a, .100), belt(z, .100), belt(z, 0), gold);
+    }
+    emitEnd();
+}
+
+void heroHead(Vec3 head, const Basis &b, Color skin, Color white, Color hair) {
+    const auto at = [&](double f, double u, double side = 0) {
+        return head + b.forward * f + b.up * u + b.side * side;
+    };
+    constexpr std::array<double, 10> heights{-.184, -.163, -.126, -.074, -.020, .035, .084, .126, .160, .177};
+    constexpr std::array<double, 10> widths{.010, .062, .102, .125, .135, .134, .124, .100, .059, .002};
+    constexpr std::array<double, 10> fronts{.031, .077, .108, .127, .133, .132, .122, .101, .061, .002};
+    const auto surface = [&](double u, double side, double offset = .002) {
+        size_t r = 1;
+        while (r + 1 < heights.size() && heights[r] < u) ++r;
+        const double t = (u - heights[r - 1]) / (heights[r] - heights[r - 1]);
+        const double width = widths[r - 1] * (1 - t) + widths[r] * t;
+        const double front = fronts[r - 1] * (1 - t) + fronts[r] * t;
+        return at(front * std::sqrt(std::max(0.0, 1 - side * side / (width * width))) + offset, u, side);
+    };
+    material(Finish::Skin);
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < heights.size(); ++r)
+        for (int i = 0; i < 24; ++i) {
+            const auto point = [&](size_t row, int slice) {
+                const double angle = slice * PI / 12;
+                return at(fronts[row] * std::cos(angle), heights[row], widths[row] * std::sin(angle));
+            };
+            quad(point(r, i), point(r + 1, i), point(r + 1, i + 1), point(r, i + 1), skin);
+        }
+    emitEnd();
+    for (double sign : {-1., 1.}) {
+        ellipsoid(at(.005, -.035, sign * .134), b, {.018, .032, .012}, skin, 8, 5);
+        // Small almond eyes, dark eyeliner and arched brows, rather than goggles.
+        const Color liner{.14f, .085f, .065f, skin.a};
+        emitBegin(gfx::QUADS);
+        for (int i = 0; i < 8; ++i) {
+            const double a = -1 + i * .25, z = a + .25;
+            const auto eye = [&](double x, bool upper, double expansion) {
+                return surface(.022 + (upper ? 1 : -1) * (.012 * (1 - x * x) + expansion) + .003 * x * sign,
+                               sign * .057 + x * .032, expansion > 0 ? .002 : .004);
+            };
+            quad(eye(a, false, .003), eye(a, true, .003), eye(z, true, .003), eye(z, false, .003), liner);
+            quad(eye(a, false, 0), eye(a, true, 0), eye(z, true, 0), eye(z, false, 0), white);
+        }
+        emitEnd();
+        ellipsoid(surface(.022, sign * .057, .005), b, {.003, .011, .012}, {.22f, .39f, .29f, skin.a}, 10, 5);
+        ellipsoid(surface(.022, sign * .057, .009), b, {.0015, .0075, .006}, liner, 8, 4);
+        ellipsoid(surface(.026, sign * .057 - .003, .011), b, {.001, .0035, .003}, white, 6, 4);
+        tailoredSegment(surface(.068, sign * .025), surface(.078, sign * .055), .0027, .0027, .0032, .0032, hair);
+        tailoredSegment(surface(.078, sign * .055), surface(.060, sign * .091), .0032, .0032, .0017, .0017, hair);
+    }
+    ellipsoid(at(.141, -.005), b, {.013, .040, .013}, skin, 10, 6);
+    ellipsoid(at(.150, -.033), b, {.018, .017, .020}, skin, 10, 6);
+    emitBegin(gfx::QUADS);
+    for (int i = 0; i < 12; ++i) {
+        const double a = -1 + i / 6.0, z = a + 1.0 / 6;
+        const auto lip = [&](double x, int edge) {
+            const double y = -.098 + .014 * x * x + (edge == 0 ? -.009 * (1 - x * x) : .008 * (1 - x * x));
+            return surface(y, x * .048, .004);
+        };
+        quad(lip(a, 0), lip(a, 1), lip(z, 1), lip(z, 0), {.77f, .035f, .09f, skin.a});
+        if (i >= 2 && i < 10)
+            quad(surface(-.095 + .009 * a * a, a * .048, .005),
+                 surface(-.090 + .006 * a * a, a * .048, .005),
+                 surface(-.090 + .006 * z * z, z * .048, .005),
+                 surface(-.095 + .009 * z * z, z * .048, .005), white);
+    }
+    emitEnd();
+}
+
+void heroHair(const OriginalSkeleton &s, const Frame &motion, Color hair) {
+    const auto mesh = visual::heroHairMesh(s, motion);
+    const Vec3 headUp = (s[OriginalJoint::Head] - s[OriginalJoint::ShoulderCenter]).normalized();
+    const auto normal = [&](size_t r, size_t c) {
+        if (r == 0) return headUp;
+        const Vec3 across = mesh[r][std::min(c + 1, visual::heroHairColumns)] - mesh[r][c ? c - 1 : 0];
+        const Vec3 down = mesh[std::min(r + 1, visual::heroHairRows - 1)][c] - mesh[r - 1][c];
+        const Vec3 n = cross(across, down);
+        return n.length() > 1e-8 ? n.normalized() : headUp * -1;
+    };
+    visual::HeroHairMesh normals{};
+    if (!contactPass)
+        for (size_t r = 0; r < visual::heroHairRows; ++r)
+            for (size_t c = 0; c <= visual::heroHairColumns; ++c)
+                normals[r][c] = normal(r, c);
+    material(Finish::Fabric);
+    color(hair);
+    emitBegin(gfx::QUADS);
+    for (size_t r = 0; r + 1 < visual::heroHairRows; ++r)
+        for (size_t c = 0; c < visual::heroHairColumns; ++c)
+            for (const auto index : {std::pair{r, c}, {r, c + 1}, {r + 1, c + 1}, {r + 1, c}}) {
+                const auto n = normals[index.first][index.second];
+                emitNormal(n.x, n.y, n.z);
+                vertex(mesh[index.first][index.second]);
+            }
+    emitEnd();
+}
+
+void heroCloth(const OriginalSkeleton &s, const Frame &motion, Color red, Color gold, Color hair) {
+    using J = OriginalJoint;
+    const Vec3 hip = s[J::HipCenter], shoulder = s[J::ShoulderCenter];
+    const Basis torso = segmentBasis(shoulder - hip);
+    const Vec3 knees = (s[J::Knee1] + s[J::Knee2]) * .5;
+    material(Finish::Metal);
+    // A short opaque pleated skirt follows the original thighs in every pose.
+    const auto skirt = [&](double t, double angle) {
+        const double pleat = 1 + .065 * t * std::cos(angle * 12);
+        const double flutter = .010 * t * t * std::sin(double(motion.elapsed) * 6 - t * 7 + angle * 3);
+        return hip + (knees - hip) * (.72 * t) + torso.up * (.012 * (1 - t)) +
+               torso.side * ((.153 + .115 * t) * pleat * std::sin(angle)) +
+               torso.forward * ((.115 + .075 * t + flutter) * pleat * std::cos(angle));
+    };
+    emitBegin(gfx::QUADS);
+    for (int r = 0; r < 6; ++r)
+        for (int i = 0; i < 36; ++i) {
+            const double a = i * PI / 18, z = a + PI / 18, t = r / 6.0, u = (r + 1) / 6.0;
+            quad(skirt(t, a), skirt(t, z), skirt(u, z), skirt(u, a),
+                 shade(red, i % 3 == 0 ? 1.1 : i % 3 == 2 ? .78 : 1));
+        }
+    // Close the hem with an inset red lining; no exposed pelvis under the skirt.
+    const Vec3 center = hip + (knees - hip) * .72;
+    for (int i = 0; i < 36; ++i)
+        quad(center, skirt(1, i * PI / 18), skirt(1, (i + 1) * PI / 18), center, shade(red, .68));
+    emitEnd();
+    material(Finish::Fabric);
+    // Double-sided winding gives the cape a lit scarlet outside and darker lining.
+    emitBegin(gfx::QUADS);
+    constexpr int rows = 16, columns = 14;
+    for (int r = 0; r < rows; ++r)
+        for (int i = 0; i < columns; ++i) {
+            const double t = r / double(rows), u = (r + 1) / double(rows);
+            const double a = -1 + i * 2.0 / columns, z = a + 2.0 / columns;
+            const Vec3 p = visual::heroCapePoint(s, motion, t, a), q = visual::heroCapePoint(s, motion, t, z),
+                       v = visual::heroCapePoint(s, motion, u, z), w = visual::heroCapePoint(s, motion, u, a);
+            quad(p, q, v, w, shade(red, .92 + .10 * std::cos(a * 5 * PI)));
+            quad(q, p, w, v, shade(red, .72));
+        }
+    emitEnd();
+    heroHair(s, motion, hair);
+    // Small gold clasps pin the cape to the blue shoulders.
+    material(Finish::Metal);
+    for (double side : {-1., 1.})
+        ellipsoid(shoulder - torso.up * .025 - torso.forward * .105 + torso.side * (side * .175),
+                  torso, {.021, .020, .022}, gold, 8, 4);
+}
+
 enum class GeometryPart { All, BeforeCloth, Cloth, AfterCloth };
 void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance,
                          const Frame &motion = {}, GeometryPart part = GeometryPart::All) {
@@ -1203,17 +1444,22 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
         return c;
     };
     const bool president = appearance == JumperAppearance::President, actor = appearance == JumperAppearance::Actor,
-               cartoon = appearance == JumperAppearance::Cartoon;
-    const Color suit = tint(cartoon ? Color{.43f, .22f, .60f} : president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
+               cartoon = appearance == JumperAppearance::Cartoon, hero = appearance == JumperAppearance::Hero;
+    const Color suit = tint(hero ? Color{.025f, .18f, .79f} : cartoon ? Color{.43f, .22f, .60f} : president ? Color{.075f, .105f, .17f} : Color{.94f, .31f, .13f}),
                 dark = tint({.055f, .13f, .19f}), white = tint({.91f, .95f, .95f}),
                 visor = tint({.22f, .69f, .82f}),
-                bootShell = tint({.86f, .88f, .85f}), bootSole = tint({.065f, .075f, .085f}),
-                bootStrap = tint({.78f, .13f, .09f}), bootBuckle = tint({.62f, .66f, .68f}),
-                skin = tint(cartoon ? Color{.96f, .75f, .60f} : actor ? Color{.79f, .57f, .43f} : president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f}),
+                bootShell = tint(hero ? Color{.80f, .018f, .045f} : Color{.86f, .88f, .85f}), bootSole = tint({.065f, .075f, .085f}),
+                bootStrap = tint(hero ? Color{.95f, .70f, .25f} : Color{.78f, .13f, .09f}), bootBuckle = tint({.62f, .66f, .68f}),
+                skin = tint(hero ? Color{.91f, .68f, .49f} : cartoon ? Color{.96f, .75f, .60f} : actor ? Color{.79f, .57f, .43f} : president ? Color{.94f, .61f, .50f} : Color{.77f, .56f, .43f}),
                 actorHair = tint({.13f, .105f, .080f}), bodyHair = tint({.29f, .19f, .13f}),
+                heroHair = tint({.035f, .035f, .035f}),
                 swimwear = tint({.53f, .96f, .10f}), pink = tint({.76f, .40f, .64f}),
                 gold = tint({.90f, .66f, .24f}), goldLight = tint({1.f, .84f, .43f}), goldDark = tint({.63f, .39f, .105f});
     if (part == GeometryPart::Cloth) {
+        if (hero) {
+            heroCloth(skeleton, motion, bootShell, gold, heroHair);
+            return;
+        }
         material(Finish::Fabric);
         cartoonDress(skeleton, suit, pink, white, tint({.87f, .64f, .73f}), motion);
         cartoonLongHair(skeleton, motion, gold, goldLight, goldDark);
@@ -1225,6 +1471,7 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                     tint({.80f, .035f, .065f}), tint({.93f, .61f, .13f})}
         : actor ? SkiLivery{tint({.015f, .31f, .16f}), tint({.015f, .055f, .035f}),
                             tint({.46f, .85f, .025f}), tint({.015f, .055f, .035f})}
+        : hero ? SkiLivery{suit, tint({.025f, .045f, .16f}), bootShell, gold}
         : cartoon ? SkiLivery{tint({.27f, .035f, .48f}), tint({.095f, .015f, .19f}),
                               tint({.67f, .045f, .36f}), tint({.96f, .60f, .12f})}
                   : SkiLivery{tint({.94f, .19f, .035f}), tint({.025f, .065f, .13f}),
@@ -1247,7 +1494,29 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
             // Tuck the trouser hem into the cuff instead of drawing a dark tube
             // through the entire light boot. All skeleton joints stay untouched.
             const Vec3 trouserHem = ankle + (knee - ankle).normalized() * .215;
-            if (cartoon) {
+            if (hero) {
+                material(Finish::Skin);
+                tailoredSegment(trouserHem, knee, .067, .066, .082, .081, skin);
+                tailoredSegment(knee, hip, .082, .081, .113, .109, skin);
+                ellipsoid(knee, segmentBasis(hip - ankle), {.081, .093, .080}, skin, 8, 4);
+                material(Finish::Metal);
+                tailoredSegment(shoulder, elbow, .076, .078, .058, .061, suit);
+                tailoredSegment(elbow, hand, .060, .058, .045, .047, suit);
+                ellipsoid(elbow, segmentBasis(shoulder - hand), {.058, .067, .058}, suit, 8, 4);
+                const Vec3 calf = (knee - ankle).normalized(), bootTop = ankle + (knee - ankle) * .80;
+                tailoredSegment(ankle + calf * .15, bootTop, .086, .083, .090, .088, bootShell);
+                const Basis legBasis = segmentBasis(knee - ankle);
+                emitBegin(gfx::QUADS);
+                for (int edge = 0; edge < 16; ++edge) {
+                    const auto trim = [&](int i, double band) {
+                        const double a = i * PI / 8;
+                        return bootTop + calf * (-.030 * std::max(0.0, std::cos(a)) + band) +
+                               legBasis.forward * (.091 * std::cos(a)) + legBasis.side * (.089 * std::sin(a));
+                    };
+                    quad(trim(edge, -.007), trim(edge, .013), trim(edge + 1, .013), trim(edge + 1, -.007), gold);
+                }
+                emitEnd();
+            } else if (cartoon) {
                 // The opaque skirt wraps the original leg joints; sleeves and puffs
                 // remain anchored to the unchanged shoulder/elbow/hand positions.
                 tailoredSegment(shoulder, elbow, .079, .078, .062, .064, pink);
@@ -1295,16 +1564,16 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                 ellipsoid(elbow, segmentBasis(shoulder - hand), {.083, .09, .085}, suit, 8, 4);
             }
             const Basis handBasis = segmentBasis(elbow - hand);
-            material(president || actor || cartoon ? Finish::Skin : Finish::Rubber);
-            ellipsoid(hand, handBasis, cartoon ? Vec3{.064, .090, .061} : Vec3{.077, .11, .075},
-                      president || actor || cartoon ? skin : dark, 8, 5);
+            material(president || actor || cartoon || hero ? Finish::Skin : Finish::Rubber);
+            ellipsoid(hand, handBasis, cartoon || hero ? Vec3{.064, .090, .061} : Vec3{.077, .11, .075},
+                      president || actor || cartoon || hero ? skin : dark, 8, 5);
             ellipsoid(hand + handBasis.forward * .05 + handBasis.side * (leg == 0 ? -.045 : .045), handBasis,
-                      cartoon ? Vec3{.035, .045, .030} : Vec3{.044, .057, .038},
-                      president || actor || cartoon ? skin : dark, 6, 4);
-            if (!actor)
+                      cartoon || hero ? Vec3{.035, .045, .030} : Vec3{.044, .057, .038},
+                      president || actor || cartoon || hero ? skin : dark, 6, 4);
+            if (!actor && !hero)
                 tailoredSegment(hand + handBasis.up * .045, hand + handBasis.up * .1, .074, .074, .075, .075,
                                 white);
-            else if (leg == 0) {
+            else if (actor && leg == 0) {
                 material(Finish::Rubber);
                 tailoredSegment(hand + handBasis.up * .055, hand + handBasis.up * .085, .070, .070, .070,
                                 .070, actorHair);
@@ -1320,7 +1589,11 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                head = point(OriginalJoint::Head);
     material(Finish::Fabric);
     const Basis torso = segmentBasis(shoulder - hip);
-    if (cartoon) {
+    if (hero) {
+        heroBodice(skeleton, suit, bootShell, gold);
+        if (part != GeometryPart::AfterCloth)
+            heroCloth(skeleton, motion, bootShell, gold, heroHair);
+    } else if (cartoon) {
         if (part != GeometryPart::AfterCloth) {
             cartoonDress(skeleton, suit, pink, white, tint({.87f, .64f, .73f}), motion);
             cartoonLongHair(skeleton, motion, gold, goldLight, goldDark);
@@ -1331,14 +1604,17 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
         presidentTorso(hip, shoulder, torso, suit, white, tint({.12f, .155f, .23f}), tint({.80f, .045f, .065f}));
     else
         tailoredSegment(hip, shoulder, .135, .17, .15, .235, suit, true, white);
-    if (!actor && !cartoon)
+    if (!actor && !cartoon && !hero)
         tailoredSegment(hip + torso.up * .008, hip + torso.up * .052, .143, .182, .144, .184, dark);
-    material(actor || cartoon ? Finish::Skin : Finish::Fabric);
+    material(actor || cartoon || hero ? Finish::Skin : Finish::Fabric);
     tailoredSegment(shoulder, head - (head - shoulder).normalized() * .09,
-                    cartoon ? .057 : .075, cartoon ? .057 : .078, cartoon ? .060 : .075, cartoon ? .060 : .078,
-                    actor || cartoon ? skin : president ? white : dark);
+                    cartoon || hero ? .057 : .075, cartoon || hero ? .057 : .078,
+                    cartoon || hero ? .060 : .075, cartoon || hero ? .060 : .078,
+                    actor || cartoon || hero ? skin : president ? white : dark);
     const Basis headBasis = segmentBasis(head - shoulder);
-    if (cartoon)
+    if (hero)
+        heroHead(head, headBasis, skin, white, heroHair);
+    else if (cartoon)
         cartoonHead(head, headBasis, skin, gold, goldLight, goldDark, white);
     else if (actor)
         actorHead(head, headBasis, skin, actorHair, tint({.76f, .68f, .49f}), tint({.20f, .12f, .065f}), white);
@@ -1428,11 +1704,11 @@ void Renderer::jumperPreviewGeometry(JumperAppearance appearance) {
         drawAthleteGeometry(standing, false, appearance, motion, part);
         gfx::endList();
     };
-    const bool cartoon = appearance == JumperAppearance::Cartoon;
-    replayOrBuild(previewMeshes[size_t(appearance)], cartoon ? GeometryPart::BeforeCloth : GeometryPart::All);
-    if (cartoon) {
+    const bool cartoon = appearance == JumperAppearance::Cartoon, hero = appearance == JumperAppearance::Hero;
+    replayOrBuild(previewMeshes[size_t(appearance)], cartoon || hero ? GeometryPart::BeforeCloth : GeometryPart::All);
+    if (cartoon || hero) {
         drawAthleteGeometry(standing, false, appearance, motion, GeometryPart::Cloth);
-        replayOrBuild(cartoonPreviewHead, GeometryPart::AfterCloth);
+        replayOrBuild(hero ? heroPreviewHead : cartoonPreviewHead, GeometryPart::AfterCloth);
     }
 }
 

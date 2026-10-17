@@ -10,6 +10,7 @@
 #include "visual_contact_shadow.h"
 #include "visual_mountains.h"
 #include "visual_cartoon_hair.h"
+#include "visual_hero_cloth.h"
 #include "visual_ski_spray.h"
 #include <algorithm>
 #include <array>
@@ -127,6 +128,74 @@ void cartoonHairMotion() {
                 "Hair animation produces non-finite geometry");
         require((sought[i] - flying[i]).length() == 0, "Pause/replay seeking changes identical recorded hair poses");
     }
+}
+void heroClothMotion() {
+    using namespace sjp;
+    OriginalPose pose;
+    pose.reset(0);
+    pose.selectMode(7, 0);
+    for (int i = 0; i < 280; ++i) pose.advance(ORIGINAL_TICK);
+    std::array<float, 22> values{};
+    std::copy(pose.angles.begin(), pose.angles.end(), values.begin());
+    std::copy(pose.offsets.begin(), pose.offsets.end(), values.begin() + 18);
+    const auto skeleton = originalSkeleton(values, 0);
+    Frame still, flight;
+    flight.vx = 25;
+    flight.vy = -6;
+    flight.windSpeed = 3;
+    flight.elapsed = 2;
+    const auto resting = visual::heroHairMesh(skeleton, still);
+    const auto flying = visual::heroHairMesh(skeleton, flight);
+    const Vec3 head = skeleton[OriginalJoint::Head];
+    const Vec3 headUp = (head - skeleton[OriginalJoint::ShoulderCenter]).normalized();
+    const Vec3 forward = visual::heroForward(headUp);
+    for (size_t r = 0; r < visual::heroHairFixedRows; ++r)
+        for (size_t c = 0; c <= visual::heroHairColumns; ++c)
+            require((resting[r][c] - flying[r][c]).length() == 0,
+                    "Wind lifts the scalp/nape hair away from the head");
+    for (size_t r : {3u, 4u, 5u, 6u})
+        require(dot(flying[r][visual::heroHairColumns / 2] - head, forward) < -.10,
+                "Hero hair leaves the back of the head or nape uncovered");
+    require(dot(flying[6][visual::heroHairColumns / 2] - head, headUp) < -.20,
+            "Fixed hair does not extend down to the nape");
+    const Vec3 tip = flying.back().front();
+    require((tip - head).length() < .9 && tip.x < head.x - .3,
+            "Hero hair does not stream behind the head within its length budget");
+    for (const auto &p : flying.front())
+        require((p - flying.front().front()).length() == 0, "Hair crown has an open seam");
+    for (const auto &p : flying.back())
+        require((p - tip).length() < 1e-12, "Hair tip has an open seam");
+    const auto capeRoot = visual::heroCapePoint(skeleton, still, 0, .5);
+    const auto cape = visual::heroCapePoint(skeleton, flight, 1, .5);
+    require((capeRoot - visual::heroCapePoint(skeleton, flight, 0, .5)).length() == 0,
+            "Hero cape detaches from shoulders");
+    require(cape.x < capeRoot.x - .7 && (cape - capeRoot).length() < 1.5,
+            "Hero cape does not stream backwards within its length budget");
+    auto changed = flight;
+    changed.elapsed += .23f;
+    require((visual::heroHairMesh(skeleton, changed).back().front() - tip).length() > .005 &&
+                (visual::heroCapePoint(skeleton, changed, 1, .5) - cape).length() > .005,
+            "Hero hair/cape do not flutter with recorded time");
+    changed = flight;
+    changed.windSpeed = 8;
+    require((visual::heroHairMesh(skeleton, changed).back().front() - tip).length() > .005 &&
+                (visual::heroCapePoint(skeleton, changed, 1, .5) - cape).length() > .005,
+            "Hero hair/cape ignore recorded wind");
+    const auto sought = visual::heroHairMesh(skeleton, flight);
+    for (size_t r = 0; r < flying.size(); ++r)
+        for (size_t c = 0; c < flying[r].size(); ++c) {
+            const auto p = flying[r][c];
+            require(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z) &&
+                        (p - sought[r][c]).length() == 0,
+                    "Hero replay hair is nonfinite or nondeterministic");
+        }
+    for (double t : {0., .25, .5, .75, 1.})
+        for (double side : {-1., -.5, 0., .5, 1.}) {
+            const auto a = visual::heroCapePoint(skeleton, flight, t, side);
+            const auto b = visual::heroCapePoint(skeleton, flight, t, side);
+            require(std::isfinite(a.x) && std::isfinite(a.y) && std::isfinite(a.z) && (a - b).length() == 0,
+                    "Hero replay cape is nonfinite or nondeterministic");
+        }
 }
 void contactShadowDecals() {
     using namespace sjp;
@@ -1702,6 +1771,7 @@ int main() {
             sjp::Simulation sim(2, 0);
             const auto original = sim.frame();
             audit::cartoonHairMotion();
+            audit::heroClothMotion();
             for (auto appearance : sjp::JUMPER_APPEARANCES) {
                 r.setJumperAppearance(appearance);
                 r.begin(sim.hill(), original, 0, 0, false, true, &original);

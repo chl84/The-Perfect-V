@@ -457,6 +457,8 @@ Renderer::~Renderer() {
             gfx::deleteLists(mesh, 1);
     if (cartoonPreviewHead)
         gfx::deleteLists(cartoonPreviewHead, 1);
+    if (heroPreviewHead)
+        gfx::deleteLists(heroPreviewHead, 1);
     for (auto l : landscapes)
         if (l)
             sjp::gfx::deleteLists(l, 1);

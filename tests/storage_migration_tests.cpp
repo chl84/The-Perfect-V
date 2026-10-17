@@ -314,7 +314,7 @@ int main() {
         write(replayPath, withoutJumper);
         require(loadReplay(replayPath.string(), loaded) && loaded.jumper == JumperAppearance::Pro,
                 "A replay without character metadata must default to Pro");
-        for (const auto *metadata : {"JUMPER 1 -1\n", "JUMPER 1 4\n", "JUMPER 2 0\n", "JUMPER 1\n",
+        for (const auto *metadata : {"JUMPER 1 -1\n", "JUMPER 1 99\n", "JUMPER 2 0\n", "JUMPER 1\n",
                                      "JUMPER 1 2\nJUMPER 1 3\n", "UNKNOWN 1 0\n"}) {
             loaded.jumper = JumperAppearance::President;
             write(replayPath, withoutJumper + metadata);
