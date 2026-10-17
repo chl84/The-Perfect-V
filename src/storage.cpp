@@ -84,7 +84,7 @@ bool updateHillRecord(Records &records, int hill, const Result &result, bool hum
 }
 bool saveRecords(const std::string &path, const Records &r) {
     if (!environment::valid(r.environment) || !validJumperAppearance(r.jumper) ||
-        !validMsaaSamples(r.graphics.msaaSamples))
+        !validMsaaSamples(r.graphics.msaaSamples) || !validResolution(r.graphics.resolution))
         return false;
     for (size_t i = 0; i < r.best.size(); i++)
         if (hills()[i].id.empty() || !std::isfinite(r.best[i]) || r.best[i] < 0 || r.best[i] > 1000)
@@ -99,8 +99,8 @@ bool saveRecords(const std::string &path, const Records &r) {
     out << r.camera << ' ' << r.sound << ' ' << r.sensitivity << '\n';
     out << "ENV 1 " << int(r.environment.time) << ' ' << int(r.environment.weather) << '\n';
     out << "JUMPER 1 " << int(r.jumper) << '\n';
-    out << "GRAPHICS 4 " << r.graphics.fullscreen << ' ' << r.graphics.msaaSamples << ' '
-        << r.graphics.vsync << '\n';
+    out << "GRAPHICS 5 " << r.graphics.fullscreen << ' ' << r.graphics.msaaSamples << ' '
+        << r.graphics.vsync << ' ' << r.graphics.resolution.width << ' ' << r.graphics.resolution.height << '\n';
     return replaceFile(path, out);
 }
 Records loadRecords(const std::string &path) {
@@ -170,11 +170,14 @@ Records loadRecords(const std::string &path) {
                 samples = samples ? 4 : 0;
             }
             int vsync = 1;
-            if (version == 4 && !(in >> vsync))
+            if ((version == 4 || version == 5) && !(in >> vsync))
                 break;
-            if (version >= 1 && version <= 4 && fullscreen >= 0 && fullscreen <= 1 &&
-                validMsaaSamples(samples) && vsync >= 0 && vsync <= 1)
-                r.graphics = {fullscreen == 1, samples, vsync == 1};
+            Resolution resolution;
+            if (version == 5 && !(in >> resolution.width >> resolution.height))
+                break;
+            if (version >= 1 && version <= 5 && fullscreen >= 0 && fullscreen <= 1 &&
+                validMsaaSamples(samples) && vsync >= 0 && vsync <= 1 && validResolution(resolution))
+                r.graphics = {fullscreen == 1, samples, vsync == 1, resolution};
         } else if (tag == "JUMPER") {
             int value;
             if (!(in >> version >> value))

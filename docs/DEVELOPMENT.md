@@ -578,18 +578,21 @@ Environment. Controls includes mouse sensitivity and the existing bindings;
 Gameplay contains camera, practice wind and ghost; Environment contains time
 and weather. Each category returns to Settings through Back or Escape.
 
-Settings → Graphics provides Fullscreen, Antialiasing (off/2×/4×/8× MSAA), and
+Settings → Graphics provides Fullscreen, Resolution, Antialiasing (off/2×/4×/8× MSAA), and
 VSync (on/off) on one page. VSync defaults to on and follows the display, without
 a separate FPS cap. Off requests immediate presentation; unsupported immediate
 presentation falls back to VSync and the UI shows the supported mode.
-Preferences are saved in an optional `GRAPHICS 4` records tag;
-older saves retain their records and display preferences, including saves from
+Preferences are saved in an optional `GRAPHICS 5` records tag;
+resolution defaults to Auto (desktop fullscreen or a window fitted to the desktop).
+Supported common resolutions up to 3840×2160 and the native desktop mode are offered;
+unavailable saved modes fall back to Auto. Manual window sizes account for pixel density.
+Older saves retain their records and display preferences, including saves from
 the former manual frame-rate menu. Graphics changes apply between submissions.
 Both GPU frame slots finish before sample-count-specific attachments and
 pipelines are replaced; cached scenery and textures remain available.
 Only levels supported by both color and depth targets are offered. Saved levels
 unsupported on another GPU fall back to the nearest lower supported level.
-The default is 4× when available. F11 uses and saves the same fullscreen
+The default is 4× when available. F uses and saves the same fullscreen
 setting.
 
 Camera smoothing uses elapsed presentation

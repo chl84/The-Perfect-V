@@ -89,7 +89,7 @@ Release the start button during the inrun. Time the takeoff near the end of the
 ramp, then release both buttons before preparing your landing.
 
 **Shortcuts:** C changes camera, G toggles the ghost during a jump, M toggles sound,
-F11 toggles fullscreen, and R opens the replay from the menu or results.
+F toggles fullscreen, and R opens the replay from the menu or results.
 
 ## Choose your jumper
 

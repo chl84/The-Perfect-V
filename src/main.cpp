@@ -80,6 +80,7 @@ enum class Action {
     Gameplay,
     Environment,
     Fullscreen,
+    Resolution,
     Antialiasing,
     Vsync,
     Records,
@@ -249,6 +250,7 @@ class App {
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_WARP_MOTION, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SYSTEM_SCALE, "0");
         SDL_SetHint(SDL_HINT_MOUSE_RELATIVE_SPEED_SCALE, "1");
+        SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_MODE_SCALING, "aspect");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
             throw std::runtime_error(SDL_GetError());
         window = SDL_CreateWindow("The Perfect V", smoke ? 1920 : 1440, smoke ? 1080 : 900,
@@ -301,10 +303,12 @@ class App {
                               : std::filesystem::exists(oldProfileRecords) ? oldProfileRecords
                                                                            : dataDir + "/records.dat");
         camera = records.camera;
-        if (!smoke && records.graphics.fullscreen) {
-            fullscreen = SDL_SetWindowFullscreen(window, true);
-            if (!fullscreen)
+        if (!smoke && !applyDisplay()) {
+            records.graphics.resolution = {};
+            if (!applyDisplay()) {
                 records.graphics.fullscreen = false;
+                applyDisplay();
+            }
         }
         renderer = std::make_unique<Renderer>(window, assets, noMsaa ? 0 : records.graphics.msaaSamples,
                                               !smoke && records.graphics.vsync, gpuValidation);
@@ -795,6 +799,79 @@ class App {
         records.graphics.vsync = gfx::vsyncEnabled();
         savePreferences();
     }
+    std::vector<sjp::Resolution> displayResolutions() const {
+        const auto display = SDL_GetDisplayForWindow(window);
+        const auto *desktop = SDL_GetDesktopDisplayMode(display);
+        if (!desktop)
+            return {{}};
+        int count = 0;
+        auto **modes = SDL_GetFullscreenDisplayModes(display, &count);
+        std::vector<sjp::Resolution> sizes;
+        for (int i = 0; modes && i < count; ++i)
+            sizes.push_back({modes[i]->w, modes[i]->h});
+        SDL_free(modes);
+        return resolutionChoices({desktop->w, desktop->h}, sizes);
+    }
+    bool applyDisplay() {
+        const auto choice = records.graphics.resolution;
+        const auto display = SDL_GetDisplayForWindow(window);
+        const auto *desktop = SDL_GetDesktopDisplayMode(display);
+        SDL_DisplayMode mode{};
+        const SDL_DisplayMode *selected = nullptr;
+        if (!(choice == sjp::Resolution{})) {
+            const auto choices = displayResolutions();
+            if (std::find(choices.begin(), choices.end(), choice) == choices.end())
+                return false;
+            if (!desktop || choice.width != desktop->w || choice.height != desktop->h) {
+                if (!SDL_GetClosestFullscreenDisplayMode(display, choice.width, choice.height, 0, true, &mode) ||
+                    mode.w != choice.width || mode.h != choice.height)
+                    return false;
+                selected = &mode;
+            }
+        }
+        if (renderer)
+            gfx::finish();
+        if (!SDL_SetWindowFullscreenMode(window, selected) ||
+            !SDL_SetWindowFullscreen(window, records.graphics.fullscreen))
+            return false;
+        SDL_SyncWindow(window);
+        fullscreen = bool(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN);
+        if (fullscreen != records.graphics.fullscreen)
+            return false;
+        if (!fullscreen) {
+            const float density = std::max(1.f, SDL_GetWindowPixelDensity(window));
+            SDL_SetWindowMinimumSize(window, int(std::ceil(960 / density)), int(std::ceil(540 / density)));
+            if (choice == sjp::Resolution{}) {
+                if (!SDL_MaximizeWindow(window)) {
+                    SDL_Rect bounds{};
+                    if (SDL_GetDisplayUsableBounds(display, &bounds))
+                        SDL_SetWindowSize(window, bounds.w, bounds.h);
+                }
+            } else {
+                SDL_RestoreWindow(window);
+                SDL_SyncWindow(window);
+                if (!SDL_SetWindowSize(window, int(std::lround(choice.width / density)),
+                                       int(std::lround(choice.height / density))))
+                    return false;
+            }
+            SDL_SyncWindow(window);
+        }
+        return true;
+    }
+    void changeDisplay(GraphicsSettings requested) {
+        const auto previous = records.graphics;
+        records.graphics = requested;
+        if (!applyDisplay()) {
+            records.graphics = previous;
+            if (!applyDisplay()) {
+                records.graphics.resolution = {};
+                records.graphics.fullscreen = false;
+                applyDisplay();
+            }
+            message = "Could not change display mode.";
+        }
+        savePreferences();
+    }
     void action(Action a, int value = 0) {
         if (editingName != -1) {
             finishNameEdit(true);
@@ -851,15 +928,21 @@ class App {
         case Action::Environment:
             changeScreen(Screen::Environment);
             break;
-        case Action::Fullscreen:
-            if (SDL_SetWindowFullscreen(window, !fullscreen)) {
-                fullscreen = !fullscreen;
-                records.graphics.fullscreen = fullscreen;
-                savePreferences();
-            } else {
-                message = "Could not change fullscreen mode.";
-            }
+        case Action::Fullscreen: {
+            auto requested = records.graphics;
+            requested.fullscreen = !fullscreen;
+            changeDisplay(requested);
             break;
+        }
+        case Action::Resolution: {
+            const auto choices = displayResolutions();
+            const auto current = std::find(choices.begin(), choices.end(), records.graphics.resolution);
+            const auto index = current == choices.end() ? 0 : (size_t(current - choices.begin()) + 1) % choices.size();
+            auto requested = records.graphics;
+            requested.resolution = choices[index];
+            changeDisplay(requested);
+            break;
+        }
         case Action::Antialiasing: {
             constexpr std::array<int, 4> levels{{0, 2, 4, 8}};
             const auto current = std::find(levels.begin(), levels.end(), gfx::sampleCount());
@@ -1221,7 +1304,7 @@ class App {
             }
             if (e.type == SDL_EVENT_KEY_DOWN && !e.key.repeat) {
                 auto key = e.key.key;
-                if (key == SDLK_F11) {
+                if (key == SDLK_F) {
                     action(Action::Fullscreen);
                 }
                 if (key == SDLK_M)
@@ -1469,7 +1552,7 @@ class App {
             r.text(controls[i].key, 1070, y + 17, 16, colors::white);
         }
         const Control shortcuts[] = {{"Pause", "", "Esc"}, {"Camera", "", "C"},       {"Ghost", "", "G"},
-                                     {"Sound", "", "M"},   {"Fullscreen", "", "F11"}, {"Replay", "", "R"}};
+                                     {"Sound", "", "M"},   {"Fullscreen", "", "F"}, {"Replay", "", "R"}};
         for (int i = 0; i < 6; ++i) {
             const float x = 86 + (i % 3) * 436, y = 658 + (i / 3) * 59;
             r.text(shortcuts[i].action, x, y, 15, colors::muted);
@@ -1530,8 +1613,11 @@ class App {
             std::string value;
             Action action;
         };
-        const std::array<Setting, 3> rows{{
+        const auto resolution = records.graphics.resolution;
+        const std::array<Setting, 4> rows{{
             {"Fullscreen", fullscreen ? "On" : "Off", Action::Fullscreen},
+            {"Resolution", resolution == sjp::Resolution{} ? "Auto" :
+                std::to_string(resolution.width) + " x " + std::to_string(resolution.height), Action::Resolution},
             {"Antialiasing", gfx::sampleCount() ? std::to_string(gfx::sampleCount()) + "x MSAA" : "Off", Action::Antialiasing},
             {"VSync", gfx::vsyncEnabled() ? "On" : "Off", Action::Vsync}}};
         for (size_t i = 0; i < rows.size(); ++i)
@@ -2170,6 +2256,48 @@ class App {
         render();
         if (!captureDir.empty())
             renderer->capture(captureDir + "/graphics.ppm");
+        renderer->finish();
+        int originalWidth = 0, originalHeight = 0;
+        SDL_GetWindowSize(window, &originalWidth, &originalHeight);
+        const auto resolutions = displayResolutions();
+        for (size_t i = 0; i < resolutions.size(); ++i) {
+            clickButton(Action::Resolution);
+            render();
+            renderer->finish();
+            const auto persisted = loadRecords(dataDir + "/records-dsj2.dat").graphics;
+            if (!(persisted.resolution == records.graphics.resolution) ||
+                !(persisted.resolution == resolutions[(i + 1) % resolutions.size()]) ||
+                persisted.vsync != savedGraphics.vsync || persisted.msaaSamples != savedGraphics.msaaSamples)
+                throw std::runtime_error("Resolution must cycle supported modes and persist without changing other settings");
+            if (!(persisted.resolution == sjp::Resolution{})) {
+                int width = 0, height = 0;
+                SDL_GetWindowSizeInPixels(window, &width, &height);
+                if (width != persisted.resolution.width || height != persisted.resolution.height)
+                    throw std::runtime_error("Selected resolution did not resize the drawable");
+                if (!captureDir.empty())
+                    renderer->capture(captureDir + "/graphics-resolution.ppm");
+                if (!smokeMouseCapture) {
+                    for (bool expectedFullscreen : {true, false}) {
+                        SDL_Event fullscreenKey{};
+                        fullscreenKey.type = SDL_EVENT_KEY_DOWN;
+                        fullscreenKey.key.key = SDLK_F;
+                        SDL_PushEvent(&fullscreenKey);
+                        events();
+                        render();
+                        renderer->finish();
+                        const auto saved = loadRecords(dataDir + "/records-dsj2.dat").graphics;
+                        if (fullscreen != expectedFullscreen || saved.fullscreen != expectedFullscreen ||
+                            !(saved.resolution == persisted.resolution))
+                            throw std::runtime_error("Fullscreen must preserve the selected resolution and persist");
+                    }
+                }
+            }
+        }
+        SDL_RestoreWindow(window);
+        SDL_SyncWindow(window);
+        SDL_SetWindowSize(window, originalWidth, originalHeight);
+        SDL_SyncWindow(window);
+        render();
         renderer->finish();
         const int previousSamples = gfx::sampleCount();
         int availableLevels = 0;

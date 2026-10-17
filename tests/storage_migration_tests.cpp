@@ -152,13 +152,26 @@ int main() {
                     loadRecords(oldPath.string()).graphics.msaaSamples == 4 &&
                     loadRecords(oldPath.string()).graphics.vsync,
                 "Old saves must default to windowed mode and antialiasing");
+        const std::vector<Resolution> modes{{1280,720}, {1920,1080}, {3840,2160}, {3840,2160}};
+        require(resolutionChoices({3840,2160}, modes) ==
+                    std::vector<Resolution>{{}, {1280,720}, {1920,1080}, {3840,2160}},
+                "4K choices must include supported presets without duplicates");
+        require(resolutionChoices({1920,1080}, modes) ==
+                    std::vector<Resolution>{{}, {1280,720}, {1920,1080}},
+                "Choices must not exceed the desktop resolution");
+        require(resolutionChoices({3440,1440}, {}) == std::vector<Resolution>{{}, {3440,1440}} &&
+                    resolutionChoices({}, modes) == std::vector<Resolution>{{}},
+                "Native nonstandard modes and unavailable displays must remain usable");
+        for (Resolution resolution : {Resolution{}, Resolution{1280,720}, Resolution{1920,1080},
+                                      Resolution{2560,1440}, Resolution{3840,2160}})
         for (bool vsync : {true, false}) {
             for (int samples : {0, 2, 4, 8}) {
-                graphicsRecords.graphics = {true, samples, vsync};
+                graphicsRecords.graphics = {true, samples, vsync, resolution};
                 require(saveRecords(newPath.string(), graphicsRecords), "Save graphics preferences");
                 const auto restoredGraphics = loadRecords(newPath.string());
                 require(restoredGraphics.graphics.fullscreen && restoredGraphics.graphics.msaaSamples == samples &&
-                            restoredGraphics.graphics.vsync == vsync && restoredGraphics.best == graphicsRecords.best &&
+                            restoredGraphics.graphics.vsync == vsync && restoredGraphics.graphics.resolution == resolution &&
+                            restoredGraphics.best == graphicsRecords.best &&
                             restoredGraphics.jumper == graphicsRecords.jumper,
                         "Graphics preferences failed to persist or changed personal data");
             }
@@ -171,6 +184,16 @@ int main() {
                         restored.graphics.vsync && restored.best == graphicsRecords.best,
                     "Existing MSAA preferences must default to VSync on and retain records");
         }
+        write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) + "GRAPHICS 4 1 2 0\n");
+        const auto oldGraphics = loadRecords(newPath.string());
+        require(oldGraphics.graphics.resolution == Resolution{} && oldGraphics.graphics.fullscreen &&
+                    oldGraphics.graphics.msaaSamples == 2 && !oldGraphics.graphics.vsync &&
+                    oldGraphics.best == graphicsRecords.best, "Version 4 must migrate to Auto without data loss");
+        const auto beforeInvalid = contents(newPath);
+        graphicsRecords.graphics.resolution = {0,1080};
+        require(!saveRecords(newPath.string(), graphicsRecords) && contents(newPath) == beforeInvalid,
+                "Invalid resolution must not overwrite records");
+        graphicsRecords.graphics.resolution = {};
         graphicsRecords.graphics.msaaSamples = 3;
         require(!saveRecords(newPath.string(), graphicsRecords), "Invalid MSAA level was saved");
         for (int enabled : {0, 1}) {
@@ -193,7 +216,9 @@ int main() {
                                 "GRAPHICS 99 0 0 0 0 30\n", "GRAPHICS 1 0\n",
                                 "GRAPHICS 2 2 0\n", "GRAPHICS 2 0\n", "GRAPHICS 3 0 3\n",
                                 "GRAPHICS 3 0 16\n", "GRAPHICS 3 0 -2\n",
-                                "GRAPHICS 4 0 4 2\n", "GRAPHICS 4 0 4 -1\n", "GRAPHICS 4 0 4\n"}) {
+                                "GRAPHICS 4 0 4 2\n", "GRAPHICS 4 0 4 -1\n", "GRAPHICS 4 0 4\n",
+                                "GRAPHICS 5 0 4 1 0 1080\n", "GRAPHICS 5 0 4 1 -1920 1080\n",
+                                "GRAPHICS 5 0 4 1 99999 1080\n", "GRAPHICS 5 0 4 1 1920\n"}) {
             write(newPath, appearanceFile.substr(0, appearanceFile.find("GRAPHICS ")) + tag);
             const auto restored = loadRecords(newPath.string());
             require(restored.best == appearanceRecords.best &&
