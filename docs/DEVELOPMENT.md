@@ -597,6 +597,10 @@ Older saves retain their records and display preferences, including saves from
 the former manual frame-rate menu. Graphics changes apply between submissions.
 Both GPU frame slots finish before sample-count-specific attachments and
 pipelines are replaced; cached scenery and textures remain available.
+The fixed sky, scenery, shadow, overlay and transparent-effect pipeline states
+are compiled during renderer setup and again when MSAA changes. Takeoff powder
+and air streaks therefore reuse a ready pipeline on their first flight frame,
+including with an empty driver shader cache. Other states retain lazy creation.
 Only levels supported by both color and depth targets are offered. Saved levels
 unsupported on another GPU fall back to the nearest lower supported level.
 The default is 4× when available. F uses and saves the same fullscreen

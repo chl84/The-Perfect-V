@@ -22,6 +22,7 @@ struct Resource {
     virtual ~Resource() = default;
 };
 int resources = 0, waits = 0, submits = 0, draws = 0, uploads = 0, blits = 0, acquisitions = 0;
+int pipelineCreations = 0;
 bool available = true;
 bool immediateAvailable = true, multisampleAvailable = true;
 int maxColorSamples = 8, maxDepthSamples = 8;
@@ -154,6 +155,7 @@ SDL_GPUSampler *SDLCALL SDL_CreateGPUSampler(SDL_GPUDevice *, const SDL_GPUSampl
 }
 SDL_GPUGraphicsPipeline *SDLCALL
 SDL_CreateGPUGraphicsPipeline(SDL_GPUDevice *, const SDL_GPUGraphicsPipelineCreateInfo *info) {
+    ++audit::pipelineCreations;
     auto *p = audit::make<SDL_GPUGraphicsPipeline>();
     p->blend = info->target_info.color_target_descriptions[0].blend_state.enable_blend;
     p->samples = info->multisample_state.sample_count;
@@ -310,6 +312,21 @@ void triangle(float alpha = 1) {
     vertex3d(0, .5, 0);
     end();
 }
+void preparedFlightEffects() {
+    using namespace sjp::gfx;
+    const int before = audit::pipelineCreations;
+    beginFrame(640, 480);
+    pushAttrib(ENABLE_BIT | DEPTH_BUFFER_BIT | CURRENT_BIT | COLOR_BUFFER_BIT);
+    enable(DEPTH_TEST);
+    enable(BLEND);
+    disable(CULL_FACE);
+    depthMask(false);
+    triangle(.4f);
+    popAttrib();
+    renderOffscreen();
+    audit::require(audit::pipelineCreations == before,
+                   "First flight effect created a pipeline during rendering");
+}
 void cacheKeys() {
     using namespace sjp;
     Frame a, b;
@@ -416,6 +433,7 @@ int main() {
         for (int initialSamples : {0, 2, 4, 8}) {
             initialize(nullptr, initialSamples, false, false);
             audit::require(sampleCount() == initialSamples, "Initial MSAA level was ignored");
+            preparedFlightEffects();
             enable(BLEND);
             const auto baseline = audit::waits;
             for (int i = 0; i < 3; ++i) {
@@ -429,6 +447,7 @@ int main() {
             audit::require(!audit::blending.back(), "Opaque geometry retained blending");
             for (int samples : {2, 4, 8, 0, 8, 2, 0}) {
                 configureGraphics(samples, samples != 0);
+                preparedFlightEffects();
                 audit::require(sampleCount() == samples && supportsSampleCount(samples),
                                "MSAA setting did not change");
                 audit::require(vsyncEnabled() == (samples != 0) &&

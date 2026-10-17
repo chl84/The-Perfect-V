@@ -220,6 +220,7 @@ struct VulkanBackend::Impl {
         white = std::make_shared<Image>();
         white->levels.push_back({1, 1, {255, 255, 255, 255}});
         white->repeatU = white->repeatV = false;
+        prepareScenePipelines();
     }
     void waitFrame(FrameResources &f, bool reportFailure = true) {
         if (f.fence) {
@@ -355,6 +356,22 @@ struct VulkanBackend::Impl {
             fail("graphics pipeline creation");
         pipelines.emplace(state, created);
         return created;
+    }
+    void prepareScenePipelines() {
+        // Compile the scene's fixed states before the first frame. In
+        // particular, takeoff powder/air streaks must not compile a new
+        // transparent, depth-tested pipeline at the board crossing.
+        static constexpr PipelineState states[]{
+            {false, false, false, false, false, 0, 0}, // opaque sky
+            {false, false, true, false, false, 0, 0},  // mountain backdrop
+            {false, true, true, false, false, 0, 0},   // UI
+            {true, true, false, false, false, 0, 0},   // opaque scenery
+            {true, true, true, false, false, 0, 0},    // textured scenery
+            {true, false, true, false, true, -1, -1},  // shadows/decals
+            {true, false, true, false, false, 0, 0},   // snow, streaks, ghost
+        };
+        for (const auto &state : states)
+            pipeline(state);
     }
     void uploadImage(SDL_GPUCopyPass *copy, const std::shared_ptr<Image> &image,
                      std::vector<std::unique_ptr<Transfer>> &transfers) {
@@ -634,6 +651,7 @@ void VulkanBackend::configureGraphics(int msaaSamples, bool vsync) {
         }
         b.samples = samples;
         b.rendered = false;
+        b.prepareScenePipelines();
     }
 }
 const std::string &VulkanBackend::name() const { return impl->description; }
