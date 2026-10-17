@@ -151,6 +151,7 @@ void color4f(float, float, float, float) { ++drawCalls; }
 void pushAttrib(Flags) { ++drawCalls; }
 void popAttrib() { ++drawCalls; }
 void disable(Enum) { ++drawCalls; }
+void enable(Enum) { ++drawCalls; }
 void materialfv(Enum, Enum, const float *) { ++drawCalls; }
 void materialf(Enum, Enum, float) { ++drawCalls; }
 void lightfv(Enum, Enum, const float *) { ++drawCalls; }

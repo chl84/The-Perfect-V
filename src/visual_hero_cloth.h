@@ -40,7 +40,7 @@ inline Vec3 heroCapePoint(const OriginalSkeleton &s, const Frame &f, double t, d
 }
 // One connected surface: closed crown, an opening for the face, covered nape,
 // then a tapered moving curtain. Only the lengths below row 6 can move.
-inline constexpr size_t heroHairRows = 14, heroHairColumns = 20, heroHairFixedRows = 7;
+inline constexpr size_t heroHairRows = 14, heroHairColumns = 16, heroHairFixedRows = 7;
 using HeroHairMesh = std::array<std::array<Vec3, heroHairColumns + 1>, heroHairRows>;
 inline HeroHairMesh heroHairMesh(const OriginalSkeleton &s, const Frame &f) {
     using J = OriginalJoint;
@@ -72,8 +72,10 @@ inline HeroHairMesh heroHairMesh(const OriginalSkeleton &s, const Frame &f) {
             const double lateral = widths[r] * std::sin(angle);
             const Vec3 resting = head + up * heights[r] +
                                  front * (depths[r] * std::cos(angle) - backDrape) + side * lateral;
-            const Vec3 streaming = neck + air.flow * (.48 * t) - up * (.035 * t) +
-                                   side * lateral + front * (depths[r] * .6 * std::cos(angle));
+            // Keep the same clearance at speed; dropping this offset lets
+            // the black curtain cut through the red cape during flight.
+            const Vec3 streaming = neck + air.flow * (.46 * t) - up * (.035 * t) +
+                                   side * lateral + front * (depths[r] * .6 * std::cos(angle) - backDrape);
             mesh[r][c] = resting * (1 - blend) + streaming * blend + flutter;
         }
     }

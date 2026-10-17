@@ -149,6 +149,13 @@ struct FallContact {
                     edge(face[1], local);
                 face[1] = local;
             }
+        } else if (mode == sjp::gfx::TRIANGLES) {
+            face[count % 3] = local;
+            if (count % 3 == 2) {
+                edge(face[0], face[1]);
+                edge(face[1], face[2]);
+                edge(face[2], face[0]);
+            }
         } else {
             face[count % 4] = local;
             if ((mode == sjp::gfx::QUADS && count % 4 == 3) ||
@@ -161,6 +168,13 @@ struct FallContact {
     }
 };
 thread_local FallContact *contactPass = nullptr;
+// Scope applies only to cosmetic models. Pro keeps its original mesh exactly.
+thread_local bool compactAthlete = false;
+struct AthleteDetailScope {
+    bool previous = compactAthlete;
+    explicit AthleteDetailScope(JumperAppearance appearance) { compactAthlete = appearance != JumperAppearance::Pro; }
+    ~AthleteDetailScope() { compactAthlete = previous; }
+};
 enum class Finish { Fabric, Rubber, Ski, Shell, Glass, Skin, Metal };
 void material(Finish finish) {
     if (contactPass)
@@ -262,9 +276,35 @@ void orientedBox(Vec3 center, const Basis &basis, Vec3 size, Color tint) {
     emitEnd();
 }
 void ellipsoid(Vec3 center, const Basis &basis, Vec3 radii, Color tint, int slices = 10, int rings = 6) {
+    if (compactAthlete) {
+        const bool small = std::max({radii.x, radii.y, radii.z}) < .055;
+        slices = std::min(slices, small ? 6 : 10);
+        rings = std::min(rings, small ? 3 : 5);
+    }
     color(tint);
     for (int ring = 0; ring < rings; ++ring) {
         const double a = -PI * .5 + ring * PI / rings, b = a + PI / rings;
+        if (compactAthlete && (ring == 0 || ring + 1 == rings)) {
+            // One fan per pole removes zero-area triangles without changing
+            // the sphere's visible rings, silhouette or smooth normals.
+            const bool top = ring != 0;
+            emitBegin(gfx::TRIANGLE_FAN);
+            const Vec3 n = basis.up * (top ? 1 : -1);
+            emitNormal(n.x, n.y, n.z);
+            vertex(center + basis.up * (radii.y * (top ? 1 : -1)));
+            const double latitude = top ? a : b;
+            for (int slice = 0; slice <= slices; ++slice) {
+                const double angle = (top ? slices - slice : slice) * 2 * PI / slices;
+                const double x = std::cos(latitude) * std::cos(angle), y = std::sin(latitude),
+                             z = std::cos(latitude) * std::sin(angle);
+                const Vec3 normal = (basis.forward * (x / radii.x) + basis.up * (y / radii.y) +
+                                     basis.side * (z / radii.z)).normalized();
+                emitNormal(normal.x, normal.y, normal.z);
+                vertex(center + basis.forward * (x * radii.x) + basis.up * (y * radii.y) + basis.side * (z * radii.z));
+            }
+            emitEnd();
+            continue;
+        }
         emitBegin(sjp::gfx::QUAD_STRIP);
         for (int slice = 0; slice <= slices; ++slice) {
             const double angle = slice * 2 * PI / slices;
@@ -289,18 +329,22 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
     if ((b - a).length() < 1e-5)
         return;
     const Basis basis = segmentBasis(b - a);
-    constexpr std::array<double, 6> positions{0, .1, .27, .71, .89, 1};
-    constexpr std::array<double, 6> fullness{.76, 1, 1, 1, 1, .76};
+    constexpr std::array<double, 6> fullPositions{0, .1, .27, .71, .89, 1};
+    constexpr std::array<double, 4> compactPositions{0, .1, .89, 1};
+    const size_t ringCount = compactAthlete ? compactPositions.size() : fullPositions.size();
+    const int sides = compactAthlete && std::max({frontA, sideA, frontB, sideB}) < .015 ? 4 : 8;
+    const auto position = [&](size_t r) { return compactAthlete ? compactPositions[r] : fullPositions[r]; };
     auto ringPoint = [&](size_t ring, double angle) {
-        const double t = positions[ring], depth = (frontA + (frontB - frontA) * t) * fullness[ring],
-                     width = (sideA + (sideB - sideA) * t) * fullness[ring];
+        const double t = position(ring), fullness = ring == 0 || ring + 1 == ringCount ? .76 : 1;
+        const double depth = (frontA + (frontB - frontA) * t) * fullness,
+                     width = (sideA + (sideB - sideA) * t) * fullness;
         return a + (b - a) * t + basis.forward * (std::cos(angle) * depth) +
                basis.side * (std::sin(angle) * width);
     };
     emitBegin(sjp::gfx::QUADS);
-    for (size_t ring = 0; ring + 1 < positions.size(); ++ring)
-        for (int face = 0; face < 8; ++face) {
-            const double left = face * PI / 4, right = (face + 1) * PI / 4;
+    for (size_t ring = 0; ring + 1 < ringCount; ++ring)
+        for (int face = 0; face < sides; ++face) {
+            const double left = face * 2 * PI / sides, right = (face + 1) * 2 * PI / sides;
             const bool frontPanel = face == 0 || face == 7;
             Color panel = bib && frontPanel && ring >= 1 && ring <= 3
                               ? bibColor
@@ -315,8 +359,8 @@ void tailoredSegment(Vec3 a, Vec3 b, double frontA, double sideA, double frontB,
         const Vec3 normal = basis.up * (end ? 1 : -1);
         emitNormal(normal.x, normal.y, normal.z);
         vertex(end ? b : a);
-        for (int face = 0; face <= 8; ++face)
-            vertex(ringPoint(end ? positions.size() - 1 : 0, (end ? -face : face) * PI / 4));
+        for (int face = 0; face <= sides; ++face)
+            vertex(ringPoint(end ? ringCount - 1 : 0, (end ? -face : face) * 2 * PI / sides));
         emitEnd();
     }
 }
@@ -524,7 +568,7 @@ void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color 
         const double c = std::sqrt(std::max(0.0, 1 - std::pow(side / std::max(.001, section.width), 2)));
         return at(centerAt(up) + section.front * c + relief(up, side) * c * c + offset, up, side);
     };
-    constexpr int headSlices = 32;
+    constexpr int headSlices = 20;
     std::array<std::array<Vec3, headSlices>, sections.size()> points{};
     for (size_t r = 0; r < sections.size(); ++r)
         for (int i = 0; i < headSlices; ++i) {
@@ -571,8 +615,8 @@ void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color 
             return;
         const double du = -(sideB - sideA) * radius / length, ds = (upB - upA) * radius / length;
         emitBegin(gfx::QUADS);
-        for (int i = 0; i < 4; ++i) {
-            const double a = i / 4.0, b = (i + 1) / 4.0;
+        for (int i = 0; i < 1; ++i) {
+            const double a = 0, b = 1;
             const auto edge = [&](double t, double side) {
                 return face(upA + (upB - upA) * t + du * side,
                             sideA + (sideB - sideA) * t + ds * side, offset);
@@ -615,10 +659,10 @@ void presidentHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color 
     constexpr std::array<NoseSection, 9> noseSections{{
         {-.070, .012, 0}, {-.064, .033, .008}, {-.050, .044, .032}, {-.035, .035, .044},
         {-.014, .024, .037}, {.012, .020, .022}, {.034, .019, .008}, {.046, .018, .002}, {.054, .016, 0}}};
-    std::array<std::array<Vec3, 13>, noseSections.size()> nose{};
+    std::array<std::array<Vec3, 9>, noseSections.size()> nose{};
     for (size_t r = 0; r < nose.size(); ++r)
         for (size_t i = 0; i < nose[r].size(); ++i) {
-            const double t = -1 + i / 6.0;
+            const double t = -1 + i / 4.0;
             const auto &s = noseSections[r];
             nose[r][i] = face(s.up, t * s.width,
                              .001 + s.projection * std::pow(std::max(0.0, std::cos(t * PI / 2)), .75));
@@ -838,13 +882,13 @@ void actorHead(Vec3 head, const Basis &basis, Color skin, Color hair, Color gold
         }
         emitEnd();
     }
-    for (int i = 0; i < 12; ++i) {
-        const double angle = i * 2 * PI / 12, latitude = .58 + .09 * std::sin(i * 2.3);
+    for (int i = 0; i < 8; ++i) {
+        const double angle = i * 2 * PI / 8, latitude = .58 + .09 * std::sin(i * 2.3);
         ellipsoid(hairPoint(latitude, angle), basis, {.027, .030, .027},
                   shade(hair, i % 3 == 0 ? 1.13 : .96), 6, 4);
     }
-    for (int i = 0; i < 8; ++i) {
-        const double angle = i * PI / 4, latitude = 1.12 + .04 * std::sin(i * 1.9);
+    for (int i = 0; i < 4; ++i) {
+        const double angle = i * PI / 2, latitude = 1.12 + .04 * std::sin(i * 1.9);
         ellipsoid(hairPoint(latitude, angle), basis, {.029, .029, .029},
                   shade(hair, i % 2 ? .97 : 1.10), 6, 4);
     }
@@ -889,7 +933,7 @@ void actorLimbHair(Vec3 a, Vec3 b, double frontA, double sideA, double frontB, d
                basis.side * ((sideA + (sideB - sideA) * t + .0015) * std::sin(angle));
     };
     emitBegin(gfx::QUADS);
-    for (int i = 0; i < 18; ++i) {
+    for (int i = 0; i < 12; ++i) {
         const double t = .20 + (i % 6) * .115, angle = -.85 + (i / 6) * .78 + .09 * std::sin(i * 2.1);
         quad(surface(t, angle - .008), surface(t + .021, angle + .025),
              surface(t + .021, angle + .041), surface(t, angle + .008), hair);
@@ -939,10 +983,10 @@ void actorTorso(Vec3 hip, Vec3 shoulder, const Basis &basis, Color skin, Color s
     // Deterministic short ribbons suggest the reference's chest/abdominal hair.
     // They follow the same surface in live play, ghosts, falls and replay seeks.
     emitBegin(gfx::QUADS);
-    for (int i = 0; i < 450; ++i) {
+    for (int i = 0; i < 72; ++i) {
         const auto fraction = [](double v) { return v - std::floor(v); };
         const double scatter = fraction(i * .618033989);
-        const double t = i < 300 ? .08 + scatter * .84 : .38 + scatter * .54;
+        const double t = i < 48 ? .08 + scatter * .84 : .38 + scatter * .54;
         const double extent = .047 + .115 * std::sin(t * PI);
         const double side = extent * (-.94 + 1.88 * fraction(i * .754877666));
         const double bend = .0035 * std::sin(i * 1.7), length = .022 + .014 * fraction(i * .414213562);
@@ -1026,13 +1070,13 @@ void cartoonHead(Vec3 head, const Basis &basis, Color skin, Color gold, Color li
     }
     emitEnd();
     material(Finish::Fabric);
-    for (int ring = 0; ring < 6; ++ring) {
+    for (int ring = 0; ring < 4; ++ring) {
         emitBegin(gfx::QUAD_STRIP);
-        for (int slice = 0; slice <= 20; ++slice) {
-            const double angle = slice * PI / 10;
+        for (int slice = 0; slice <= 16; ++slice) {
+            const double angle = slice * PI / 8;
             const double bottom = -.10 + .90 * std::max(0.0, std::cos(angle)) - .20 * std::max(0.0, -std::cos(angle));
             for (int edge : {ring, ring + 1}) {
-                const double latitude = bottom + (PI / 2 - bottom) * edge / 6;
+                const double latitude = bottom + (PI / 2 - bottom) * edge / 4;
                 const double c = std::cos(latitude), s = std::sin(latitude);
                 const Vec3 normal = basis.forward * (c * std::cos(angle)) + basis.up * s + basis.side * (c * std::sin(angle));
                 emitNormal(normal.x, normal.y, normal.z);
@@ -1063,26 +1107,13 @@ void cartoonHead(Vec3 head, const Basis &basis, Color skin, Color gold, Color li
 
 void cartoonLongHair(const OriginalSkeleton &skeleton, const Frame &motion, Color gold, Color light, Color shadow) {
     const auto path = visual::cartoonHairPath(skeleton, motion);
-    constexpr int slices = 12;
-    std::array<Basis, visual::cartoonHairSamples> axes{};
-    for (size_t r = 0; r < path.size(); ++r) {
-        const Vec3 tangent = (path[std::min(r + 1, path.size() - 1)] - path[r ? r - 1 : 0]).normalized();
-        const Vec3 previous = r ? axes[r - 1].side : Vec3{0, 0, 1};
-        Vec3 side = previous - tangent * dot(previous, tangent);
-        Vec3 horizontal = cross(tangent, {0, 1, 0});
-        const double blend = clamp((horizontal.length() - .15) / .65, 0.0, 1.0);
-        if (side.length() < 1e-6) side = horizontal;
-        side = side.normalized();
-        horizontal = horizontal.normalized();
-        if (dot(horizontal, side) < 0) horizontal = horizontal * -1;
-        side = (side * (1 - blend) + horizontal * blend).normalized();
-        axes[r] = {cross(tangent, side).normalized(), tangent, side};
-    }
+    constexpr int slices = 8;
+    const auto axes = visual::cartoonHairAxes(path, motion);
     const auto point = [&](size_t r, int slice) {
         const double t = double(r) / (path.size() - 1), angle = slice * 2 * PI / slices;
         const double width = (.160 + .09 * std::sin(t * PI)) * (1 - .60 * t * t * t);
         const double depth = .060 * (1 - .55 * t) + .025 * std::sin(t * PI);
-        return path[r] + axes[r].side * (width * std::cos(angle)) + axes[r].forward * (depth * std::sin(angle));
+        return path[r] + axes[r].side * (width * std::cos(angle)) + axes[r].normal * (depth * std::sin(angle));
     };
     material(Finish::Fabric);
     emitBegin(gfx::QUADS);
@@ -1094,7 +1125,7 @@ void cartoonLongHair(const OriginalSkeleton &skeleton, const Frame &motion, Colo
                 const double width = (.160 + .09 * std::sin(t * PI)) * (1 - .60 * t * t * t);
                 const double depth = .060 * (1 - .55 * t) + .025 * std::sin(t * PI);
                 const Vec3 normal = (axes[index.first].side * (std::cos(angle) / width) +
-                                     axes[index.first].forward * (std::sin(angle) / depth)).normalized();
+                                     axes[index.first].normal * (std::sin(angle) / depth)).normalized();
                 emitNormal(normal.x, normal.y, normal.z);
                 vertex(point(index.first, index.second));
             }
@@ -1102,7 +1133,7 @@ void cartoonLongHair(const OriginalSkeleton &skeleton, const Frame &motion, Colo
     emitEnd();
     color(gold);
     emitBegin(gfx::TRIANGLE_FAN);
-    const auto normal = axes.back().up;
+    const auto normal = axes.back().tangent;
     emitNormal(normal.x, normal.y, normal.z);
     vertex(path.back());
     for (int i = 0; i <= slices; ++i)
@@ -1211,6 +1242,83 @@ Vec3 heroTorsoPoint(Vec3 hip, Vec3 shoulder, const Basis &b, double t, double an
     return hip + (shoulder - hip) * t + b.forward * ((depth + offset) * c) +
            b.side * ((blend(heroWidths) + offset) * std::sin(angle));
 }
+struct HeroEmblemTriangle {
+    std::array<Vec3, 3> points; // depth, normalized torso height, lateral position
+    bool gold;
+};
+const std::vector<HeroEmblemTriangle> &heroEmblem() {
+    static const auto triangles = [] {
+        std::vector<HeroEmblemTriangle> output;
+        const auto area = [](Vec3 a, Vec3 b, Vec3 c) {
+            return (b.z - a.z) * (c.y - a.y) - (b.y - a.y) * (c.z - a.z);
+        };
+        const auto patch = [&](const std::vector<Vec3> &polygon, bool gold, double offset) {
+            for (size_t r = 0; r + 1 < heroRows.size(); ++r)
+                for (int face = -4; face < 4; ++face) {
+                    const auto point = [&](size_t row, int angle) {
+                        return Vec3{heroFronts[row] * std::cos(angle * PI / 8), heroRows[row],
+                                    heroWidths[row] * std::sin(angle * PI / 8)};
+                    };
+                    const std::array<Vec3, 4> quad{point(r, face), point(r + 1, face),
+                                                  point(r + 1, face + 1), point(r, face + 1)};
+                    for (const auto &faceTriangle : {std::array<Vec3, 3>{quad[0], quad[1], quad[2]},
+                                                     std::array<Vec3, 3>{quad[0], quad[2], quad[3]}}) {
+                        auto clipped = polygon;
+                        const double denominator = area(faceTriangle[0], faceTriangle[1], faceTriangle[2]);
+                        const double sign = denominator < 0 ? -1 : 1;
+                        for (size_t edge = 0; edge < 3 && !clipped.empty(); ++edge) {
+                            std::vector<Vec3> next;
+                            const Vec3 a = faceTriangle[edge], b = faceTriangle[(edge + 1) % 3];
+                            Vec3 previous = clipped.back();
+                            double pd = sign * area(a, b, previous);
+                            for (const auto current : clipped) {
+                                const double cd = sign * area(a, b, current);
+                                if ((pd >= 0) != (cd >= 0))
+                                    next.push_back(previous + (current - previous) * (pd / (pd - cd)));
+                                if (cd >= 0) next.push_back(current);
+                                previous = current;
+                                pd = cd;
+                            }
+                            clipped = std::move(next);
+                        }
+                        for (auto &p : clipped) {
+                            const double a = area(faceTriangle[1], faceTriangle[2], p) / denominator;
+                            const double b = area(faceTriangle[2], faceTriangle[0], p) / denominator;
+                            p.x = faceTriangle[0].x * a + faceTriangle[1].x * b +
+                                  faceTriangle[2].x * (1 - a - b) + offset;
+                        }
+                        for (size_t i = 1; i + 1 < clipped.size(); ++i) {
+                            auto triangle = std::array<Vec3, 3>{clipped[0], clipped[i], clipped[i + 1]};
+                            const double size = area(triangle[0], triangle[1], triangle[2]);
+                            if (std::abs(size) < 1e-12) continue;
+                            if (size > 0) std::swap(triangle[1], triangle[2]);
+                            output.push_back({triangle, gold});
+                        }
+                    }
+                }
+        };
+        const auto at = [](double x, double y) { return Vec3{0, .655 + y * .184, -x * .150}; };
+        constexpr std::array<std::array<double, 2>, 5> outline{{{-.62, 1}, {.62, 1}, {1, .57}, {0, -1}, {-1, .57}}};
+        for (bool gold : {false, true}) {
+            const double scale = gold ? .82 : 1;
+            std::vector<Vec3> polygon;
+            for (const auto p : outline) polygon.push_back(at(p[0] * scale, p[1] * scale));
+            patch(polygon, gold, gold ? .008 : .006);
+        }
+        constexpr std::array<std::array<double, 2>, 12> letter{{
+            {.59, .50}, {.37, .67}, {-.37, .67}, {-.61, .43}, {-.43, .23}, {-.22, .17},
+            {.25, .04}, {.40, -.12}, {.20, -.40}, {-.04, -.46}, {-.24, -.32}, {-.35, -.18}}};
+        for (size_t i = 0; i + 1 < letter.size(); ++i) {
+            const auto a = letter[i], b = letter[i + 1];
+            const double dx = b[0] - a[0], dy = b[1] - a[1], length = std::hypot(dx, dy);
+            const double nx = -dy / length * .105, ny = dx / length * .105;
+            patch({at(a[0] - nx, a[1] - ny), at(b[0] - nx, b[1] - ny),
+                   at(b[0] + nx, b[1] + ny), at(a[0] + nx, a[1] + ny)}, false, .011);
+        }
+        return output;
+    }();
+    return triangles;
+}
 void heroBodice(const OriginalSkeleton &s, Color blue, Color red, Color gold) {
     using J = OriginalJoint;
     const Vec3 hip = s[J::HipCenter], shoulder = s[J::ShoulderCenter];
@@ -1218,69 +1326,34 @@ void heroBodice(const OriginalSkeleton &s, Color blue, Color red, Color gold) {
     material(Finish::Metal);
     emitBegin(gfx::QUADS);
     for (size_t r = 0; r + 1 < heroRows.size(); ++r)
-        for (int i = 0; i < 24; ++i) {
-            const double a = i * PI / 12, z = a + PI / 12;
+        for (int i = 0; i < 16; ++i) {
+            const double a = i * PI / 8, z = a + PI / 8;
             quad(heroTorsoPoint(hip, shoulder, b, heroRows[r], a),
                  heroTorsoPoint(hip, shoulder, b, heroRows[r + 1], a),
                  heroTorsoPoint(hip, shoulder, b, heroRows[r + 1], z),
                  heroTorsoPoint(hip, shoulder, b, heroRows[r], z), blue);
         }
-    // Curved chest coordinates interpolate the same faceted surface as the mesh.
-    const auto emblem = [&](double x, double y, double layer = 0) {
-        const double t = .655 + y * .184, lateral = -x * .150;
-        size_t r = 1;
-        while (r + 1 < heroRows.size() && heroRows[r] < t) ++r;
-        const double u = (t - heroRows[r - 1]) / (heroRows[r] - heroRows[r - 1]);
-        const auto front = [&](size_t row) {
-            const double angle = std::asin(clamp(lateral / heroWidths[row], -1.0, 1.0));
-            const double a = std::floor(angle / (PI / 12)) * PI / 12, z = a + PI / 12;
-            const double v = (lateral / heroWidths[row] - std::sin(a)) / (std::sin(z) - std::sin(a));
-            return heroFronts[row] * (std::cos(a) * (1 - v) + std::cos(z) * v);
-        };
-        return hip + (shoulder - hip) * t + b.side * lateral +
-               b.forward * (front(r - 1) * (1 - u) + front(r) * u + .003 + layer);
-    };
-    // Five-sided red shield, golden field and the broad, angular red S.
-    constexpr std::array<std::array<double, 2>, 5> outline{{{-.62, 1}, {.62, 1}, {1, .57}, {0, -1}, {-1, .57}}};
-    for (int layer = 0; layer < 2; ++layer) {
-        const double scale = layer ? .82 : 1, depth = .003 + layer * .002;
-        for (size_t i = 0; i < outline.size(); ++i) {
-            const auto a = outline[i], z = outline[(i + 1) % outline.size()];
-            // Short radial/angular cells follow the chest facets. A single large
-            // badge polygon would sink into the curved bodice between its corners.
-            for (int edge = 0; edge < 8; ++edge)
-                for (int strip = 0; strip < 10; ++strip) {
-                    const double u = strip / 10.0, v = (strip + 1) / 10.0;
-                    const double left = edge / 8.0, right = (edge + 1) / 8.0;
-                    const double ax = a[0] * (1 - left) + z[0] * left, ay = a[1] * (1 - left) + z[1] * left;
-                    const double bx = a[0] * (1 - right) + z[0] * right, by = a[1] * (1 - right) + z[1] * right;
-                    quad(emblem(ax * scale * u, ay * scale * u, depth),
-                         emblem(bx * scale * u, by * scale * u, depth),
-                         emblem(bx * scale * v, by * scale * v, depth),
-                         emblem(ax * scale * v, ay * scale * v, depth), layer ? gold : red);
-                }
+    emitEnd();
+    // The cached artwork is clipped to the exact bodice triangles, so a small
+    // number of polygons follows its curvature without sinking into the suit.
+    emitBegin(gfx::TRIANGLES);
+    for (const auto &triangle : heroEmblem()) {
+        std::array<Vec3, 3> points{};
+        for (size_t i = 0; i < points.size(); ++i) {
+            const auto p = triangle.points[i];
+            points[i] = hip + (shoulder - hip) * p.y + b.forward * p.x + b.side * p.z;
         }
-    }
-    constexpr std::array<std::array<double, 2>, 12> letter{{
-        {.59, .50}, {.37, .67}, {-.37, .67}, {-.61, .43}, {-.43, .23}, {-.22, .17},
-        {.25, .04}, {.40, -.12}, {.20, -.40}, {-.04, -.46}, {-.24, -.32}, {-.35, -.18}}};
-    for (size_t i = 0; i + 1 < letter.size(); ++i) {
-        const auto a = letter[i], z = letter[i + 1];
-        const double dx = z[0] - a[0], dy = z[1] - a[1], length = std::hypot(dx, dy);
-        const double nx = -dy / length * .105, ny = dx / length * .105;
-        for (int cell = 0; cell < 8; ++cell) {
-            const double u = cell / 8.0, v = (cell + 1) / 8.0;
-            const double ax = a[0] + dx * u, ay = a[1] + dy * u, bx = a[0] + dx * v, by = a[1] + dy * v;
-            quad(emblem(ax - nx, ay - ny, .008), emblem(bx - nx, by - ny, .008),
-                 emblem(bx + nx, by + ny, .008), emblem(ax + nx, ay + ny, .008), red);
-        }
+        const auto normal = cross(points[1] - points[0], points[2] - points[0]).normalized();
+        emitNormal(normal.x, normal.y, normal.z);
+        color(triangle.gold ? gold : red);
+        for (const auto p : points) vertex(p);
     }
     emitEnd();
     // The shallow gold chevron belt continues around the waist.
     material(Finish::Metal);
     emitBegin(gfx::QUADS);
-    for (int i = 0; i < 32; ++i) {
-        const double a = i * PI / 16, z = a + PI / 16;
+    for (int i = 0; i < 16; ++i) {
+        const double a = i * PI / 8, z = a + PI / 8;
         const auto belt = [&](double angle, double height) {
             const double dip = .047 * std::max(0.0, std::cos(angle));
             return heroTorsoPoint(hip, shoulder, b, .055 + height - dip, angle, .007);
@@ -1308,9 +1381,10 @@ void heroHead(Vec3 head, const Basis &b, Color skin, Color white, Color hair) {
     material(Finish::Skin);
     emitBegin(gfx::QUADS);
     for (size_t r = 0; r + 1 < heights.size(); ++r)
-        for (int i = 0; i < 24; ++i) {
+        for (int i = 0; i < 16; ++i) {
+            if (i >= 4 && i < 12) continue; // hidden by the fixed hair shell
             const auto point = [&](size_t row, int slice) {
-                const double angle = slice * PI / 12;
+                const double angle = slice * PI / 8;
                 return at(fronts[row] * std::cos(angle), heights[row], widths[row] * std::sin(angle));
             };
             quad(point(r, i), point(r + 1, i), point(r + 1, i + 1), point(r, i + 1), skin);
@@ -1399,31 +1473,49 @@ void heroCloth(const OriginalSkeleton &s, const Frame &motion, Color red, Color 
                torso.forward * ((.115 + .075 * t + flutter) * pleat * std::cos(angle));
     };
     emitBegin(gfx::QUADS);
-    for (int r = 0; r < 6; ++r)
-        for (int i = 0; i < 36; ++i) {
-            const double a = i * PI / 18, z = a + PI / 18, t = r / 6.0, u = (r + 1) / 6.0;
+    for (int r = 0; r < 4; ++r)
+        for (int i = 0; i < 24; ++i) {
+            const double a = i * PI / 12, z = a + PI / 12, t = r / 4.0, u = (r + 1) / 4.0;
             quad(skirt(t, a), skirt(t, z), skirt(u, z), skirt(u, a),
                  shade(red, i % 3 == 0 ? 1.1 : i % 3 == 2 ? .78 : 1));
         }
     // Close the hem with an inset red lining; no exposed pelvis under the skirt.
     const Vec3 center = hip + (knees - hip) * .72;
-    for (int i = 0; i < 36; ++i)
-        quad(center, skirt(1, i * PI / 18), skirt(1, (i + 1) * PI / 18), center, shade(red, .68));
+    for (int i = 0; i < 24; ++i)
+        quad(center, skirt(1, i * PI / 12), skirt(1, (i + 1) * PI / 12), center, shade(red, .68));
     emitEnd();
     material(Finish::Fabric);
-    // Double-sided winding gives the cape a lit scarlet outside and darker lining.
-    emitBegin(gfx::QUADS);
-    constexpr int rows = 16, columns = 14;
+    // Both sides must share the same triangulation. Reversing a nonplanar
+    // quad with a different diagonal makes its lining cut through the outside.
+    // Cull back faces so coincident front/lining triangles never compete for depth.
+    if (!contactPass) {
+        gfx::pushAttrib(gfx::ENABLE_BIT);
+        gfx::enable(gfx::CULL_FACE);
+    }
+    emitBegin(gfx::TRIANGLES);
+    const auto capeTriangle = [&](Vec3 a, Vec3 b, Vec3 c, Color outside) {
+        const Vec3 normal = cross(b - a, c - a).normalized();
+        color(outside);
+        emitNormal(normal.x, normal.y, normal.z);
+        vertex(a); vertex(b); vertex(c);
+        color(shade(red, .72));
+        emitNormal(-normal.x, -normal.y, -normal.z);
+        vertex(a); vertex(c); vertex(b);
+    };
+    constexpr int rows = 6, columns = 8;
     for (int r = 0; r < rows; ++r)
         for (int i = 0; i < columns; ++i) {
             const double t = r / double(rows), u = (r + 1) / double(rows);
             const double a = -1 + i * 2.0 / columns, z = a + 2.0 / columns;
             const Vec3 p = visual::heroCapePoint(s, motion, t, a), q = visual::heroCapePoint(s, motion, t, z),
                        v = visual::heroCapePoint(s, motion, u, z), w = visual::heroCapePoint(s, motion, u, a);
-            quad(p, q, v, w, shade(red, .92 + .10 * std::cos(a * 5 * PI)));
-            quad(q, p, w, v, shade(red, .72));
+            const Color outside = shade(red, .92 + .10 * std::cos(a * 5 * PI));
+            capeTriangle(p, q, v, outside);
+            capeTriangle(p, v, w, outside);
         }
     emitEnd();
+    if (!contactPass)
+        gfx::popAttrib();
     heroHair(s, motion, hair);
     // Small gold clasps pin the cape to the blue shoulders.
     material(Finish::Metal);
@@ -1435,6 +1527,7 @@ void heroCloth(const OriginalSkeleton &s, const Frame &motion, Color red, Color 
 enum class GeometryPart { All, BeforeCloth, Cloth, AfterCloth };
 void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperAppearance appearance,
                          const Frame &motion = {}, GeometryPart part = GeometryPart::All) {
+    const AthleteDetailScope detail(appearance);
     const auto point = [&](OriginalJoint joint) { return skeleton[joint]; };
     const float alpha = ghost ? .35f : 1;
     auto tint = [&](Color c) {
@@ -1529,8 +1622,8 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
                     const double angle = stripe * PI / 3;
                     color(shade(suit, 1.17));
                     emitBegin(gfx::QUAD_STRIP);
-                    for (int ring = 0; ring <= 8; ++ring) {
-                        const double latitude = -1.20 + ring * 2.40 / 8;
+                    for (int ring = 0; ring <= 4; ++ring) {
+                        const double latitude = -1.20 + ring * 2.40 / 4;
                         for (double edge : {angle - .10, angle + .10}) {
                             const Vec3 normal = puff.forward * (std::cos(latitude) * std::cos(edge)) +
                                                 puff.up * std::sin(latitude) +

@@ -12,6 +12,7 @@
 #include "visual_cartoon_hair.h"
 #include "visual_hero_cloth.h"
 #include "visual_ski_spray.h"
+#include "presentation_cache.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -128,6 +129,24 @@ void cartoonHairMotion() {
                 "Hair animation produces non-finite geometry");
         require((sought[i] - flying[i]).length() == 0, "Pause/replay seeking changes identical recorded hair poses");
     }
+    // The former world-horizontal sign choice flipped a ground curl at 37.43s.
+    // Sweep a full minute at display cadence, without accumulated animation state.
+    frame = {};
+    frame.windSpeed = .4f;
+    visual::CartoonHairAxes previous{};
+    for (int tick = 0; tick < 3600; ++tick) {
+        frame.elapsed = tick / 60.f;
+        const auto axes = visual::cartoonHairAxes(visual::cartoonHairPath(skeleton, frame), frame);
+        for (size_t r = 0; r < axes.size(); ++r) {
+            require(std::isfinite(axes[r].side.x) && std::isfinite(axes[r].side.y) && std::isfinite(axes[r].side.z),
+                    "Cartoon hair orientation is nonfinite");
+            if (tick)
+                require(dot(previous[r].side, axes[r].side) > .98 &&
+                            dot(previous[r].normal, axes[r].normal) > .98,
+                        "Cartoon ground curl flips between adjacent display frames");
+        }
+        previous = axes;
+    }
 }
 void heroClothMotion() {
     using namespace sjp;
@@ -159,6 +178,10 @@ void heroClothMotion() {
     require(dot(flying[6][visual::heroHairColumns / 2] - head, headUp) < -.20,
             "Fixed hair does not extend down to the nape");
     const Vec3 tip = flying.back().front();
+    const auto air = visual::heroBreeze(flight);
+    const Vec3 neck = head - headUp * .225 - forward * .100;
+    require(dot(tip - neck - air.flow * .46 + headUp * .035, forward) < -.24,
+            "Streaming Hero hair loses its clearance from the cape");
     require((tip - head).length() < .9 && tip.x < head.x - .3,
             "Hero hair does not stream behind the head within its length budget");
     for (const auto &p : flying.front())
@@ -618,11 +641,14 @@ struct Saved {
     bool signal;
     bool textureEnabled;
     sjp::gfx::Id boundTexture;
+    bool cull;
 };
 std::vector<Saved> attributes;
 std::map<sjp::gfx::Enum, int> matrices{{sjp::gfx::MODELVIEW, 1}, {sjp::gfx::PROJECTION, 1}, {sjp::gfx::TEXTURE, 1}};
 sjp::gfx::Enum matrix = sjp::gfx::MODELVIEW, primitiveMode = sjp::gfx::TRIANGLES;
 bool primitive = false, depth = true;
+bool cull = false, captureCape = false;
+std::vector<sjp::Vec3> capeVertices, capeNormals;
 sjp::gfx::Id captureRecordList = 0;
 std::vector<sjp::Vec3> recordVertices;
 sjp::gfx::Id compiling = 0, nextList = 1, nextTexture = 1;
@@ -634,6 +660,7 @@ std::map<sjp::gfx::Id, List> lists;
 std::set<sjp::gfx::Id> textures;
 size_t vertices = 0, commands = 0, maximumDraw = 0, drawVertices = 0, maximumLists = 0,
        maximumCachedVertices = 0, textureBytes = 0;
+size_t generatedTriangles = 0;
 int drawableWidth = 960, drawableHeight = 600;
 void finite(double x) {
     require(std::isfinite(x), "Non-finite value submitted to OpenGL");
@@ -664,6 +691,11 @@ std::vector<sjp::Vec3> snowCenters;
 std::array<std::vector<sjp::Vec3>, 2> boardFaces;
 std::vector<sjp::Vec3> standTops, spectatorSoles;
 void position(double x, double y, double z) {
+    if (captureCape && cull) {
+        require(primitiveMode == sjp::gfx::TRIANGLES, "Cape sides need identical triangle topology");
+        capeVertices.push_back({x, y, z});
+        capeNormals.push_back({current.normal[0], current.normal[1], current.normal[2]});
+    }
     if (captureSnowCenters && !compiling && primitiveMode == sjp::gfx::TRIANGLE_FAN && drawVertices == 0 &&
         current.color[0] == .91f && current.color[1] == .97f && current.color[2] == 1 && current.color[3] > .02f)
         snowCenters.push_back({x, y, z});
@@ -939,15 +971,28 @@ void sjp::gfx::disable(sjp::gfx::Enum cap) {
     audit::command("sjp::gfx::disable inside sjp::gfx::begin", false);
     if (cap == sjp::gfx::TEXTURE_2D)
         audit::textureEnabled = false;
+    if (cap == sjp::gfx::CULL_FACE)
+        audit::cull = false;
 }
 void sjp::gfx::enable(sjp::gfx::Enum cap) {
     audit::command("sjp::gfx::enable inside sjp::gfx::begin", false);
     if (cap == sjp::gfx::TEXTURE_2D)
         audit::textureEnabled = true;
+    if (cap == sjp::gfx::CULL_FACE)
+        audit::cull = true;
 }
 void sjp::gfx::end(void) {
     audit::command("sjp::gfx::end inside sjp::gfx::begin", true);
     audit::require(audit::primitive, "Unmatched sjp::gfx::end");
+    const size_t n = audit::drawVertices;
+    switch (audit::primitiveMode) {
+    case sjp::gfx::TRIANGLES: audit::generatedTriangles += n / 3; break;
+    case sjp::gfx::QUADS: audit::generatedTriangles += n / 4 * 2; break;
+    case sjp::gfx::QUAD_STRIP: audit::generatedTriangles += n >= 4 ? (n / 2 - 1) * 2 : 0; break;
+    case sjp::gfx::TRIANGLE_FAN:
+    case sjp::gfx::TRIANGLE_STRIP: audit::generatedTriangles += n >= 3 ? n - 2 : 0; break;
+    default: break;
+    }
     audit::primitive = false;
     audit::maximumDraw = std::max(audit::maximumDraw, audit::drawVertices);
 }
@@ -1175,6 +1220,8 @@ void sjp::gfx::popAttrib(void) {
         audit::current = saved.value;
     if (saved.mask & sjp::gfx::DEPTH_BUFFER_BIT)
         audit::depth = saved.depth;
+    if (saved.mask & sjp::gfx::ENABLE_BIT)
+        audit::cull = saved.cull;
     if (saved.mask & sjp::gfx::LIGHTING_BIT) {
         audit::currentEmission = saved.emission;
         audit::signalMaterial = saved.signal;
@@ -1191,7 +1238,7 @@ void sjp::gfx::popMatrix(void) {
 void sjp::gfx::pushAttrib(sjp::gfx::Flags mask) {
     audit::command("sjp::gfx::pushAttrib inside sjp::gfx::begin", false);
     audit::attributes.push_back({mask, audit::current, audit::depth, audit::currentEmission,
-                                 audit::signalMaterial, audit::textureEnabled, audit::boundTexture});
+                                 audit::signalMaterial, audit::textureEnabled, audit::boundTexture, audit::cull});
     audit::require(audit::attributes.size() <= 16, "Attribute stack exceeds guaranteed capacity");
 }
 void sjp::gfx::pushMatrix(void) {
@@ -1784,6 +1831,68 @@ int main() {
                 audit::require(sim.frame().pose == original.pose && sim.originalCounter == 1,
                                "Jumper skins/previews changed the simulation pose or tick");
             }
+        }
+        for (const auto appearance : sjp::JUMPER_APPEARANCES) {
+            sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
+            sjp::Simulation sim(2, 0);
+            sim.resetOriginal(2, 12345, 67890);
+            sim.setWind(2, sjp::PI);
+            auto reference = sim;
+            r.setJumperAppearance(appearance);
+            r.begin(sim.hill(), sim.frame(), 0, 0, false);
+            r.overlay();
+            const size_t before = audit::generatedTriangles;
+            // Fresh renderer: count body/head cache construction and moving cloth
+            // once, using the same primitive conversion as the Vulkan backend.
+            r.jumperPreview(appearance, 600, 600, 145);
+            const size_t triangles = audit::generatedTriangles - before;
+            audit::require(triangles >= 3000 && triangles <= 4000,
+                           "Jumper model exceeded its 3000-4000 triangle budget");
+            if (appearance == sjp::JumperAppearance::Pro)
+                audit::require(triangles == 3288, "Pro geometry changed during cosmetic mesh simplification");
+            std::cout << "Jumper triangles: " << sjp::jumperAppearanceName(appearance) << '=' << triangles << '\n';
+            r.finish();
+            audit::balanced();
+            if (appearance == sjp::JumperAppearance::Hero) {
+                for (int frame = 0; frame < 60; ++frame) {
+                    r.begin(sim.hill(), sim.frame(), frame / 60., 0, true);
+                    r.overlay();
+                    audit::capeVertices.clear();
+                    audit::capeNormals.clear();
+                    audit::captureCape = true;
+                    r.jumperPreview(appearance, 690, 775, 270, frame % 2 ? 125 : -55);
+                    audit::captureCape = false;
+                    const auto &v = audit::capeVertices, &n = audit::capeNormals;
+                    audit::require(v.size() == 6 * 8 * 12 && !audit::cull,
+                                   "Cape lost a side, changed budget or leaked culling state");
+                    for (size_t i = 0; i < v.size(); i += 6) {
+                        audit::require((v[i] - v[i + 3]).length() == 0 &&
+                                           (v[i + 1] - v[i + 5]).length() == 0 &&
+                                           (v[i + 2] - v[i + 4]).length() == 0 &&
+                                           (n[i] + n[i + 3]).length() < 1e-7,
+                                       "Cape front and lining intersect or have inconsistent normals");
+                    }
+                    r.finish();
+                }
+            }
+            auto previousPhase = sim.phase;
+            for (int tick = 0; tick < 14000 && sim.phase != sjp::Phase::Finished; ++tick) {
+                const auto input = sjp::autopilot(reference);
+                reference.step(sjp::ORIGINAL_TICK, input);
+                sim.step(sjp::ORIGINAL_TICK, input);
+                if (sim.phase != previousPhase || tick % 200 == 0) {
+                    r.begin(sim.hill(), sim.frame(), sim.elapsed, 0, false);
+                    r.finish();
+                    previousPhase = sim.phase;
+                }
+                audit::require(sjp::visual::samePresentationFrame(sim.frame(), reference.frame()) &&
+                                   sim.originalCounter == reference.originalCounter,
+                               "Cosmetic jumper changed flight, wind, pose or simulation timing");
+            }
+            audit::require(sim.phase == sjp::Phase::Finished &&
+                               sim.originalRecordedDistance() == reference.originalRecordedDistance() &&
+                               sim.result.total == reference.result.total,
+                           "Cosmetic jumper changed jump length or scoring");
         }
         audit::require(audit::lists.empty() && audit::textures.empty(), "Record marker leaked GPU resources");
         audit::require(leaks == 0, "Cached terrain freezes the caller's current color/normal/UV");

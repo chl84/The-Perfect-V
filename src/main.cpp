@@ -137,7 +137,8 @@ enum class Action {
     ReplayExport,
     ReplayExportNative,
     SkiJumper,
-    SelectJumper
+    SelectJumper,
+    JumperPage
 };
 struct Button {
     float x, y, w, h;
@@ -165,7 +166,9 @@ class App {
     Input pending;
     std::vector<Button> buttons;
     static constexpr int HILLS_PER_PAGE = 8;
+    static constexpr int JUMPERS_PER_PAGE = 3;
     int hillPage = 0;
+    int jumperPage = 0;
     int selectedHill = 2, camera = 0, round = 0, cupEvent = 0, windMode = 0;
     Competition cup;
     CupSetup worldSetup = defaultCupSetup(), teamSetup = defaultTeamCupSetup();
@@ -494,6 +497,7 @@ class App {
     }
     int hillCount() const { return int(hills().size()); }
     int hillPages() const { return (hillCount() + HILLS_PER_PAGE - 1) / HILLS_PER_PAGE; }
+    int jumperPages() const { return (int(JUMPER_APPEARANCES.size()) + JUMPERS_PER_PAGE - 1) / JUMPERS_PER_PAGE; }
     bool finalCupEvent() const { return competition && cup.finalEvent(); }
     CupSetup &editableSetup() { return setupTeam ? teamSetup : worldSetup; }
     int activeJumper() const { return competition ? cup.currentJumper() : -1; }
@@ -939,7 +943,11 @@ class App {
             changeScreen(Screen::CupSetup);
             break;
         case Action::SkiJumper:
+            jumperPage = int(records.jumper) / JUMPERS_PER_PAGE;
             changeScreen(Screen::SkiJumper);
+            break;
+        case Action::JumperPage:
+            jumperPage = clamp(jumperPage + value, 0, jumperPages() - 1);
             break;
         case Action::SelectJumper:
             if (validJumperAppearance(JumperAppearance(value))) {
@@ -1345,10 +1353,11 @@ class App {
                         }
                 }
             }
-            if (e.type == SDL_EVENT_MOUSE_WHEEL && (screen == Screen::Hills || screen == Screen::Records)) {
+            if (e.type == SDL_EVENT_MOUSE_WHEEL &&
+                (screen == Screen::Hills || screen == Screen::Records || screen == Screen::SkiJumper)) {
                 int direction = e.wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -e.wheel.y : e.wheel.y;
                 if (direction)
-                    action(Action::HillPage, direction > 0 ? -1 : 1);
+                    action(screen == Screen::SkiJumper ? Action::JumperPage : Action::HillPage, direction > 0 ? -1 : 1);
             }
             if (e.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                 if (e.button.button == SDL_BUTTON_LEFT)
@@ -1426,6 +1435,11 @@ class App {
                         action(Action::Help);
                     if (key == SDLK_R && hasReplay)
                         action(Action::Replay);
+                } else if (screen == Screen::SkiJumper) {
+                    if (key == SDLK_RIGHT || key == SDLK_PAGEDOWN)
+                        action(Action::JumperPage, 1);
+                    if (key == SDLK_LEFT || key == SDLK_PAGEUP)
+                        action(Action::JumperPage, -1);
                 } else if (screen == Screen::Hills || screen == Screen::Records) {
                     if (key == SDLK_RIGHT || key == SDLK_DOWN)
                         action(Action::SelectHill, (selectedHill + 1) % hillCount());
@@ -1536,12 +1550,14 @@ class App {
     void skiJumperUI() {
         top("Ski Jumper");
         auto &r = *renderer;
-        for (size_t i = 0; i < JUMPER_APPEARANCES.size(); ++i) {
-            const auto appearance = JUMPER_APPEARANCES[i];
+        const int first = jumperPage * JUMPERS_PER_PAGE;
+        const int count = std::min(JUMPERS_PER_PAGE, int(JUMPER_APPEARANCES.size()) - first);
+        constexpr float gap = 24, cardWidth = (1312 - gap * (JUMPERS_PER_PAGE - 1)) / JUMPERS_PER_PAGE;
+        const float start = (1440 - (count * cardWidth + (count - 1) * gap)) * .5f;
+        for (int slot = 0; slot < count; ++slot) {
+            const auto appearance = JUMPER_APPEARANCES[size_t(first + slot)];
             const bool selected = records.jumper == appearance;
-            constexpr float gap = 24;
-            const float cardWidth = (1312 - gap * (JUMPER_APPEARANCES.size() - 1)) / JUMPER_APPEARANCES.size();
-            const float x = 64 + i * (cardWidth + gap);
+            const float x = start + slot * (cardWidth + gap);
             r.glassPanel(x, 214, cardWidth, 566, 12, .94f);
             if (selected)
                 r.rect(x + 22, 214, 58, 3, colors::teal, 1);
@@ -1549,6 +1565,13 @@ class App {
             r.jumperPreview(appearance, x + cardWidth * .43f, 618, std::min(145.f, cardWidth * .47f));
             button(selected ? "Selected" : "Select", x + 22, 720, cardWidth - 44,
                    Action::SelectJumper, int(appearance), selected, 40, 14);
+        }
+        if (jumperPages() > 1) {
+            r.text(std::to_string(jumperPage + 1) + " / " + std::to_string(jumperPages()), 1040, 820, 13, colors::muted);
+            if (jumperPage > 0)
+                smallButton("Previous", 1174, 810, 98, Action::JumperPage, -1);
+            if (jumperPage + 1 < jumperPages())
+                smallButton("Next", 1283, 810, 91, Action::JumperPage, 1);
         }
     }
     void hillPagination(float y) {
@@ -2288,7 +2311,30 @@ class App {
         if (screen != Screen::SkiJumper)
             throw std::runtime_error("Home Ski Jumper button failed");
         const Simulation appearanceBaseline = sim;
+        const auto selectionBeforePaging = records.jumper;
+        action(Action::JumperPage, -jumperPages());
+        for (int page = 0; page < jumperPages(); ++page) {
+            render();
+            const int first = page * JUMPERS_PER_PAGE;
+            const int expected = std::min(JUMPERS_PER_PAGE, int(JUMPER_APPEARANCES.size()) - first);
+            int visible = 0;
+            for (const auto &b : buttons)
+                if (b.action == Action::SelectJumper) {
+                    ++visible;
+                    if (b.value < first || b.value >= first + expected)
+                        throw std::runtime_error("Jumper page shows a model from another page");
+                }
+            if (jumperPage != page || visible != expected || visible > 3 || records.jumper != selectionBeforePaging)
+                throw std::runtime_error("Jumper pagination changed selection or exceeded three models");
+            if (!captureDir.empty())
+                renderer->capture(captureDir + "/ski-jumper-page-" + std::to_string(page + 1) + ".ppm");
+            renderer->finish();
+            if (page + 1 < jumperPages()) clickButton(Action::JumperPage, 1);
+        }
         for (int choice : {1, 2, 3, 4, 0, 4}) {
+            const int page = choice / JUMPERS_PER_PAGE;
+            while (jumperPage < page) clickButton(Action::JumperPage, 1);
+            while (jumperPage > page) clickButton(Action::JumperPage, -1);
             clickButton(Action::SelectJumper, choice);
             if (int(records.jumper) != choice ||
                 int(loadRecords(dataDir + "/records-dsj2.dat").jumper) != choice ||
@@ -2299,23 +2345,53 @@ class App {
                 sim.initialRandomSeed() != appearanceBaseline.initialRandomSeed())
                 throw std::runtime_error("Jumper selection lost persistence or changed simulation");
         }
+        clickButton(Action::Back);
+        clickButton(Action::SkiJumper);
+        if (jumperPage != int(records.jumper) / JUMPERS_PER_PAGE)
+            throw std::runtime_error("Jumper menu did not reopen on the selected model's page");
         render();
         if (!captureDir.empty())
             renderer->capture(captureDir + "/ski-jumper.ppm");
         renderer->finish();
         if (!captureDir.empty()) {
-            render();
+            renderer->begin(hills()[selectedHill], sim.frame(), time, camera, true);
+            renderer->overlay();
             renderer->glassPanel(330, 128, 780, 704, 12, .98f);
             renderer->text("Hero", 365, 155, 32, colors::white, true);
             renderer->jumperPreview(JumperAppearance::Hero, 690, 775, 270);
             renderer->capture(captureDir + "/hero-preview.ppm");
             renderer->finish();
-            render();
+            renderer->begin(hills()[selectedHill], sim.frame(), time, camera, true);
+            renderer->overlay();
             renderer->glassPanel(330, 128, 780, 704, 12, .98f);
             renderer->text("Hero", 365, 155, 32, colors::white, true);
             renderer->jumperPreview(JumperAppearance::Hero, 690, 775, 270, 125);
             renderer->capture(captureDir + "/hero-back.ppm");
             renderer->finish();
+            for (auto appearance : {JumperAppearance::President, JumperAppearance::Actor, JumperAppearance::Cartoon}) {
+                render();
+                renderer->glassPanel(330, 128, 780, 704, 12, .98f);
+                renderer->text(jumperAppearanceName(appearance), 365, 155, 32, colors::white, true);
+                renderer->jumperPreview(appearance, 690, 775, 270);
+                renderer->capture(captureDir + "/jumper-" + jumperAppearanceName(appearance) + ".ppm");
+                renderer->finish();
+
+            }
+            const double savedTime = time;
+            for (int frame = 0; frame < 5; ++frame) {
+                time = 37.4 + frame / 60.0;
+                // Isolate this preview from the menu's other 3D previews: their
+                // depth can otherwise occlude the enlarged diagnostic model.
+                renderer->begin(hills()[selectedHill], sim.frame(), time, camera, true);
+                renderer->overlay();
+                renderer->glassPanel(330, 128, 780, 704, 12, .98f);
+                renderer->text("Cartoon", 365, 155, 32, colors::white, true);
+                renderer->jumperPreview(JumperAppearance::Cartoon, 690, 775, 270);
+                renderer->capture(captureDir + "/cartoon-hair-" + std::to_string(frame) + ".ppm");
+                renderer->finish();
+            }
+            time = savedTime;
+            renderer->resetCamera();
         }
         clickButton(Action::Back);
         clickButton(Action::Hills);
@@ -2589,12 +2665,28 @@ class App {
             updateAudio(1. / 120);
             if (n % 4 == 0) {
                 render();
-                if (sim.phase == Phase::Flight && sim.phaseTime > 1.4 && !flightCaptured) {
+                const bool captureCape = sim.phase == Phase::Flight && sim.phaseTime > 1.4 && !flightCaptured;
+                if (captureCape) {
                     flightCaptured = true;
                     if (!captureDir.empty())
                         renderer->capture(captureDir + "/flight.ppm");
                 }
                 renderer->finish();
+                if (captureCape && !captureDir.empty()) {
+                    // Inspect both sides of the moving cape using unchanged
+                    // recorded poses; diagnostics never step the simulation.
+                    for (int view = 0; view < 3; ++view)
+                        for (int sample = 0; sample < 4; ++sample) {
+                            auto frame = sim.frame();
+                            frame.elapsed += sample / 12.f;
+                            renderer->resetCamera();
+                            renderer->begin(sim.hill(), frame, time + sample / 12., view, false);
+                            renderer->capture(captureDir + "/hero-cape-" + std::to_string(view) +
+                                              "-" + std::to_string(sample) + ".ppm");
+                            renderer->finish();
+                        }
+                    renderer->resetCamera();
+                }
             }
             if (sim.phase == Phase::Finished || sim.phase == Phase::Disqualified)
                 completeJump();

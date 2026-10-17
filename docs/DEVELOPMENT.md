@@ -287,7 +287,9 @@ credits and the reproducible preparation script accompany the assets.
 ## Fall model visibility
 
 The main menu's Ski Jumper screen uses the existing panels, buttons and five native
-3D previews. Pro keeps its competition suit and helmet. President adds a navy suit,
+3D previews, with at most three models per page. Previous/Next buttons, arrow keys,
+Page Up/Down and the mouse wheel change pages; reopening shows the selected model's
+page. Pro keeps its competition suit and helmet. President adds a navy suit,
 white shirt, red tie, bare hands and a helmet-free face with swept golden hair.
 President's reference-based face uses a continuous cheek/jaw mesh, a tapering
 chin, narrow blue-grey eyes, heavy lids, pale brows and an integrated broad nose.
@@ -313,6 +315,10 @@ recorded elapsed time and wind. The original/interpolated Frame determines the
 complete pose, so pause and replay seeking reproduce the same flutter. The menu
 uses its presentation clock for a gentle breeze. The fall-contact height cache
 also covers the extended hair, without changing terrain or physical collision.
+Hair cross-sections use rotation-minimizing transport along the curve. This
+removes the former horizontal-axis sign flip in the ground curl without adding
+geometry or temporal state. A minute-long display-cadence regression checks
+orientation continuity, including the former flip around 37.43 seconds.
 
 All skins wrap the exact same original skeleton, including interpolated joints
 and fall poses; ski outlines and binding positions retain their geometry. All wear the same
@@ -329,15 +335,29 @@ Hero adds a fitted glossy blue bodice, red pleated short skirt, gold chevron
 belt, red knee-high boots with gold trim, a scarlet cape and a helmet-free face
 with a centre-parted, uniformly near-black hairstyle. Scalp and flowing locks
 use the same hair colour without root/tip gradients or painted streaks.
-The red/gold shield and S motif are
-curved geometry on the bodice. Hair is one connected 14-row, 20-column surface
-(260 quads), replacing 1,776 quads of separate scalp, ribbons and locks. Its
+The red/gold shield and S motif are clipped to the exact bodice triangles and
+cached in local coordinates, retaining their curvature with fewer polygons.
+Hair is one connected 14-row, 16-column surface
+(208 quads), replacing 1,776 quads of separate scalp, ribbons and locks. Its
 upper seven rows cover the crown, back of the head and nape and stay pinned to
 the head. Only the lower lengths bend with velocity, wind and recorded elapsed
-time. The cape retains its small grid pinned to the shoulders. No physical forces or accumulated
+time. The loose hair retains its outward cape clearance when streaming at speed.
+The cape uses a 6×8 grid pinned to the shoulders. Its front and lining
+share identical triangles with opposite winding/normals and scoped back-face
+culling; waved panels cannot intersect their own lining or fight for depth.
+No physical forces or accumulated
 cloth simulation are introduced. Paused/seeked replays reproduce the same
 flutter. Menu previews cache the static body/head and redraw only moving cloth.
 Hero is appended to the appearance IDs, preserving existing saved selections.
+
+Complete cosmetic models, including skis, boots and clothing, have a fixed
+3,000–4,000 triangle budget: Pro 3,288 (unchanged), President 3,728, Actor 3,958,
+Cartoon 3,718 and Hero 3,964. Non-Pro models reduce subdivisions on small spheres
+and nearly linear limb segments; sphere poles use fans instead of zero-area
+triangles. Facial features, costume patterns and procedural animation remain.
+The CPU renderer audit enforces the budget and compares complete jumps against
+an unrendered reference to verify identical flight, wind, poses, timing, length
+and scoring for every appearance. Appearance never enters the physics model.
 
 The optional `JUMPER 1` preferences tag preserves the choice while retaining the
 existing records format; older saves default to Pro. The fall-contact display

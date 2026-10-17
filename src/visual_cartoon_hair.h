@@ -5,8 +5,51 @@
 #include <cmath>
 
 namespace sjp::visual {
-inline constexpr size_t cartoonHairSamples = 57;
+inline constexpr size_t cartoonHairSamples = 33;
 using CartoonHairPath = std::array<Vec3, cartoonHairSamples>;
+struct CartoonHairAxis {
+    Vec3 side, normal, tangent;
+};
+using CartoonHairAxes = std::array<CartoonHairAxis, cartoonHairSamples>;
+
+// Rotation-minimizing transport follows each bend continuously. Aligning every
+// section with world-horizontal instead can choose opposite signs as a curled
+// ground section sways, flipping the flattened tube by 180 degrees in one frame.
+inline CartoonHairAxes cartoonHairAxes(const CartoonHairPath &path, const Frame &frame) {
+    CartoonHairAxes axes{};
+    for (size_t r = 0; r < path.size(); ++r) {
+        const Vec3 tangent = (path[std::min(r + 1, path.size() - 1)] - path[r ? r - 1 : 0]).normalized();
+        Vec3 side{0, 0, 1};
+        if (r) {
+            const Vec3 rotation = cross(axes[r - 1].tangent, tangent);
+            const double denominator = 1 + dot(axes[r - 1].tangent, tangent);
+            side = axes[r - 1].side;
+            if (denominator > 1e-8)
+                side = side + cross(rotation, side) + cross(rotation, cross(rotation, side)) * (1 / denominator);
+        }
+        side = side - tangent * dot(side, tangent);
+        if (side.length() < 1e-8)
+            side = cross(tangent, {0, 1, 0});
+        side = side.normalized();
+        axes[r] = {side, cross(tangent, side).normalized(), tangent};
+    }
+    // Keep the settled coils flat on the ground without a binary +/- choice.
+    // Fade this preference out before the lengths begin streaming in flight.
+    double settle = clamp(std::hypot(double(frame.vx), double(frame.vy)) / 4, 0.0, 1.0);
+    settle = 1 - settle * settle * (3 - 2 * settle);
+    if (settle > 0)
+        for (size_t r = 0; r < path.size(); ++r) {
+            const Vec3 up = Vec3{0, 1, 0} - axes[r].tangent * axes[r].tangent.y;
+            if (up.length() < 1e-8) continue;
+            const Vec3 target = cross(up.normalized(), axes[r].tangent).normalized();
+            double weight = clamp((double(r) / (path.size() - 1) - .36) / .24, 0.0, 1.0);
+            weight = weight * weight * (3 - 2 * weight) * settle;
+            weight *= clamp((1 + dot(target, axes[r].side)) / .25, 0.0, 1.0);
+            axes[r].side = (axes[r].side * (1 - weight) + target * weight).normalized();
+            axes[r].normal = cross(axes[r].tangent, axes[r].side).normalized();
+        }
+    return axes;
+}
 
 // Presentation only. No accumulated state: pause, replay seeks and interpolated
 // frames reproduce exactly the same roots, streaming and travelling gusts.
