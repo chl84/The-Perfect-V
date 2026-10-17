@@ -269,34 +269,65 @@ sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int heigh
     sjp::visual::popAttrib();
     return texture;
 }
-sjp::gfx::Id makeConcreteTexture() {
-    constexpr int size = 128;
+constexpr double ledPixelPitch = .025;
+sjp::gfx::Id makeLedPixelTexture() {
+    constexpr int size = 16;
     std::vector<uint8_t> pixels(size * size);
-    auto noise = [](double x, double y) {
-        const double row = std::floor(y), t = y - row, blend = t * t * (3 - 2 * t);
-        // Broad weathering repeats seamlessly along the wall's vertical UV.
-        return smoothNoise(x, std::fmod(row, 4.0) * 37.13 + 211) * (1 - blend) +
-               smoothNoise(x, std::fmod(row + 1, 4.0) * 37.13 + 211) * blend;
+    for (int y = 0; y < size; ++y)
+        for (int x = 0; x < size; ++x) {
+            const double dx = std::abs((x + .5) / size - .5);
+            const double dy = std::abs((y + .5) / size - .5);
+            const double radius = std::pow(dx * dx * dx * dx + dy * dy * dy * dy, .25);
+            const double diode = 1 - smoothRange(.37, .46, radius);
+            const double glow = .10 * std::exp(-radius * radius / .16);
+            pixels[size_t(y * size + x)] = uint8_t(std::lround(255 *
+                (.012 + .988 * std::min(1.0, diode + glow))));
+        }
+    // One rounded diode per repeat, shared by all panels. Averaged mipmaps
+    // turn the physical 25 mm grid into steady color when it is subpixel.
+    const auto texture = makeMarkerTexture(std::move(pixels), size, size, sjp::gfx::LUMINANCE);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::REPEAT);
+    sjp::visual::popAttrib();
+    return texture;
+}
+constexpr double concreteTextureMeters = 2.0;
+sjp::gfx::Id makeConcreteTexture() {
+    // A two-metre tile gives roughly 8 mm texels: small pores, decimetre
+    // weathering and 25 cm formwork courses, independent of terrace width.
+    constexpr int size = 256;
+    std::vector<uint8_t> pixels(size * size);
+    auto noise = [](double u, double v, int columns, int rows, double seed) {
+        const double x = u * columns, y = v * rows;
+        const int ix = int(std::floor(x)), iy = int(std::floor(y));
+        const double tx = x - ix, ty = y - iy;
+        const double bx = tx * tx * (3 - 2 * tx), by = ty * ty * (3 - 2 * ty);
+        auto cell = [&](int cx, int cy) { return hash(cx % columns + (cy % rows) * 37.13 + seed); };
+        // Wrap both axes so world-sized repeats have no dark tile seams.
+        return (cell(ix, iy) * (1 - bx) + cell(ix + 1, iy) * bx) * (1 - by) +
+               (cell(ix, iy + 1) * (1 - bx) + cell(ix + 1, iy + 1) * bx) * by;
     };
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x) {
-            const double mottling = (noise(x / 24.0, y * 4.0 / size) - .5) * .055;
-            const double grain = (hash(x * 13.71 + y * 8.17 + 61) - .5) * .035;
-            const double pores = hash(x * 91.3 + y * 37.7 + 9) > .988 ? .055 : 0;
-            const double streak = .030 * std::pow(std::max(0.0, (smoothNoise(x / 8.0, 89) - .55) / .45), 2) *
-                                  (.5 + .5 * noise(x / 30.0, y * 4.0 / size));
-            // Narrow, subdued joints follow each terrace bay; horizontal
-            // formwork marks are weaker than the material's broad variations.
-            const double edge = std::min(x, size - 1 - x);
-            const double joint = .035 * (1 - smoothRange(0, 1.5, edge));
-            const double board = .008 * (1 - smoothRange(0, 1.0, std::abs(std::remainder(double(y), 32.0))));
+            const double u = (x + .5) / size, v = (y + .5) / size;
+            const double mottling = (noise(u, v, 6, 4, 211) - .5) * .28 +
+                                    (noise(u, v, 16, 12, 317) - .5) * .10;
+            const double grain = (hash(x * 13.71 + y * 8.17 + 61) - .5) * .08;
+            const double pore = hash(x * 91.3 + y * 37.7 + 9);
+            const double pores = pore > .977 ? .15 + .10 * (pore - .977) / .023 : 0;
+            const double streak = .18 * smoothRange(.48, .88, noise(u, v, 28, 2, 89)) *
+                                  (.35 + .65 * noise(u, v, 8, 3, 157));
+            const double board = .025 * (1 - smoothRange(0, 1.3,
+                std::abs(std::remainder(y + .5, size / 8.0))));
             pixels[size_t(y * size + x)] = uint8_t(std::lround(255 * clamp(
-                .975 + mottling + grain - pores - streak - joint - board, 0.0, 1.0)));
+                .94 + .70 * (mottling + grain - pores - streak - board), 0.0, 1.0)));
         }
     const auto texture = makeMarkerTexture(std::move(pixels), size, size, sjp::gfx::LUMINANCE);
     sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
-    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::CLAMP_TO_EDGE);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::REPEAT);
     sjp::visual::popAttrib();
     return texture;
@@ -502,8 +533,8 @@ void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double
         for (Vec3 v : {p, q, r, s}) {
             const double dry = clamp((v.y - bottom) / (top - bottom), 0.0, 1.0);
             col(shade(tint, brightness * (.94 + .06 * dry)));
-            const double u = std::abs(normal.x) > .5 ? (v.z - z0) / (z1 - z0) : (v.x - x0) / (x1 - x0);
-            const double vv = std::abs(normal.y) > .5 ? (v.z - z0) * .70 : v.y * .70;
+            const double u = (std::abs(normal.x) > .5 ? v.z : v.x) / concreteTextureMeters;
+            const double vv = (std::abs(normal.y) > .5 ? v.z : v.y) / concreteTextureMeters;
             sjp::visual::texCoord(u, vv);
             vertex(v);
         }
@@ -635,6 +666,62 @@ std::array<uint8_t, 7> glyph(char c) {
         return {};
     }
 }
+sjp::gfx::Id makeLedGlowTexture() {
+    // Two softly blurred word masks. Each board needs only one extra quad;
+    // no per-diode geometry, framebuffer blur or additional scene lights.
+    constexpr int width = 512, rowHeight = 64, height = rowHeight * 2, glyphScale = 4;
+    std::vector<double> pixels(width * height), temporary(width * height);
+    const std::array<std::string, 2> labels{{"NORDIC", "THE PERFECT V"}};
+    for (size_t label = 0; label < labels.size(); ++label) {
+        const auto &text = labels[label];
+        const int left = (width - int(text.size() * 6 - 1) * glyphScale) / 2;
+        const int top = int(label) * rowHeight + (rowHeight - 7 * glyphScale) / 2;
+        for (size_t letter = 0; letter < text.size(); ++letter) {
+            const auto mask = glyph(text[letter]);
+            for (int y = 0; y < 7; ++y)
+                for (int x = 0; x < 5; ++x)
+                    if (mask[y] & (1 << (4 - x)))
+                        for (int dy = 0; dy < glyphScale; ++dy)
+                            for (int dx = 0; dx < glyphScale; ++dx) {
+                                const int xx = left + (int(letter) * 6 + x) * glyphScale + dx;
+                                const int yy = top + y * glyphScale + dy;
+                                // Match the geometry lettering's 88% filled cells.
+                                pixels[size_t(yy * width + xx)] =
+                                    std::min(1.0, glyphScale * .88 - dx) *
+                                    std::min(1.0, glyphScale * .88 - dy);
+                            }
+        }
+    }
+    constexpr int radius = 12;
+    std::array<double, radius * 2 + 1> weights{};
+    double total = 0;
+    for (int i = -radius; i <= radius; ++i)
+        total += weights[size_t(i + radius)] = std::exp(-i * i / 32.0);
+    for (auto &weight : weights)
+        weight /= total;
+    for (bool horizontal : {true, false}) {
+        for (int y = 0; y < height; ++y)
+            for (int x = 0; x < width; ++x) {
+                double value = 0;
+                for (int i = -radius; i <= radius; ++i) {
+                    const int xx = x + (horizontal ? i : 0), yy = y + (horizontal ? 0 : i);
+                    if (xx >= 0 && xx < width && yy / rowHeight == y / rowHeight && yy >= 0 && yy < height)
+                        value += pixels[size_t(yy * width + xx)] * weights[size_t(i + radius)];
+                }
+                temporary[size_t(y * width + x)] = value;
+            }
+        pixels.swap(temporary);
+    }
+    std::vector<uint8_t> mask(pixels.size());
+    for (size_t i = 0; i < mask.size(); ++i)
+        mask[i] = uint8_t(std::lround(255 * pixels[i]));
+    const auto texture = makeMarkerTexture(std::move(mask), width, height);
+    sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
+    sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::CLAMP_TO_EDGE);
+    sjp::visual::popAttrib();
+    return texture;
+}
 void signText(const std::string &text, Vec3 center, double width, double height, int side, Color c) {
     const double cell = std::min(height / 7, width / std::max(1.0, double(text.size() * 6 - 1)));
     const double left = center.x - cell * (text.size() * 6 - 1) * .5;
@@ -665,14 +752,29 @@ struct BoardFrame {
         return {p.x, p.y, z};
     }
 };
-void boardFace(const BoardFrame &frame, double left, double right, double bottom, double top,
-               double z, int side, Color color) {
+void texturedBoardFace(const BoardFrame &frame, double left, double right, double bottom, double top,
+                       double z, int side, Color color, const std::array<double, 4> &bounds) {
     const Vec3 a = frame.point(left, bottom, z), b = frame.point(right, bottom, z),
                c = frame.point(right, top, z), d = frame.point(left, top, z);
-    if (side > 0)
-        quad(d, c, b, a, color);
-    else
-        quad(a, b, c, d, color);
+    const Vec3 normal = cross(frame.along, frame.up) * -side;
+    col(color);
+    sjp::visual::begin(sjp::gfx::QUADS);
+    sjp::visual::normal(normal.x, normal.y, normal.z);
+    const std::array<Vec3, 4> positions{{a, b, c, d}};
+    const std::array<std::array<double, 2>, 4> uv{{
+        {bounds[0], bounds[2]}, {bounds[1], bounds[2]},
+        {bounds[1], bounds[3]}, {bounds[0], bounds[3]}}};
+    for (int i : side > 0 ? std::array<int, 4>{{3, 2, 1, 0}} : std::array<int, 4>{{0, 1, 2, 3}}) {
+        sjp::visual::texCoord(uv[size_t(i)][0], uv[size_t(i)][1]);
+        vertex(positions[size_t(i)]);
+    }
+    sjp::visual::end();
+}
+void boardFace(const BoardFrame &frame, double left, double right, double bottom, double top,
+               double z, int side, Color color) {
+    // All colored fields and glyphs share the same grid in board-local metres.
+    texturedBoardFace(frame, left, right, bottom, top, z, side, color,
+                      {left / ledPixelPitch, right / ledPixelPitch, bottom / ledPixelPitch, top / ledPixelPitch});
 }
 void boardText(const BoardFrame &frame, const std::string &text, double x, double offset,
                double width, double height, double z, int side, Color color) {
@@ -695,8 +797,39 @@ void boardText(const BoardFrame &frame, const std::string &text, double x, doubl
                 }
     }
 }
-void advertisement(const Hill &h, double x, double width, double front, int side, Color accent,
-                   const std::string &text, visual::SnowAccumulation &snow) {
+struct LedBoard {
+    BoardFrame frame;
+    double width, zFront;
+    int side;
+    Color accent;
+    std::string text;
+};
+void ledBoard(const LedBoard &board) {
+    const auto &[frame, width, zFront, side, accent, text] = board;
+    const double left = -width * .5, right = width * .5;
+    boardFace(frame, left, right, .16, 1.79, zFront, side, {.10f, .28f, .33f, 1});
+    const double accentLeft = side > 0 ? right - width * .1025 : left + width * .0175;
+    const double accentRight = side > 0 ? right - width * .0175 : left + width * .1025;
+    boardFace(frame, accentLeft, accentRight, .29, 1.61, zFront - side * .025, side, shade(accent, 2.1));
+    boardText(frame, text, -side * width * .025, .97, width * .78, .74, zFront - side * .035, side,
+              {1.65f, 1.75f, 1.72f, 1});
+}
+void ledBoardGlow(const LedBoard &board) {
+    const auto &[frame, width, zFront, side, accent, text] = board;
+    const double cells = double(text.size() * 6 - 1);
+    const double cell = std::min(.74 / 7, width * .78 / cells);
+    const double center = -side * width * .025, halfWidth = (cells * .5 + 4) * cell;
+    const double u0 = .5 - (cells * 2 + 16) / 512, u1 = 1 - u0;
+    const int row = text == "NORDIC" ? 0 : 1;
+    // The padded mask follows the front face, so the board, snow and people
+    // occlude it normally. Keep the rear panel dark and the diode gaps visible.
+    texturedBoardFace(frame, center - halfWidth, center + halfWidth, .97 - 7.5 * cell, .97 + 7.5 * cell,
+                      zFront - side * .04, side, {1, .98f, .93f, .42f},
+                      {side > 0 ? u1 : u0, side > 0 ? u0 : u1,
+                       (row * 64 + 62) / 128.0, (row * 64 + 2) / 128.0});
+}
+LedBoard advertisement(const Hill &h, double x, double width, double front, int side, Color accent,
+                       const std::string &text, visual::SnowAccumulation &snow) {
     // Rotate a rigid rectangle along the existing terrain's local tangent.
     // The valley term is the x derivative of terrainY, not a terrain change.
     const double edge = std::max(0.0, std::abs(front) - 19 * h.scale());
@@ -734,7 +867,6 @@ void advertisement(const Hill &h, double x, double width, double front, int side
         quad(td, tc, tb, ta, {.73f, .82f, .84f, 1});
         quad(bd, bc, bb, ba, {.31f, .43f, .48f, 1});
     }
-    boardFace(frame, left, right, .16, 1.79, zFront, side, {.10f, .28f, .33f, 1});
     boardFace(frame, left, right, .16, 1.79, zBack, -side, {.20f, .32f, .37f, 1});
     for (double end : {left, right})
         quad(frame.point(end, .16, zFront), frame.point(end, 1.79, zFront),
@@ -742,11 +874,6 @@ void advertisement(const Hill &h, double x, double width, double front, int side
     for (int face : {side, -side}) {
         const double z = face == side ? zFront : zBack;
         boardFace(frame, left, right, 1.745, 1.82, z - face * .02, face, {.73f, .82f, .84f, 1});
-        const double accentLeft = face > 0 ? right - width * .1025 : left + width * .0175;
-        const double accentRight = face > 0 ? right - width * .0175 : left + width * .1025;
-        boardFace(frame, accentLeft, accentRight, .29, 1.61, z - face * .025, face, accent);
-        boardText(frame, text, -face * width * .025, .97, width * .78, .74, z - face * .035, face,
-                  {.91f, .96f, .95f, 1});
     }
     for (double offset : {-.39, .39}) {
         const double z = zBack + side * .12;
@@ -756,6 +883,8 @@ void advertisement(const Hill &h, double x, double width, double front, int side
         beam(frame.point(offset * width, .80, z), frame.point(offset * width, .80, zBack), .035,
              {.43f, .54f, .58f, 1});
     }
+    // Only the face towards the jumping hill carries sponsor graphics.
+    return {frame, width, zFront, side, accent, text};
 }
 constexpr std::array<Color, 7> crowdColors{{{.14f, .34f, .43f, 1},
                                             {.80f, .31f, .23f, 1},
@@ -877,14 +1006,17 @@ void floodlight(const Hill &h, double x, double z, double size, visual::SnowAccu
     snow.cap({snowLeft,y+height+.625,z}, {snowLeft+snowLength,y+height+.625,z},
              .34+.14*visual::SnowAccumulation::variation(seed+13.7),
              .44+.22*visual::SnowAccumulation::variation(seed+21.9),seed);
+    const double frontSide = z > 0 ? -1 : 1;
     for (int lamp = 0; lamp < 6; ++lamp) {
         const double xx = x + (lamp % 3 - 1) * 1.02, yy = y + height + (lamp / 3 - .5) * .49;
-        box({xx, yy, z}, {.82, .38, .67}, {.51f, .59f, .63f, 1});
+        // Shallow lamp frames protrude only from the hill-facing surface.
+        // Their rear ends stay inside the housing's uninterrupted back plate.
+        box({xx, yy, z + frontSide * .295}, {.82, .38, .08}, {.51f, .59f, .63f, 1});
         // Self-lit warm glass; the vertex shader raises emission with the
         // current lamp strength without rebuilding these cached faces.
         const float emission[]{.28f, .27f, .22f, 1};
         sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::EMISSION, emission);
-        const double front = z + (z > 0 ? -.345 : .345);
+        const double front = z + frontSide * .345;
         quad({xx - .35, yy - .125, front}, {xx + .35, yy - .125, front}, {xx + .35, yy + .125, front},
              {xx - .35, yy + .125, front}, {.94f, .91f, .78f, 1});
         const float noEmission[]{0, 0, 0, 1};
@@ -948,6 +1080,10 @@ bool Renderer::prepareTerrain(const Hill &h) {
         contactShadowTexture = makeContactShadowTexture();
     if (!concreteTexture)
         concreteTexture = makeConcreteTexture();
+    if (!ledPixelTexture)
+        ledPixelTexture = makeLedPixelTexture();
+    if (!ledGlowTexture)
+        ledGlowTexture = makeLedGlowTexture();
     preparingVenue = index;
     const Hill *hill = &hills()[index];
     preparingLandscape = gfx::prepareList([this, hill, index] {
@@ -1218,6 +1354,8 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     const auto &stands = grandstandLayouts[index];
     const visual::CameraSurface arenaSnow(h);
     const double arenaNear = stands.near;
+    std::vector<LedBoard> ledBoards;
+    ledBoards.reserve(visual::GrandstandLayout::sectionCount * 2);
     // One opaque material group for all concrete, rather than texture switches
     // around every timber seat. Coordinates and triangle counts stay identical.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::CURRENT_BIT);
@@ -1240,7 +1378,8 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             const auto &stand = stands.section(side, section);
             const double x = stand.center, width = stand.width;
             const Color accent = section % 3 == 0 ? Color{.86f, .37f, .25f, 1} : Color{.25f, .68f, .65f, 1};
-            advertisement(h, x, width, front, side, accent, section % 3 == 0 ? "NORDIC" : "THE PERFECT V", accumulatedSnow);
+            ledBoards.push_back(advertisement(h, x, width, front, side, accent,
+                                             section % 3 == 0 ? "NORDIC" : "THE PERFECT V", accumulatedSnow));
             for (int edge : {0,1}) {
                 const double z = side * (arenaNear + (edge ? 4.95 : 1.35));
                 const auto &first = stand.terraces.front(), &last = stand.terraces.back();
@@ -1300,6 +1439,16 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             floodlight(h, fixture.base.x, fixture.base.z, fixture.size, accumulatedSnow);
         }
     }
+    // All LED fronts share one opaque material group in the cached venue.
+    // The unlit colors are constant emission, with fog but no lighting work,
+    // new lights or shadow passes. Frames and rear panels remain normally lit.
+    visual::pushAttrib(gfx::ENABLE_BIT | gfx::TEXTURE_BIT | gfx::CURRENT_BIT);
+    visual::enable(gfx::TEXTURE_2D);
+    visual::bindTexture(gfx::TEXTURE_2D, ledPixelTexture);
+    visual::disable(gfx::LIGHTING);
+    for (const auto &board : ledBoards)
+        ledBoard(board);
+    visual::popAttrib();
     // One opaque snow group, compiled into the venue's existing cached mesh.
     // Reuse terrain UVs/albedo. Blend rim normals into the original terrain;
     // buried edges then join without a bright outline or an alpha-blended pass.
@@ -1319,6 +1468,19 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
             vertex(v.position);
         }
     visual::end();
+    // A cached, local halo only around each word: 56 triangles for the arena.
+    // Alpha blending and depth testing keep this independent of scene lights.
+    visual::pushAttrib(gfx::ENABLE_BIT | gfx::TEXTURE_BIT | gfx::CURRENT_BIT |
+                       gfx::DEPTH_BUFFER_BIT | gfx::COLOR_BUFFER_BIT);
+    visual::enable(gfx::TEXTURE_2D);
+    visual::bindTexture(gfx::TEXTURE_2D, ledGlowTexture);
+    visual::disable(gfx::LIGHTING);
+    visual::enable(gfx::BLEND);
+    visual::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
+    visual::depthMask(false);
+    for (const auto &board : ledBoards)
+        ledBoardGlow(board);
+    visual::popAttrib();
     staticBatch.finish();
     // Finish writes current attributes, so restore the caller's state last.
     sjp::visual::popAttrib();

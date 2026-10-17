@@ -478,6 +478,10 @@ Renderer::~Renderer() {
         sjp::gfx::deleteTextures(1, &contactShadowTexture);
     if (concreteTexture)
         sjp::gfx::deleteTextures(1, &concreteTexture);
+    if (ledPixelTexture)
+        sjp::gfx::deleteTextures(1, &ledPixelTexture);
+    if (ledGlowTexture)
+        sjp::gfx::deleteTextures(1, &ledGlowTexture);
     if (spruceMarkerTexture)
         sjp::gfx::deleteTextures(1, &spruceMarkerTexture);
     if (sprayMarkerTexture)

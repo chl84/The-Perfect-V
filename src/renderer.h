@@ -81,6 +81,8 @@ class Renderer {
     sjp::gfx::Id naturalSnowTexture = 0;
     sjp::gfx::Id contactShadowTexture = 0;
     sjp::gfx::Id concreteTexture = 0;
+    sjp::gfx::Id ledPixelTexture = 0;
+    sjp::gfx::Id ledGlowTexture = 0;
     sjp::gfx::Id spruceMarkerTexture = 0;
     sjp::gfx::Id sprayMarkerTexture = 0;
     sjp::gfx::Id recordMarkerMesh = 0;
