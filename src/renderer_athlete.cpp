@@ -1464,25 +1464,17 @@ void heroCloth(const OriginalSkeleton &s, const Frame &motion, Color red, Color 
     const Basis torso = segmentBasis(shoulder - hip);
     const Vec3 knees = (s[J::Knee1] + s[J::Knee2]) * .5;
     material(Finish::Metal);
-    // A short opaque pleated skirt follows the original thighs in every pose.
-    const auto skirt = [&](double t, double angle) {
-        const double pleat = 1 + .065 * t * std::cos(angle * 12);
-        const double flutter = .010 * t * t * std::sin(double(motion.elapsed) * 6 - t * 7 + angle * 3);
-        return hip + (knees - hip) * (.72 * t) + torso.up * (.012 * (1 - t)) +
-               torso.side * ((.153 + .115 * t) * pleat * std::sin(angle)) +
-               torso.forward * ((.115 + .075 * t + flutter) * pleat * std::cos(angle));
-    };
+    const auto skirt = visual::heroSkirtMesh(s, motion);
     emitBegin(gfx::QUADS);
-    for (int r = 0; r < 4; ++r)
-        for (int i = 0; i < 24; ++i) {
-            const double a = i * PI / 12, z = a + PI / 12, t = r / 4.0, u = (r + 1) / 4.0;
-            quad(skirt(t, a), skirt(t, z), skirt(u, z), skirt(u, a),
+    for (size_t r = 0; r < visual::heroSkirtRows; ++r)
+        for (size_t i = 0; i < visual::heroSkirtColumns; ++i) {
+            quad(skirt[r][i], skirt[r][i + 1], skirt[r + 1][i + 1], skirt[r + 1][i],
                  shade(red, i % 3 == 0 ? 1.1 : i % 3 == 2 ? .78 : 1));
         }
     // Close the hem with an inset red lining; no exposed pelvis under the skirt.
-    const Vec3 center = hip + (knees - hip) * .72;
-    for (int i = 0; i < 24; ++i)
-        quad(center, skirt(1, i * PI / 12), skirt(1, (i + 1) * PI / 12), center, shade(red, .68));
+    const Vec3 center = hip + (knees - hip) * visual::heroSkirtLength;
+    for (size_t i = 0; i < visual::heroSkirtColumns; ++i)
+        quad(center, skirt.back()[i], skirt.back()[i + 1], center, shade(red, .68));
     emitEnd();
     material(Finish::Fabric);
     // Both sides must share the same triangulation. Reversing a nonplanar
@@ -1590,7 +1582,13 @@ void drawAthleteGeometry(const OriginalSkeleton &skeleton, bool ghost, JumperApp
             if (hero) {
                 material(Finish::Skin);
                 tailoredSegment(trouserHem, knee, .067, .066, .082, .081, skin);
-                tailoredSegment(knee, hip, .082, .081, .113, .109, skin);
+                // Skin ends just inside the opaque hem instead of intersecting
+                // the skirt when the original pose bends or spreads the legs.
+                const double covered = visual::heroSkirtLength - .02;
+                const Vec3 thighTop = hip + (knee - hip) * covered;
+                tailoredSegment(knee, thighTop, .082, .081,
+                                .082 + (.113 - .082) * (1 - covered),
+                                .081 + (.109 - .081) * (1 - covered), skin);
                 ellipsoid(knee, segmentBasis(hip - ankle), {.081, .093, .080}, skin, 8, 4);
                 material(Finish::Metal);
                 tailoredSegment(shoulder, elbow, .076, .078, .058, .061, suit);

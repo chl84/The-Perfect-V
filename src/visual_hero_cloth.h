@@ -23,6 +23,36 @@ inline HeroBreeze heroBreeze(const Frame &f) {
 inline Vec3 heroForward(Vec3 up) {
     return cross(up, std::abs(up.z) < .9 ? Vec3{0, 0, 1} : Vec3{0, 1, 0}).normalized();
 }
+inline constexpr size_t heroSkirtRows = 4, heroSkirtColumns = 24;
+inline constexpr double heroSkirtLength = .72;
+using HeroSkirtMesh = std::array<std::array<Vec3, heroSkirtColumns + 1>, heroSkirtRows + 1>;
+inline HeroSkirtMesh heroSkirtMesh(const OriginalSkeleton &s, const Frame &f) {
+    using J = OriginalJoint;
+    const Vec3 hip = s[J::HipCenter], torsoUp = (s[J::ShoulderCenter] - hip).normalized();
+    const Vec3 torsoFront = heroForward(torsoUp), torsoSide = cross(torsoFront, torsoUp).normalized();
+    const Vec3 knees = (s[J::Knee1] + s[J::Knee2]) * .5;
+    const Vec3 legUp = (hip - knees).normalized(), spread = (s[J::Knee1] - s[J::Knee2]) * .5;
+    HeroSkirtMesh mesh{};
+    for (size_t r = 0; r <= heroSkirtRows; ++r) {
+        const double t = r / double(heroSkirtRows);
+        // The waist stays inside the belt; lower rings turn with the thighs.
+        const Vec3 up = (torsoUp * (1 - t) + legUp * t).normalized();
+        const Vec3 side = (torsoSide - up * dot(torsoSide, up)).normalized();
+        const Vec3 front = cross(up, side).normalized();
+        const Vec3 center = hip + (knees - hip) * (heroSkirtLength * t) + torsoUp * (.012 * (1 - t));
+        const double width = .153 + .115 * t + std::abs(dot(spread, side)) * heroSkirtLength * t;
+        const double depth = .115 + .075 * t + std::abs(dot(spread, front)) * heroSkirtLength * t;
+        for (size_t c = 0; c < heroSkirtColumns; ++c) {
+            const double angle = c * 2 * PI / heroSkirtColumns;
+            const double pleat = 1 + .065 * t * std::cos(angle * 12);
+            const double flutter = .010 * t * t * std::sin(double(f.elapsed) * 6 - t * 7 + angle * 3);
+            mesh[r][c] = center + side * (width * pleat * std::sin(angle)) +
+                         front * ((depth + flutter) * pleat * std::cos(angle));
+        }
+        mesh[r].back() = mesh[r].front();
+    }
+    return mesh;
+}
 inline Vec3 heroCapePoint(const OriginalSkeleton &s, const Frame &f, double t, double across) {
     using J = OriginalJoint;
     const Vec3 shoulder = s[J::ShoulderCenter], hip = s[J::HipCenter];

@@ -109,7 +109,6 @@ enum class Action {
     Wind,
     TimeOfDay,
     Weather,
-    EnvironmentReset,
     Ghost,
     CupSetupMode,
     CupSetupTab,
@@ -1261,9 +1260,6 @@ class App {
             if (value >= 0 && value <= 4)
                 records.environment.weather = environment::Weather(value);
             break;
-        case Action::EnvironmentReset:
-            records.environment = {};
-            break;
         case Action::Ghost:
             ghost = !ghost;
             break;
@@ -1689,7 +1685,6 @@ class App {
         for (int i = 0; i <= 4; ++i)
             button(environment::name(environment::Weather(i)), 86 + (i % 3) * 276, 510 + (i / 3) * 59, 256,
                    Action::Weather, i, int(records.environment.weather) == i);
-        smallButton("Day & sun", 64, 662, 151, Action::EnvironmentReset);
     }
     void graphicsSettings() {
         top("Graphics");
@@ -2842,10 +2837,11 @@ class App {
                 renderer->finish();
             }
         }
-        clickButton(Action::EnvironmentReset);
+        clickButton(Action::TimeOfDay, int(environment::TimeOfDay::Day));
+        clickButton(Action::Weather, int(environment::Weather::Sunny));
         if (records.environment.time != environment::TimeOfDay::Day ||
             records.environment.weather != environment::Weather::Sunny)
-            throw std::runtime_error("Day and sun defaults failed");
+            throw std::runtime_error("Day and sun selection failed");
         render();
         if (!captureDir.empty())
             renderer->capture(captureDir + "/environment.ppm");

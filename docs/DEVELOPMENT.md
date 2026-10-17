@@ -335,6 +335,10 @@ Hero adds a fitted glossy blue bodice, red pleated short skirt, gold chevron
 belt, red knee-high boots with gold trim, a scarlet cape and a helmet-free face
 with a centre-parted, uniformly near-black hairstyle. Scalp and flowing locks
 use the same hair colour without root/tip gradients or painted streaks.
+The skirt keeps its waist beneath the belt while its lower rings turn with
+the thighs and widen with their separation. Hidden upper-thigh skin ends inside
+the opaque hem to prevent flesh-coloured tears during crouches and wide stances.
+The existing 4×24 skirt grid and complete model triangle budget are unchanged.
 The red/gold shield and S motif are clipped to the exact bodice triangles and
 cached in local coordinates, retaining their curvature with fewer polygons.
 Hair is one connected 14-row, 16-column surface

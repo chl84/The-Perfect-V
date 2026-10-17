@@ -148,6 +148,62 @@ void cartoonHairMotion() {
         previous = axes;
     }
 }
+void heroSkirtMotion() {
+    using namespace sjp;
+    using J = OriginalJoint;
+    bool bent = false, wide = false;
+    for (int hill = 0; hill < int(HILL_COUNT); ++hill) {
+        Simulation sim(hill, 0);
+        sim.resetOriginal(hill, 12345, 98765);
+        sim.setWind(0, 0);
+        for (int tick = 0; tick < 14000 && sim.phase != Phase::Finished; ++tick) {
+            sim.step(ORIGINAL_TICK, autopilot(sim));
+            if (tick % 16) continue;
+            const auto frame = sim.frame();
+            const auto s = originalSkeleton(frame.pose, frame.leadingLeg);
+            const auto mesh = visual::heroSkirtMesh(s, frame);
+            const Vec3 hip = s[J::HipCenter], knees = (s[J::Knee1] + s[J::Knee2]) * .5;
+            const Vec3 up = (hip - knees).normalized();
+            const Vec3 torsoUp = (s[J::ShoulderCenter] - hip).normalized();
+            bent |= dot(up, torsoUp) < -.5;
+            wide |= (s[J::Knee1] - s[J::Knee2]).length() > .5;
+            for (const auto &ring : mesh) {
+                require((ring.front() - ring.back()).length() == 0, "Hero skirt seam opens");
+                for (auto p : ring)
+                    require(std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z),
+                            "Hero skirt becomes nonfinite during an original pose");
+            }
+            auto later = frame;
+            later.elapsed += .5f;
+            const auto fluttered = visual::heroSkirtMesh(s, later);
+            for (size_t c = 0; c <= visual::heroSkirtColumns; ++c)
+                require((mesh.front()[c] - fluttered.front()[c]).length() == 0,
+                        "Hero skirt waist detaches from the belt with flutter");
+            const Vec3 center = hip + (knees - hip) * visual::heroSkirtLength;
+            const Vec3 side = (mesh.back()[6] - center).normalized(), front = cross(up, side).normalized();
+            for (auto p : mesh.back())
+                require(std::abs(dot(p - center, up)) < 1e-9,
+                        "Hero skirt hem follows the torso instead of bent thighs");
+            // The hem must surround both thighs, including their skin radius,
+            // instead of cutting into them when the original pose spreads legs.
+            for (J knee : {J::Knee1, J::Knee2})
+                for (int angle = 0; angle < 16; ++angle) {
+                    const Vec3 p = hip + (s[knee] - hip) * visual::heroSkirtLength - center +
+                        side * (.095 * std::cos(angle * PI / 8)) + front * (.095 * std::sin(angle * PI / 8));
+                    const double x = dot(p, side), y = dot(p, front);
+                    bool inside = false;
+                    for (size_t c = 0; c < visual::heroSkirtColumns; ++c) {
+                        const Vec3 a = mesh.back()[c] - center, b = mesh.back()[c + 1] - center;
+                        const double ax = dot(a, side), ay = dot(a, front), bx = dot(b, side), by = dot(b, front);
+                        if ((ay > y) != (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax)
+                            inside = !inside;
+                    }
+                    require(inside, "Hero thigh skin protrudes through the skirt hem");
+                }
+        }
+    }
+    require(bent && wide, "Skirt regression missed deep bending or wide leg stances");
+}
 void heroClothMotion() {
     using namespace sjp;
     OriginalPose pose;
@@ -1819,6 +1875,7 @@ int main() {
             const auto original = sim.frame();
             audit::cartoonHairMotion();
             audit::heroClothMotion();
+            audit::heroSkirtMotion();
             for (auto appearance : sjp::JUMPER_APPEARANCES) {
                 r.setJumperAppearance(appearance);
                 r.begin(sim.hill(), original, 0, 0, false, true, &original);
