@@ -1646,6 +1646,7 @@ int main() {
         {
             sjp::Renderer r(nullptr, SJP_TEST_ASSET_DIR);
             auditVenueBytes = 40 * 1024 * 1024;
+            r.setSceneryShadows(false); // Isolate the terrain cache's byte budget.
             preparedVenues.clear();
             auto visit = [&](int hi) {
                 sjp::Simulation s(hi, 0);
@@ -1843,6 +1844,7 @@ int main() {
             sjp::Simulation sim(2, 0);
             const auto before = sim.frame();
             const sjp::visual::StartSignal layout(sim.hill(), before);
+            r.setSceneryShadows(false); // Lens and atmosphere tests isolate the invariant venue mesh.
             audit::signalCenters = {layout.lens(0), layout.lens(1)};
             audit::signalFront = layout.front;
             audit::captureSignal = true;
@@ -1924,6 +1926,33 @@ int main() {
                                        std::abs(audit::fogEnd - expected.fogEnd * sim.hill().scale()) < 1e-3,
                                    "Renderer ignored the chosen time or weather lighting");
                 }
+            const auto preparedBeforeShadows = preparedVenues.size();
+            r.setSceneryShadows(true);
+            r.setEnvironment({sjp::environment::TimeOfDay::Morning,sjp::environment::Weather::Sunny,1},true);
+            r.begin(sim.hill(),before,0,0,false); r.finish();
+            audit::require(preparedVenues.size() == preparedBeforeShadows+1,
+                           "Directional shadows rebuilt the complete venue");
+            r.begin(sim.hill(),before,0,0,false); r.finish();
+            audit::require(preparedVenues.size() == preparedBeforeShadows+1,
+                           "Unchanged daylight rebuilt directional shadows");
+            r.setEnvironment({sjp::environment::TimeOfDay::Evening,sjp::environment::Weather::Sunny,1},true);
+            r.begin(sim.hill(),before,0,0,false); r.finish();
+            audit::require(preparedVenues.size() == preparedBeforeShadows+2,
+                           "Changing sun direction failed to rebuild only the shadow mesh");
+            r.setEnvironment({sjp::environment::TimeOfDay::Morning,sjp::environment::Weather::Sunny,1},true);
+            r.begin(sim.hill(),before,0,0,false); r.finish();
+            audit::require(preparedVenues.size() == preparedBeforeShadows+2 && r.sceneReady(),
+                           "Returning to an earlier time of day rebuilt its cached shadows");
+            for (auto weather : {sjp::environment::Weather::Overcast, sjp::environment::Weather::Snowfall,
+                                 sjp::environment::Weather::Fog})
+                for (auto time : {sjp::environment::TimeOfDay::Day, sjp::environment::TimeOfDay::Night}) {
+                    r.setEnvironment({time,weather,1},true);
+                    r.begin(sim.hill(),before,0,0,false); r.finish();
+                }
+            r.setEnvironment({sjp::environment::TimeOfDay::Night,sjp::environment::Weather::Sunny,1},true);
+            r.begin(sim.hill(),before,0,0,false); r.finish();
+            audit::require(preparedVenues.size() == preparedBeforeShadows+2 && r.sceneReady(),
+                           "Invisible overcast, fog, snowfall or moonlight shadows were baked");
             const auto after = sim.frame();
             audit::require(before.x == after.x && before.y == after.y && before.pose == after.pose &&
                                before.windSpeed == after.windSpeed && before.windAngle == after.windAngle &&

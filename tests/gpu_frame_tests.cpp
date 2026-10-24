@@ -23,6 +23,7 @@ struct Resource {
 };
 int resources = 0, waits = 0, submits = 0, draws = 0, uploads = 0, blits = 0, acquisitions = 0;
 int pipelineCreations = 0;
+int anisotropicSamplers = 0;
 bool available = true;
 bool requirePreparedScene = false;
 bool immediateAvailable = true, multisampleAvailable = true;
@@ -152,7 +153,12 @@ SDL_GPUTexture *SDLCALL SDL_CreateGPUTexture(SDL_GPUDevice *, const SDL_GPUTextu
     texture->samples = info->sample_count;
     return texture;
 }
-SDL_GPUSampler *SDLCALL SDL_CreateGPUSampler(SDL_GPUDevice *, const SDL_GPUSamplerCreateInfo *) {
+SDL_GPUSampler *SDLCALL SDL_CreateGPUSampler(SDL_GPUDevice *, const SDL_GPUSamplerCreateInfo *info) {
+    if (info->enable_anisotropy) {
+        audit::require(info->max_anisotropy == 4 && info->max_lod > 0,
+                       "Snow anisotropy lost its 4x setting or mip chain");
+        ++audit::anisotropicSamplers;
+    }
     return audit::make<SDL_GPUSampler>();
 }
 SDL_GPUGraphicsPipeline *SDLCALL
@@ -503,6 +509,20 @@ int main() {
             triangle();
             present(false);
             audit::require(audit::blending.back(), "Texture alpha incorrectly disabled blending");
+            const int previousAnisotropy = audit::anisotropicSamplers;
+            Id snow;
+            genTextures(1, &snow);
+            bindTexture(TEXTURE_2D, snow);
+            const unsigned char snowPixels[16]{255,255,255,255,255,255,255,255,
+                                                255,255,255,255,255,255,255,255};
+            texImage2D(TEXTURE_2D, 0, RGBA, 2, 2, 0, RGBA, UNSIGNED_BYTE, snowPixels);
+            texImage2D(TEXTURE_2D, 1, RGBA, 1, 1, 0, RGBA, UNSIGNED_BYTE, snowPixels);
+            texParameteri(TEXTURE_2D, TEXTURE_MIN_FILTER, LINEAR_MIPMAP_LINEAR);
+            texParameteri(TEXTURE_2D, TEXTURE_MAX_ANISOTROPY, 4);
+            beginFrame(640,480); triangle(); present(false);
+            audit::require(audit::anisotropicSamplers == previousAnisotropy+1,
+                           "Mipmapped snow was uploaded without anisotropic filtering");
+            deleteTextures(1,&snow);
             disable(TEXTURE_2D);
             auto prepared = prepareList([] {
                 pushAttrib(ENABLE_BIT | CURRENT_BIT);

@@ -4,10 +4,12 @@
 #include "presentation_timing.h"
 #include "visual_mountains.h"
 #include "visual_shadow.h"
+#include "visual_sun_shadow_field.h"
 #include "visual_snow_glitter.h"
 #include "visual_sky.h"
 #include "visual_start_signal.h"
 #include "visual_weather.h"
+#include "visual_ski_tracks.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include <algorithm>
@@ -215,7 +217,8 @@ struct ShadowVertex {
 };
 void shadowGeometry(const Hill &h, const Frame &f, const visual::EnvironmentLight &light,
                     const visual::FloodlightField &lamps, const visual::InrunLayout &inrun,
-                    environment::TimeOfDay time, std::vector<ShadowVertex> &vertices) {
+                    environment::TimeOfDay time, const visual::SunShadowField *sun,
+                    std::vector<ShadowVertex> &vertices) {
     vertices.clear();
     const bool onInrun = f.x <= 0;
     const auto surface = [&](double x) { return onInrun ? h.inrun(x) : h.ground(x); };
@@ -225,7 +228,10 @@ void shadowGeometry(const Hill &h, const Frame &f, const visual::EnvironmentLigh
     const auto laneLight = inrun.sample({f.x, f.y, 0}, time);
     illumination.direction = illumination.direction + laneLight.direction;
     illumination.intensity += laneLight.intensity;
-    const auto shadow = visual::landingShadow(light, clearance, slope, illumination);
+    // A ridge between the athlete and the sun removes the direct sun shadow,
+    // exactly as it removes the baked tree and mast shadows on that snow.
+    const auto shadow = visual::landingShadow(light, clearance, slope, illumination,
+                                              sun ? sun->visibility({f.x, f.y, 0}) : 1);
     // Use exactly the same displayed joints as the athlete. Shadow projection
     // is presentation only; neither this pose nor the origin is changed.
     auto pose = f.pose;
@@ -262,7 +268,14 @@ void shadowGeometry(const Hill &h, const Frame &f, const visual::EnvironmentLigh
         const float alpha = silhouette.coverage[size_t(row * visual::ShadowMask::columns + column)];
         const double y = central ? (std::abs(z) <= 2.3 ? ramp[size_t(column)] : ground[size_t(column)])
                                  : receiver.height(x, z);
-        vertices.push_back({{x, y + .012, z}, alpha * float(shadow.opacity)});
+        double opacity = alpha * shadow.opacity;
+        // Snow already in a baked sun shadow has no direct light to block.
+        // Combine as max(athlete, existing): never a darker shadow-in-shadow.
+        if (sun && !onInrun) {
+            const double existing = sun->opacity(x, z);
+            opacity = opacity <= existing ? 0 : (opacity - existing) / std::max(1e-6, 1 - existing);
+        }
+        vertices.push_back({{x, y + .012, z}, float(opacity)});
     };
     // Each receiver cell is drawn once. Body/limb/ski overlap has already been
     // resolved in the mask; no oval or second contact shadow is drawn.
@@ -292,19 +305,26 @@ struct Renderer::ShadowCache {
     std::string hill;
     Frame frame;
     environment::Conditions conditions;
+    std::shared_ptr<const visual::SunShadowField> sun;
     std::vector<ShadowVertex> vertices;
     gfx::Id mesh = 0;
 };
 void Renderer::shadow(const Hill &h, const Frame &f, const visual::FloodlightField &lamps,
                       const visual::InrunLayout &inrun) {
     auto &cache = *shadowCache;
+    std::shared_ptr<const visual::SunShadowField> sun;
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (h.id == hills()[i].id)
+            if (const auto *baked = activeSceneryShadow(i))
+                sun = baked->field;
     const bool repeat = cache.valid && cache.hill == h.id && cache.conditions == sceneEnvironment &&
-                        visual::samePresentationFrame(cache.frame, f);
+                        cache.sun == sun && visual::samePresentationFrame(cache.frame, f);
     if (!repeat) {
         if (cache.mesh)
             gfx::deleteLists(cache.mesh, 1);
         cache.mesh = 0;
-        shadowGeometry(h, f, lighting, lamps, inrun, sceneEnvironment.time, cache.vertices);
+        shadowGeometry(h, f, lighting, lamps, inrun, sceneEnvironment.time, sun.get(), cache.vertices);
+        cache.sun = sun;
         cache.hill = h.id;
         cache.frame = f;
         cache.conditions = sceneEnvironment;
@@ -318,7 +338,8 @@ void Renderer::shadow(const Hill &h, const Frame &f, const visual::FloodlightFie
     gfx::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
     gfx::depthMask(false);
     gfx::enable(gfx::POLYGON_OFFSET_FILL);
-    gfx::polygonOffset(-1, -1);
+    // Prepared snow writes depth at one bias layer; decals sit one above it.
+    gfx::polygonOffset(-2, -2);
     if (cache.mesh) {
         gfx::callList(cache.mesh);
     } else {
@@ -330,7 +351,7 @@ void Renderer::shadow(const Hill &h, const Frame &f, const visual::FloodlightFie
         }
         gfx::begin(gfx::QUADS);
         for (const auto &v : cache.vertices) {
-            gfx::color4f(.09f, .15f, .20f, v.alpha);
+            gfx::color4f(visual::shadowColor[0], visual::shadowColor[1], visual::shadowColor[2], v.alpha);
             gfx::vertex3d(v.position.x, v.position.y, v.position.z);
         }
         gfx::end();
@@ -424,6 +445,7 @@ Renderer::Font Renderer::loadFont(const std::string &path) {
 Renderer::Renderer(SDL_Window *w, const std::string &assets, int msaaSamples, bool vsync, bool validation)
     : window(w) {
     shadowCache = std::make_unique<ShadowCache>();
+    skiTrackCache = std::make_unique<visual::SkiTrackCache>();
     sjp::gfx::initialize(window, msaaSamples, vsync, validation);
     try {
         regular = loadFont(assets + "/fonts/Interim-Regular.ttf");
@@ -450,6 +472,14 @@ Renderer::~Renderer() {
     // layouts. Join before destroying either, including on an early exit.
     if (preparingLandscape.valid())
         preparingLandscape.wait();
+    if (preparingSceneryShadow.valid())
+        preparingSceneryShadow.wait();
+    for (auto &venue : sceneryShadowMeshes)
+        for (auto &entry : venue)
+            releaseSceneryShadow(entry);
+    for (auto texture : preparingShadowTextures)
+        if (texture)
+            gfx::deleteTextures(1, &texture);
     if (shadowCache->mesh)
         gfx::deleteLists(shadowCache->mesh, 1);
     for (auto mesh : previewMeshes)
@@ -613,6 +643,9 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
                            {float(mistColor.x), float(mistColor.y), float(mistColor.z), 1});
     sjp::gfx::snowSunlight(snowGlitter ? visual::snowGlitterSunlight(lighting) : 0.f);
     terrain(h);
+    sceneryShadowsReady = prepareSceneryShadows(h, venue);
+    if (const auto *baked = activeSceneryShadow(venue))
+        gfx::callList(baked->mesh);
     hillRecordMarker(h);
     scenery(h, f, time);
     startSignalLenses(h, f);
@@ -620,6 +653,8 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
     beam({wx, h.ground(wx), -23 * s}, {wx, wy, -23 * s}, .09, colors::muted);
     windsock({wx, wy, -23 * s}, f, f.elapsed);
     const Frame display = cachedAthleteFrame(h, f, false);
+    if (!panorama)
+        skiTracks(h, display);
     shadow(h, display, lamps, inrun);
     athlete(h, display, false);
     if (ghost && gf) {
@@ -627,6 +662,8 @@ void Renderer::drawScene(const Hill &h, const Frame &f, double time, int camera,
         athlete(h, cachedAthleteFrame(h, *gf, true), true);
         sjp::gfx::depthMask(sjp::gfx::TRUE);
     }
+    lampGlows(h, f, inrun);
+    floodlightBeams(h);
     effects(h, display, time, !panorama);
     sjp::gfx::disable(sjp::gfx::FOG);
     sjp::gfx::disable(sjp::gfx::LIGHTING);

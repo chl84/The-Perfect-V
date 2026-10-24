@@ -13,6 +13,9 @@ struct AccumulatedSnowVertex {
 class SnowAccumulation {
   public:
     std::vector<std::array<AccumulatedSnowVertex, 3>> triangles;
+    // Ground-connected banks receive scenery shadows at their actual height;
+    // roof and railing caps are deliberately separate from these receivers.
+    std::vector<size_t> groundTriangles;
     static double variation(double seed) {
         return std::fmod(std::abs(std::sin(seed * 12.9898) * 43758.5453), 1.0);
     }
@@ -29,7 +32,9 @@ class SnowAccumulation {
             std::swap(b, c);
         triangles.push_back({a, b, c});
     }
-    template <class Point> void grid(int rows, int columns, Point point, bool closed = false) {
+    template <class Point> void grid(int rows, int columns, Point point, bool closed = false,
+                                    bool groundConnected = false) {
+        const size_t first = triangles.size();
         std::vector<AccumulatedSnowVertex> mesh(size_t(rows + 1) * (columns + 1));
         auto at = [&](int r, int c) -> AccumulatedSnowVertex & {
             return mesh[size_t(r) * (columns + 1) + c];
@@ -53,6 +58,8 @@ class SnowAccumulation {
                 triangle(at(r, c), at(r + 1, c), at(r + 1, c + 1));
                 triangle(at(r, c), at(r + 1, c + 1), at(r, c + 1));
             }
+        if (groundConnected)
+            for (size_t i = first; i < triangles.size(); ++i) groundTriangles.push_back(i);
     }
     // Independent shape controls avoid scaled copies of the same pillow.
     template <class Path> void capOnPath(Path path, double width, double height, double seed) {
@@ -128,7 +135,7 @@ class SnowAccumulation {
                 std::min(height * uneven, std::max(0., wall.y - ground(wall.x, wall.z) - .025));
             p.y = base - .025 + rise * envelope * profile[c];
             return p;
-        });
+        }, false, true);
     }
     // Taller stand banks use the actual stepped floor as their ceiling. Deep
     // troughs alternate with broad high drifts; wider feet keep the slopes soft.
@@ -154,7 +161,7 @@ class SnowAccumulation {
             const double base = ground(p.x, p.z) - .025;
             p.y = std::min(base + rise * profile[c], std::max(base, top));
             return p;
-        });
+        }, false, true);
     }
     // Foundation snow rests on the ground under a bridge, even when its skirt
     // crosses the ski corridor. CameraSurface also includes the raised deck.
@@ -181,7 +188,7 @@ class SnowAccumulation {
                 p.y = ground(p.x, p.z) - .025 + rise * profile[c];
                 return p;
             },
-            true);
+            true, true);
     }
 };
 } // namespace sjp::visual

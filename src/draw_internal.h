@@ -26,10 +26,10 @@ struct alignas(16) Uniforms {
     std::array<std::array<float, 4>, 10> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
     std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
-    std::array<float, 4> backdropHaze{}, backdropColor{}, valleyEdge{};
+    std::array<float, 4> backdropHaze{}, backdropColor{}, valleyEdge{}, snowCoverage{};
     bool operator==(const Uniforms &other) const;
 };
-static_assert(sizeof(Uniforms) == 1232);
+static_assert(sizeof(Uniforms) == 1248);
 struct PipelineState {
     bool depthTest = false, depthWrite = true, blend = false, cull = false, offset = false;
     float offsetFactor = 0, offsetUnits = 0;
@@ -71,6 +71,7 @@ struct Image {
     std::vector<MipLevel> levels;
     bool repeatU = true, repeatV = true, mipmapped = false;
     bool opaque = true;
+    int anisotropy = 1;
     SDL_GPUDevice *device = nullptr;
     SDL_GPUTexture *texture = nullptr;
     SDL_GPUSampler *sampler = nullptr;

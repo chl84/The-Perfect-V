@@ -14,6 +14,7 @@
 #include <chrono>
 #include <ctime>
 #include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -66,6 +67,7 @@ enum class Screen {
     Standings,
     Replay,
     CupSetup,
+    CupReplace,
     JumpReady,
     ReplayFiles,
     SkiJumper
@@ -124,6 +126,7 @@ enum class Action {
     CupSeasons,
     CupCpuView,
     CupStart,
+    CupReplace,
     CupResume,
     CupTeamName,
     CupTeamCountry,
@@ -288,11 +291,14 @@ class App {
                 // Prefer the most recent namespace; never merge an older checkpoint
                 // back into a save set where the player may have deleted it.
                 auto legacyDirectory = shareDirectory / "ThePerfectV" / "ThePerfectV";
-                if (!std::filesystem::exists(legacyDirectory))
+                std::error_code legacyError;
+                if (!std::filesystem::exists(legacyDirectory, legacyError) && !legacyError)
                     legacyDirectory = shareDirectory / "SkiJumpPro" / "SkiJumpPro";
                 std::string error;
-                if (!importLegacySaves(legacyDirectory.string(), dataDir, &error))
-                    throw std::runtime_error("Could not import previous saves: " + error);
+                if (!importLegacySaves(legacyDirectory.string(), dataDir, &error)) {
+                    message = "Some previous saves could not be imported. Originals are intact; import will retry next launch.";
+                    std::cerr << "Warning: could not import previous saves: " << error << '\n';
+                }
             } else
                 dataDir = (executableDir / "saves").string();
         }
@@ -456,6 +462,7 @@ class App {
         case Screen::Cheats:
         case Screen::Records:
         case Screen::CupSetup:
+        case Screen::CupReplace:
         case Screen::ReplayFiles:
         case Screen::SkiJumper:
             menu = true;
@@ -791,8 +798,25 @@ class App {
         }
         message = "Saved replay: " + path;
     }
+    void exportOriginalReplay(uint32_t seed) {
+        if (!canExportOriginal) {
+            message = replayExportError;
+            return;
+        }
+        const std::string stem = dataDir + "/export-" + std::to_string(seed);
+        std::string path = stem + ".RPL", error;
+        std::error_code ec;
+        for (unsigned suffix = 1; std::filesystem::exists(path, ec); ++suffix)
+            path = stem + "-" + std::to_string(suffix) + ".RPL";
+        if (ec) {
+            message = "Replay could not be saved. Check the save directory.";
+            return;
+        }
+        message = saveOriginalReplay(path, originalReplayData, &error)
+                      ? "Saved original replay: " + path : error;
+    }
     void beginReplay() {
-        if (!hasReplay)
+        if (!hasReplay || (screen == Screen::Result && sim.result.disqualified))
             return;
         if (screen != Screen::Replay)
             replayReturn = screen;
@@ -831,6 +855,10 @@ class App {
         const auto &b = *it;
         double k = clamp((sample - a.elapsed) / (b.elapsed - a.elapsed), 0.0, 1.0);
         return interpolateFrame(a, b, k);
+    }
+    bool showJumpGhost() const {
+        return ghost && hasReplay && lastReplay.hill == selectedHill && screen == Screen::Playing &&
+               sim.phase != Phase::Ready && sim.phase != Phase::Disqualified && !sim.frames.empty();
     }
     void savePreferences() {
         records.camera = camera;
@@ -1024,7 +1052,9 @@ class App {
             running = false;
             break;
         case Action::Back:
-            if (screen == Screen::Graphics || screen == Screen::Audio ||
+            if (screen == Screen::CupReplace) {
+                changeScreen(Screen::CupSetup);
+            } else if (screen == Screen::Graphics || screen == Screen::Audio ||
                 screen == Screen::Gameplay || screen == Screen::Environment || screen == Screen::Cheats) {
                 changeScreen(Screen::Settings);
             } else if (screen == Screen::Help) {
@@ -1159,7 +1189,14 @@ class App {
             editableSetup().skipCpu = !editableSetup().skipCpu;
             break;
         case Action::CupStart:
-            beginCup();
+            if (hasCupSave)
+                changeScreen(Screen::CupReplace);
+            else
+                beginCup();
+            break;
+        case Action::CupReplace:
+            if (screen == Screen::CupReplace)
+                beginCup();
             break;
         case Action::CupResume: {
             std::string error;
@@ -1196,14 +1233,7 @@ class App {
             }
             break;
         case Action::ReplayExport:
-            if (!canExportOriginal)
-                message = replayExportError;
-            else {
-                std::string path = dataDir + "/export-" + std::to_string(originalClockSeed()) + ".RPL", error;
-                message = saveOriginalReplay(path, originalReplayData, &error)
-                              ? "Saved original replay: " + path
-                              : error;
-            }
+            exportOriginalReplay(originalClockSeed());
             break;
         case Action::ReplayExportNative:
             exportNativeReplay();
@@ -1422,6 +1452,10 @@ class App {
                     action(Action::StartTurn);
                 else if (screen == Screen::CupSetup && key == SDLK_RETURN)
                     action(Action::CupStart);
+                else if (screen == Screen::CupReplace && key == SDLK_RETURN)
+                    action(Action::Back);
+                else if (screen == Screen::CupReplace && key == SDLK_Y)
+                    action(Action::CupReplace);
                 else if (screen == Screen::Paused && key == SDLK_RETURN)
                     action(Action::Resume);
                 else if (screen == Screen::Menu) {
@@ -1838,6 +1872,16 @@ class App {
             button("Replay", 608, 691, 217, Action::Replay);
         button("Menu", 842, 691, 271, Action::Back);
     }
+    void cupReplaceUI() {
+        auto &r = *renderer;
+        top("Replace saved cup?");
+        r.rect(300, 300, 840, 300, colors::panel, 12);
+        r.text("A cup is already in progress.", 340, 340, 25, colors::white, true);
+        r.text("Starting a new cup will replace its saved progress.", 340, 394, 19, colors::muted);
+        button("Keep saved cup", 340, 460, 340, Action::Back, 0, true);
+        button("Start new cup", 700, 460, 400, Action::CupReplace);
+        r.text("Enter / Esc: Cancel    Y: Start new cup", 340, 548, 15, colors::muted);
+    }
     void cupSetupUI() {
         auto &r = *renderer;
         auto &setup = editableSetup();
@@ -2090,6 +2134,7 @@ class App {
                         screen == Screen::Gameplay || screen == Screen::Environment || screen == Screen::Cheats ||
                         screen == Screen::Settings || screen == Screen::Records ||
                         screen == Screen::Standings || screen == Screen::CupSetup ||
+                        screen == Screen::CupReplace ||
                         screen == Screen::ReplayFiles || screen == Screen::SkiJumper;
         Frame f = screen == Screen::Replay                                ? replayFrame(replayTime)
                   : screen == Screen::Playing || screen == Screen::Paused ? sim.renderFrame(accumulator)
@@ -2100,8 +2145,7 @@ class App {
             f = gate.frame();
         }
         Frame g;
-        bool showGhost = ghost && hasReplay && lastReplay.hill == selectedHill && screen == Screen::Playing &&
-                         !sim.frames.empty();
+        bool showGhost = showJumpGhost();
         if (showGhost)
             g = replayFrame(f.elapsed - sim.frames.front().elapsed);
         auto conditions = activeEnvironment;
@@ -2112,6 +2156,8 @@ class App {
         else if (panorama)
             conditions = environment::resolve(records.environment, 0x7abc9013U);
         renderer->setEnvironment(conditions);
+        renderer->setSkiTrackHistory(screen == Screen::Replay ? lastReplay.hill : sim.hillIndex,
+                                     screen == Screen::Replay ? &lastReplay.frames : &sim.frames);
         renderer->setJumperAppearance(screen == Screen::Replay ? lastReplay.jumper : records.jumper);
         renderer->setHillRecord(records.best[size_t(hi)]);
         renderer->begin(hills()[hi], f, time, camera, panorama, showGhost, showGhost ? &g : nullptr);
@@ -2175,6 +2221,9 @@ class App {
         case Screen::CupSetup:
             cupSetupUI();
             break;
+        case Screen::CupReplace:
+            cupReplaceUI();
+            break;
         case Screen::SkiJumper:
             skiJumperUI();
             break;
@@ -2211,7 +2260,7 @@ class App {
         records.music = true;
         for (Screen menu : {Screen::Menu, Screen::Hills, Screen::Settings, Screen::Graphics,
                             Screen::Audio, Screen::Help, Screen::Gameplay, Screen::Environment, Screen::Cheats,
-                            Screen::Records, Screen::CupSetup, Screen::ReplayFiles, Screen::SkiJumper}) {
+                            Screen::Records, Screen::CupSetup, Screen::CupReplace, Screen::ReplayFiles, Screen::SkiJumper}) {
             changeScreen(menu);
             if (!audio->menuMusicRequested())
                 throw std::runtime_error("Main menu screen failed to request music");
@@ -2613,6 +2662,18 @@ class App {
             SDL_PushEvent(&e);
             events();
         };
+        const bool previousGhost = ghost;
+        ghost = true;
+        // Keep a replay available even on the first launch of the smoke test.
+        const Replay previousReplay = lastReplay;
+        const bool previousHasReplay = hasReplay;
+        lastReplay = sim.replay();
+        lastReplay.hill = selectedHill;
+        hasReplay = true;
+        for (int tick = 0; tick < 210; ++tick)
+            sim.step(ORIGINAL_TICK, {});
+        if (sim.phase != Phase::Ready || showJumpGhost())
+            throw std::runtime_error("Ghost advanced during the start countdown");
         key(SDLK_ESCAPE);
         if (screen != Screen::Paused)
             throw std::runtime_error("Pause input failed");
@@ -2624,6 +2685,13 @@ class App {
             throw std::runtime_error("Keyboard start input failed");
         sim.step(1. / 120, pending);
         pending = {};
+        while (sim.phase == Phase::Ready)
+            sim.step(ORIGINAL_TICK, {});
+        if (!showJumpGhost() || sim.elapsed - sim.frames.front().elapsed > ORIGINAL_TICK)
+            throw std::runtime_error("Ghost did not start with the current jump");
+        ghost = previousGhost;
+        hasReplay = previousHasReplay;
+        lastReplay = previousReplay;
         bool flightCaptured = false, mouseTakeoff = false, mouseLanding = false, satsReleased = false;
         double landingClickTime = -1;
         for (int n = 0; n < 6000 && screen == Screen::Playing; n++) {
@@ -2714,6 +2782,12 @@ class App {
             throw std::runtime_error("Standing practice jump did not persist its all-time human record");
         if (lastReplay.result.distance != measuredJumpDistance())
             throw std::runtime_error("Completed replay lost centimeter precision");
+        Replay fixedWindReplay;
+        if (canExportOriginal || !lastReplay.originalRpl.empty() ||
+            replayExportError.find("fixed wind") == std::string::npos ||
+            !loadReplay(dataDir + "/latest-dsj2.pvr", fixedWindReplay) ||
+            !fixedWindReplay.originalRpl.empty())
+            throw std::runtime_error("Fixed-wind jump retained an incompatible original replay attachment");
         if (sim.result.distance != std::trunc(double(sim.originalRecordedDistance()) * 2) / 2)
             throw std::runtime_error("Centimeter presentation changed original scoring distance");
         const auto replayRecords = records.best;
@@ -2746,6 +2820,30 @@ class App {
                     throw std::runtime_error("Native replay export changed recorded wind");
             previousExport = exportedPath;
         }
+        const auto previousOriginal = originalReplayData;
+        const bool previousCanExport = canExportOriginal;
+        originalReplayData = {};
+        originalReplayData.startCounter = 65;
+        originalReplayData.impactCounter = 700;
+        canExportOriginal = true;
+        std::string firstOriginalPath;
+        for (int copy = 0; copy < 3; ++copy) {
+            originalReplayData.athleteName = "EXPORT " + std::to_string(copy);
+            exportOriginalReplay(0xdeadbeefu);
+            const std::string prefix = "Saved original replay: ";
+            if (message.compare(0, prefix.size(), prefix) != 0)
+                throw std::runtime_error("Original replay export failed: " + message);
+            const auto path = message.substr(prefix.size());
+            if (copy == 0)
+                firstOriginalPath = path;
+            OriginalReplayData first, exported;
+            if ((copy > 0 && path == firstOriginalPath) ||
+                !readOriginalReplay(firstOriginalPath, first) || first.athleteName != "EXPORT 0" ||
+                !readOriginalReplay(path, exported) || exported.athleteName != originalReplayData.athleteName)
+                throw std::runtime_error("Original replay filename collision overwrote an existing export");
+        }
+        originalReplayData = previousOriginal;
+        canExportOriginal = previousCanExport;
         message.clear();
         render();
         if (!captureDir.empty())
@@ -2787,6 +2885,27 @@ class App {
                 throw std::runtime_error("Replacing a replay lost the Escape destination");
         }
         Simulation successfulJump = sim;
+        const size_t previousReplayFrames = lastReplay.frames.size();
+        const double previousReplayDistance = lastReplay.result.distance;
+        action(Action::Again);
+        for (int tick = 0; tick < 2000 && sim.phase == Phase::Ready; ++tick)
+            sim.step(ORIGINAL_TICK, {});
+        if (sim.phase != Phase::Disqualified)
+            throw std::runtime_error("Start timeout fixture did not disqualify the jumper");
+        completeJump();
+        key(SDLK_R);
+        if (screen != Screen::Result || !hasReplay || lastReplay.frames.size() != previousReplayFrames ||
+            lastReplay.result.distance != previousReplayDistance)
+            throw std::runtime_error("Disqualified result opened or replaced the previous replay");
+        render();
+        if (std::any_of(buttons.begin(), buttons.end(), [](const Button &b) { return b.action == Action::Replay; }))
+            throw std::runtime_error("Disqualified result offers an unrelated replay");
+        renderer->finish();
+        changeScreen(Screen::Menu);
+        key(SDLK_R);
+        if (screen != Screen::Replay)
+            throw std::runtime_error("Disqualification made the previous replay unavailable from the menu");
+        action(Action::Back);
         sim.reset(0, 0);
         sim.setWind(0, 0);
         changeScreen(Screen::Playing);
@@ -3027,6 +3146,30 @@ class App {
                     throw std::runtime_error("Hotseat cup checkpoint failed");
                 if (teamJumps == 0) {
                     action(Action::Back);
+                    auto readCup = [&] {
+                        std::ifstream file(dataDir + "/cup.sjc", std::ios::binary);
+                        return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+                    };
+                    const auto savedCup = readCup();
+                    clickButton(Action::Cup);
+                    key(SDLK_RETURN);
+                    if (screen != Screen::CupReplace || readCup() != savedCup)
+                        throw std::runtime_error("Enter replaced a saved cup without confirmation");
+                    key(SDLK_RETURN);
+                    if (screen != Screen::CupSetup || readCup() != savedCup)
+                        throw std::runtime_error("Enter must cancel cup replacement");
+                    clickButton(Action::CupStart);
+                    if (screen != Screen::CupReplace || readCup() != savedCup)
+                        throw std::runtime_error("Start cup bypassed replacement confirmation");
+                    key(SDLK_ESCAPE);
+                    if (screen != Screen::CupSetup || readCup() != savedCup)
+                        throw std::runtime_error("Escape changed the saved cup");
+                    clickButton(Action::CupStart);
+                    if (!captureDir.empty()) renderer->capture(captureDir + "/cup-replace.ppm");
+                    clickButton(Action::Back);
+                    if (screen != Screen::CupSetup || readCup() != savedCup)
+                        throw std::runtime_error("Keep saved cup changed its checkpoint");
+                    clickButton(Action::Back);
                     const auto beforeResume = mouseCaptureTransitions;
                     clickButton(Action::CupResume);
                     requireCapture(false);
@@ -3178,6 +3321,22 @@ class App {
         records.adjustedSuit = oldSuit;
         savePreferences();
         std::cout << "Smoke test: Cheats menu, two-round cup, replay metadata and record isolation passed\n";
+        action(Action::Back);
+        action(Action::Cup);
+        worldSetup = defaultCupSetup(123);
+        worldSetup.participants.resize(1);
+        worldSetup.participants[0].name = "CONFIRMED NEW CUP";
+        worldSetup.hills = {0};
+        setupTeam = false;
+        clickButton(Action::CupStart);
+        if (screen != Screen::CupReplace)
+            throw std::runtime_error("Active cup replacement did not require confirmation");
+        clickButton(Action::CupReplace);
+        Competition replaced;
+        if (screen != Screen::JumpReady || !loadCompetition(dataDir + "/cup.sjc", replaced) ||
+            replaced.setup().participants[0].name != "CONFIRMED NEW CUP")
+            throw std::runtime_error("Confirmed cup replacement did not start and save the new cup");
+        std::cout << "Smoke test: countdown ghost, disqualification replay, fixed-wind attachments, cup confirmation and export collisions passed\n";
         sjp::gfx::finish();
         std::cout << "Smoke test: all " << hillCount() << " venues, screens, replay and " << hillCount() * 2
                   << "-jump cup passed (" << cupFalls << " falls). Vulkan submissions completed\n";

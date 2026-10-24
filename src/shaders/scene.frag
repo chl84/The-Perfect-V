@@ -11,6 +11,7 @@ layout(location = 7) in vec3 snowView;
 layout(location = 8) flat in vec3 snowSun;
 layout(location = 9) in vec4 backdropMist;
 layout(location = 10) flat in vec4 valleyEdge;
+layout(location = 11) flat in vec4 snowCoverage;
 layout(location = 0) out vec4 fragmentColor;
 
 // Integer hashing is stable for fixed surface cells, including negative world
@@ -51,6 +52,12 @@ float snowGlitter() {
     return spot * reflection * resolved * max(dot(n, l), 0.0) * fogParameters.w;
 }
 void main() {
+    // Fully opaque prepared snow supplies both color and depth here. Skip the
+    // hidden natural underlay before its anisotropic texture/glitter work.
+    vec2 snowXZ = textureUV * 13.0;
+    if (snowCoverage.w > 0.0 && abs(snowXZ.y) < snowCoverage.x &&
+        snowXZ.x < snowCoverage.y && snowXZ.x > snowCoverage.z)
+        discard;
     vec4 texel = textured != 0.0 ? texture(image, textureUV) : vec4(1.0);
     fragmentColor = vertexColor * texel;
     if (valleyEdge.z != 0.0) {

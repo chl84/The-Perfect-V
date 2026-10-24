@@ -142,6 +142,7 @@ class Simulation {
     void configureAi(const OriginalAiSkills &skills, bool computer = true, bool fastAdvance = false);
     void step(double dt, const Input &input);
     void setWind(double speed, double angle); // fixed vector for measured comparisons
+    bool usesFixedWind() const { return fixedWind; }
     // Lock the setting when the jump starts; records/replays use this retained flag.
     void setAdjustedSuit(bool enabled) { if (phase == Phase::Ready) result.adjustedSuit = enabled; }
     double clearance() const { return y - hill().ground(x); }

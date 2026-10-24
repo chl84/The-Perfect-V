@@ -61,7 +61,7 @@ struct State {
     std::array<std::array<float, 4>, ARENA_LIGHT_COUNT> inrunPositionRange{}, inrunDirectionCone{};
     std::array<float, 4> inrunParameters{}, inrunColor{};
     std::array<float, 4> signalPositionRange{}, signalDirectionCone{}, signalColor{}, signalParameters{};
-    std::array<float, 4> backdropHaze{}, backdropColor{}, valleyEdge{};
+    std::array<float, 4> backdropHaze{}, backdropColor{}, valleyEdge{}, snowCoverage{};
     float snowMaterial = 0, snowSunlight = 0;
     float shininess = 0, fogStart = 0, fogEnd = 1, lineWidth = 1;
 };
@@ -145,6 +145,7 @@ struct Context {
         u.backdropHaze = state.backdropHaze;
         u.backdropColor = state.backdropColor;
         u.valleyEdge = state.valleyEdge;
+        u.snowCoverage = state.snowCoverage;
         if (u.backdropHaze[0] == 1.f && !state.pipeline.depthTest)
             u.backdropHaze[0] = 0; // UI/sky never inherit the distant scene veil.
         return u;
@@ -561,6 +562,7 @@ void popAttrib() {
             s.backdropHaze = old.backdropHaze;
             s.backdropColor = old.backdropColor;
             s.valleyEdge = old.valleyEdge;
+            s.snowCoverage = old.snowCoverage;
             s.lighting = old.lighting;
             s.light0 = old.light0;
             s.light1 = old.light1;
@@ -744,6 +746,8 @@ void materialfv(Enum, Enum property, const float *v) {
             c.state.emission = value;
         else if (property == VALLEY_EDGE)
             c.state.valleyEdge = value;
+        else if (property == SNOW_COVERAGE)
+            c.state.snowCoverage = value;
         else
             throw std::runtime_error("Unsupported scene material");
     });
@@ -909,6 +913,11 @@ void texParameteri(Enum, Enum property, int value) {
         image->repeatV = value == int(REPEAT);
     else if (property == TEXTURE_MIN_FILTER)
         image->mipmapped = value == int(LINEAR_MIPMAP_LINEAR);
+    else if (property == TEXTURE_MAX_ANISOTROPY) {
+        if (value < 1 || value > 8)
+            throw std::runtime_error("Scene anisotropy must be between 1 and 8");
+        image->anisotropy = value;
+    }
     else if (property != TEXTURE_MAG_FILTER)
         throw std::runtime_error("Unsupported scene sampler property");
 }

@@ -2,6 +2,8 @@
 #include "renderer.h"
 #include "visual_weather.h"
 #include "visual_ski_spray.h"
+#include "visual_start_signal.h"
+#include "visual_ski_tracks.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -66,6 +68,133 @@ void Renderer::setEnvironment(environment::Conditions conditions, bool restart) 
     snowfall = conditions.weather == environment::Weather::Snowfall;
     snowParticles.clear();
     effectsInitialized = false;
+}
+
+void Renderer::lampGlows(const Hill &h, const Frame &frame, const visual::InrunLayout &inrun) {
+    if (!lampGlow)
+        return;
+    const Vec3 forward = (target - eye).normalized(), right = cross(forward, {0, 1, 0}).normalized(),
+               up = cross(right, forward).normalized();
+    gfx::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::COLOR_BUFFER_BIT |
+                    gfx::DEPTH_BUFFER_BIT | gfx::TEXTURE_BIT);
+    gfx::disable(gfx::LIGHTING);
+    gfx::disable(gfx::TEXTURE_2D);
+    gfx::disable(gfx::CULL_FACE);
+    gfx::enable(gfx::DEPTH_TEST);
+    gfx::enable(gfx::BLEND);
+    gfx::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
+    gfx::depthMask(false);
+    // One small batch of soft halos at actual lenses, rather than a screen
+    // bloom pass. Advertising panels never contribute to this effect.
+    gfx::begin(gfx::TRIANGLES);
+    auto halo = [&](Vec3 center, Vec3 normal, double radius, double power, Vec3 tint) {
+        const Vec3 toEye = eye - center;
+        const double distance = toEye.length();
+        if (distance < .1 || dot(center - eye, forward) <= 0)
+            return;
+        const Vec3 view = toEye * (1 / distance);
+        const double facing = visual::smoothUnit((dot(normal, view) - .02) / .4);
+        const double fog = clamp((lighting.fogEnd * h.scale() - distance) /
+                                 ((lighting.fogEnd - lighting.fogStart) * h.scale()), 0.0, 1.0);
+        const double opacity = .18 * power * facing * fog;
+        if (opacity < .001)
+            return;
+        center = center + view * .035;
+        constexpr std::array<double, 4> radii{0, .35, .70, 1};
+        constexpr std::array<double, 4> alpha{1, .60, .13, 0};
+        auto point = [&](int ring, double angle) {
+            gfx::color4f(float(tint.x), float(tint.y), float(tint.z), float(opacity * alpha[size_t(ring)]));
+            vertex(center + (right * std::cos(angle) + up * std::sin(angle)) * (radius * radii[size_t(ring)]));
+        };
+        for (int segment = 0; segment < 16; ++segment) {
+            const double a = segment * 2 * PI / 16, b = (segment + 1) * 2 * PI / 16;
+            point(0, a); point(1, a); point(1, b);
+            for (int ring = 1; ring < 3; ++ring) {
+                point(ring, a); point(ring + 1, a); point(ring + 1, b);
+                point(ring, a); point(ring + 1, b); point(ring, b);
+            }
+        }
+    };
+    const double arenaPower = visual::floodlightStrength(sceneEnvironment.time) / 1.35;
+    if (arenaPower > 0)
+        for (int column = 0; column < visual::floodlightColumns(h); ++column)
+            for (int side : {-1, 1}) {
+                const auto mast = visual::floodlightMast(h, column, side);
+                for (int lens = 0; lens < 6; ++lens)
+                    halo(mast.lamp + Vec3{(lens % 3 - 1) * 1.02, (lens / 3 - .5) * .49, 0},
+                         {0, 0, double(-side)}, .66, arenaPower, {1, .94, .77});
+            }
+    const double inrunPower = visual::InrunLayout::strength(sceneEnvironment.time) / .70;
+    if (inrunPower > 0)
+        for (int column = 0; column < inrun.lightColumns; ++column) {
+            const auto &light = inrun.lights[size_t(column)];
+            const auto &p = light.positionRange, &d = light.directionCone;
+            halo({p[0], p[1], p[2]}, {d[0], d[1], d[2]}, .38, inrunPower, {1, .96, .84});
+        }
+    const visual::StartSignal signal(h, frame);
+    for (int lens = 0; lens < 2; ++lens)
+        if (signal.lit(lens))
+            halo(signal.lens(lens) + signal.front * .03, signal.front, .32, .60 + .40 * arenaPower,
+                 lens == 0 ? Vec3{1, .08, .035} : Vec3{.12, 1, .22});
+    gfx::end();
+    gfx::popAttrib();
+}
+
+void Renderer::skiTracks(const Hill &h, const Frame &f) {
+    if (!trackHistory || trackHistoryHill < 0 || size_t(trackHistoryHill) >= HILL_COUNT ||
+        hills()[size_t(trackHistoryHill)].id != h.id) return;
+    skiTrackCache->update(h,*trackHistory);
+    const auto &triangles = skiTrackCache->triangles;
+    const auto first = std::lower_bound(triangles.begin(),triangles.end(), f.elapsed-visual::SkiTrackCache::lifetime,
+                                       [](const auto &triangle,double t) { return triangle.endTime < t; });
+    gfx::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::DEPTH_BUFFER_BIT |
+                    gfx::COLOR_BUFFER_BIT | gfx::POLYGON_BIT);
+    gfx::disable(gfx::LIGHTING); gfx::disable(gfx::TEXTURE_2D); gfx::disable(gfx::CULL_FACE);
+    gfx::enable(gfx::BLEND); gfx::blendFunc(gfx::SRC_ALPHA,gfx::ONE_MINUS_SRC_ALPHA);
+    gfx::enable(gfx::POLYGON_OFFSET_FILL); gfx::polygonOffset(-2,-2); gfx::depthMask(false);
+    gfx::begin(gfx::TRIANGLES);
+    for (auto it = first; it != triangles.end() && it->endTime <= f.elapsed; ++it)
+        for (const auto &v : it->vertices) {
+            gfx::color4f(.24f,.36f,.48f,float(visual::SkiTrackCache::opacity(f.elapsed,v.time,v.edge)));
+            vertex(v.position);
+        }
+    gfx::end();
+    gfx::popAttrib();
+}
+
+void Renderer::floodlightBeams(const Hill &h) {
+    if (sceneEnvironment.time != environment::TimeOfDay::Night ||
+        (sceneEnvironment.weather != environment::Weather::Fog &&
+         sceneEnvironment.weather != environment::Weather::Snowfall)) return;
+    const visual::FloodlightField field(h,sceneEnvironment.time);
+    gfx::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::DEPTH_BUFFER_BIT | gfx::COLOR_BUFFER_BIT);
+    gfx::disable(gfx::LIGHTING); gfx::disable(gfx::TEXTURE_2D); gfx::disable(gfx::CULL_FACE);
+    gfx::enable(gfx::BLEND); gfx::blendFunc(gfx::SRC_ALPHA,gfx::ONE_MINUS_SRC_ALPHA); gfx::depthMask(false);
+    // Camera-facing slices approximate a very faint shaft. Fixed geometry
+    // budget, depth-tested against the scene, without a volumetric/shadow pass.
+    gfx::begin(gfx::TRIANGLES);
+    for (int i = 0; i < field.columns*2; ++i) {
+        const auto &light = field.lights[size_t(i)];
+        const auto &p = light.positionRange;
+        const Vec3 source{p[0],p[1],p[2]}, end{p[0],h.ground(p[0]),0};
+        const Vec3 axis = (end-source).normalized(), view = (eye-source).normalized();
+        const Vec3 across = cross(axis,view).normalized();
+        const double angleFade = std::sqrt(std::max(0.0,1-std::pow(dot(axis,view),2)));
+        const double opacity = (sceneEnvironment.weather == environment::Weather::Fog ? .055 : .035)*angleFade;
+        constexpr std::array<double,5> along{0,.10,.40,.75,1}, fade{0,1,.72,.32,0};
+        auto point = [&](int row,int side) {
+            const double t = along[size_t(row)];
+            gfx::color4f(1,.94f,.79f,float(opacity*fade[size_t(row)]*(side==0?1:0)));
+            vertex(source+(end-source)*t+across*(side*(.20+5.5*t)));
+        };
+        for (int row = 0; row < 4; ++row)
+            for (int side : {-1,1}) {
+                point(row,0); point(row,side); point(row+1,side);
+                point(row,0); point(row+1,side); point(row+1,0);
+            }
+    }
+    gfx::end();
+    gfx::popAttrib();
 }
 
 void Renderer::effects(const Hill &h, const Frame &f, double, bool showWeather) {

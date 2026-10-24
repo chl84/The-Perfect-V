@@ -39,6 +39,7 @@ layout(set = 1, binding = 0, std140) uniform DrawState {
     vec4 backdropHaze; // mode, hill scale, decorative tail X, maximum opacity
     vec4 backdropColor;
     vec4 valleyEdge; // start/end world Z, enabled, upstream X
+    vec4 snowCoverage; // opaque prepared half-width, end X, start X, enabled
 } state;
 
 layout(location = 0) out vec4 vertexColor;
@@ -52,6 +53,7 @@ layout(location = 7) out vec3 snowView;
 layout(location = 8) flat out vec3 snowSun;
 layout(location = 9) out vec4 backdropMist;
 layout(location = 10) flat out vec4 valleyEdge;
+layout(location = 11) flat out vec4 snowCoverage;
 
 vec3 arenaDiffuse(vec3 eye, vec3 n, float worldX) {
     if (state.arenaParameters.w == 0.0)
@@ -178,6 +180,7 @@ void main() {
         snowSun = eyeToWorld * state.lightDirection0.xyz;
     }
     valleyEdge = state.valleyEdge;
+    snowCoverage = state.snowCoverage;
     backdropMist = vec4(state.backdropColor.rgb, 0.0);
     if (state.backdropHaze.x == 1.0) {
         // World planes already follow object transforms through eye space.
@@ -209,13 +212,27 @@ void main() {
         vec3 halfVector = normalize(l0 + vec3(0.0, 0.0, 1.0));
         float shine = d0 > 0.0 ? (state.parameters.x == 0.0 ? 1.0 :
                       pow(max(dot(n, halfVector), 0.0), state.parameters.x)) : 0.0;
-        vec3 lit = color.rgb * (state.ambient.rgb + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1 +
+        // These world axes are captured before object transforms. Using their
+        // cross product keeps the sky above a rotating athlete and the snow below.
+        vec3 worldUp = cross(state.worldZAxis.xyz, state.arenaAxis.xyz);
+        worldUp *= inversesqrt(max(dot(worldUp, worldUp), 0.000001));
+        float hemisphere = 0.5 + 0.5 * dot(n, worldUp);
+        vec3 snowBounce = state.ambient.rgb * vec3(0.98, 0.93, 0.88);
+        vec3 skyAmbient = state.ambient.rgb * vec3(1.00, 1.07, 1.16);
+        vec3 ambient = mix(snowBounce, skyAmbient, hemisphere);
+        vec3 lit = color.rgb * (ambient + state.diffuse0.rgb * d0 + state.diffuse1.rgb * d1 +
                                localDiffuse(eye.xyz, n));
         // Emission W selects arena tracking. Independently powered indicators
         // keep constant emission; vertex color still supplies surface alpha.
         lit += state.emission.rgb * (1.0 + 2.0 * state.arenaParameters.w * state.emission.w) +
                state.materialSpecular.rgb * state.specularLight0.rgb * shine;
-        vertexColor.rgb = clamp(lit, 0.0, 1.0);
+        // A continuous shoulder retains surface contrast in sunlit snow and
+        // floodlight pools. Scale all channels together to retain warm/cool hues.
+        lit = max(lit, vec3(0.0));
+        float peak = max(lit.r, max(lit.g, lit.b));
+        float excess = max(peak - 0.78, 0.0);
+        float compressed = 0.78 + excess / (1.0 + excess / 0.22);
+        vertexColor.rgb = lit * (peak > 0.78 ? compressed / peak : 1.0);
     }
     textureUV = uv;
     fogDistance = abs(eye.z);

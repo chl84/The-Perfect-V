@@ -11,8 +11,18 @@ struct LandingShadow {
     Vec3 cast;
     double opacity, softness;
 };
+// One sun-shadow darkness and color for the athlete and baked scenery: every
+// opaque caster blocks the same direct light, so none may read darker.
+inline constexpr float shadowColor[3]{.09f, .15f, .21f};
+inline double sunShadowOpacity(const EnvironmentLight &light) { return light.shadowStrength * .85; }
+// Overcast, fog and snowfall leave too little direct light for a visible
+// cast shadow (at most a few 8-bit levels). Moonlight is equally negligible
+// beside the floodlights, where a fixed dark tint would read inverted.
+inline bool bakedSunShadows(const EnvironmentLight &light) {
+    return !light.moon && light.shadowStrength >= .10;
+}
 inline LandingShadow landingShadow(const EnvironmentLight &light, double clearance, double slope,
-                                   FloodlightField::Sample lamps = {}) {
+                                   FloodlightField::Sample lamps = {}, double sunVisibility = 1) {
     clearance = std::max(0.0, clearance);
     const double sunWeight = light.direct.length();
     Vec3 direction = (light.direction * sunWeight + lamps.direction).normalized();
@@ -20,10 +30,12 @@ inline LandingShadow landingShadow(const EnvironmentLight &light, double clearan
     // A broad sky contribution takes over smoothly at grazing incidence. It
     // retains one projection instead of dropping the silhouette entirely.
     const Vec3 normal = Vec3{-slope, 1, 0}.normalized();
-    const double direct = smoothUnit((dot(normal, direction) - .08) / .32);
+    // A terrain ridge between the athlete and the sun removes only the direct
+    // sun component; floodlights and the close sky contact remain.
+    const double direct = smoothUnit((dot(normal, direction) - .08) / .32) * clamp(sunVisibility, 0.0, 1.0);
     direction = mix(Vec3{0, 1, 0}, direction, direct).normalized();
     const double nearSnow = std::exp(-clearance / 32);
-    const double strength = std::max({light.shadowStrength * direct,
+    const double strength = std::max({sunShadowOpacity(light) * direct,
                                       .32 * std::min(1.0, lamps.intensity), .28 * nearSnow});
     const double softness = (.025 + std::min(.18, clearance * .005)) *
                             (1 + (light.shadowSoftness - 1) * (1 - nearSnow) * .5);

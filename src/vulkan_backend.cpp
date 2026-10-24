@@ -22,7 +22,7 @@ bool Uniforms::operator==(const Uniforms &o) const {
            inrunColor == o.inrunColor && signalPositionRange == o.signalPositionRange &&
            signalDirectionCone == o.signalDirectionCone && signalColor == o.signalColor &&
            signalParameters == o.signalParameters && backdropHaze == o.backdropHaze &&
-           backdropColor == o.backdropColor && valleyEdge == o.valleyEdge;
+           backdropColor == o.backdropColor && valleyEdge == o.valleyEdge && snowCoverage == o.snowCoverage;
 }
 bool PipelineState::operator==(const PipelineState &o) const { return !(*this < o) && !(o < *this); }
 bool PipelineState::operator<(const PipelineState &o) const {
@@ -411,6 +411,8 @@ struct VulkanBackend::Impl {
             image->repeatV ? SDL_GPU_SAMPLERADDRESSMODE_REPEAT : SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
         sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
         sampler.max_lod = image->mipmapped ? float(image->levels.size() - 1) : 0;
+        sampler.enable_anisotropy = image->mipmapped && image->anisotropy > 1;
+        sampler.max_anisotropy = float(image->anisotropy);
         image->sampler = SDL_CreateGPUSampler(device, &sampler);
         if (!image->sampler)
             fail("scene sampler creation");

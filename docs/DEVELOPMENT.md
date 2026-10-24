@@ -928,3 +928,64 @@ jumps, falls, headwind/tailwind, 30/144 FPS and irregular frame intervals on
 all 32 hills. Renderer command tests check actual rail selection, frame cadence
 and paused camera position. Native Vulkan captures and the full-game smoke
 test cover the installed renderer.
+
+## Cached scenery shadows and snow detail
+
+The two snow samplers use 4x anisotropy with their existing mip chains. Other
+textures retain their previous filtering. Lit geometry uses a sky/snow ambient
+gradient and a hue-preserving highlight shoulder in the existing vertex shader;
+UI and unlit advertising panels bypass this lighting calculation.
+
+Snow drift tones, cool hollows and groomed-edge shading are baked into vertex
+colors when a venue is prepared. Scenery shadows clip light-space caster volumes
+against the actual snow triangles, so separate ray hits never form a false
+convex bridge across a valley. A sparse CPU-baked opacity atlas merges overlapping
+casters with MAX coverage and excludes surfaces facing away from the sun. Its
+subsample coverage is merged before filtering, avoiding receiver-triangle seams.
+Trees use the same trunk corners and seven-sided bough geometry for rendering
+and shadow casting. Floodlight masts, grandstand terraces, sponsor boards and
+the elevated inrun deck, walkway and piers are volume casters in the same
+filtered atlas, so every shadow shares one soft edge and overlaps combine as
+their maximum. Poles narrower than the final atlas cell are widened to one cell;
+thinner strips would rasterize into faint dashes.
+
+A bounded, sun-aligned CPU terrain horizon is built from the snow surface only
+(the inrun is an open structure and casts its own shadow). It clips casters to
+their sunlit parts, and the same horizon bakes a coarse terrain-shadow texture:
+snow facing the sun behind a ridge is darkened exactly like a cast shadow,
+instead of looking sunlit without any scenery shadows. Ground-connected snow
+banks receive the same filtered atlas and terrain textures at their actual
+height, projected along sunlight. Receiver selection follows the bank's type,
+including tall drifts; roof and rail caps are excluded. UV clipping keeps every
+shadow vertex on the visible snow triangle, and blended toe normals preserve
+the ground's shadow strength at the join. The horizon and combined
+occlusion are retained per cache entry: the athlete loses its direct sun shadow
+behind a ridge, and its shadow combines with baked shadows as their maximum,
+never as a darker shadow-in-shadow. Athlete and scenery share one sun-shadow
+darkness and color. Prepared snow and scenery shadows use constant depth offsets
+without a slope bias; ground decals have only 1 mm of clearance and bank
+shadows stay on the visible surface. This prevents dark skirts around snow.
+
+Only clear morning, day and evening sun bakes these shadows. Overcast, fog and
+snowfall change the image by at most a few 8-bit levels, and moonlight would
+read darker inside the floodlight pools than outside them. The asynchronous
+cache is keyed by venue and time of day (at most three entries per venue, so
+weather changes and returning to an earlier time never rebuild), uses a 24 MiB
+budget across venues and evicts the least recently drawn entry. The budget
+includes both atlas textures and receiver geometry. Each receiver search is
+bounded by the caster's first snow hits rather than the full 200 m volume reach;
+a clear-sun entry takes about 0.25-0.5 s to prepare on the development machine.
+Changing conditions never rebuilds the venue mesh. No runtime shadow-map or
+fullscreen passes are added.
+
+Fully covered groomed snow supplies its own depth. A conservative interior
+mask skips the hidden natural underlay before anisotropic sampling and glitter
+evaluation. Partial edge fades retain both materials; frozen terrain positions
+and triangulation are unchanged. CPU tests verify opaque coverage on all venues.
+
+Landing tracks are cached from recorded standing ski contacts, then fade over
+eight seconds of jump/replay time. Rendering supplies the live or
+loaded replay history; seeking does not leave future tracks or erase past ones.
+All cached track geometry is replaced for a new recording. Night fog/snowfall
+also enables a bounded batch of faint, depth-tested floodlight slices. These
+effects do not advance physics, consume gameplay RNG or modify saved replays.

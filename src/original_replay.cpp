@@ -261,6 +261,8 @@ bool OriginalReplayRecording::finish(OriginalReplayData &output,std::string *err
 bool buildOriginalReplay(const Simulation &simulation, OriginalReplayData &output, std::string *error) {
     if (simulation.result.adjustedSuit)
         return failure(error,"Adjusted suit jumps cannot be exported to the original replay format.");
+    if (simulation.usesFixedWind())
+        return failure(error,"Jumps with fixed wind cannot be exported to the original replay format. Save as .pvr instead.");
     if (simulation.phase!=Phase::Finished || simulation.result.disqualified)
         return failure(error,"A complete jump is required for original export.");
     OriginalReplayRecording recording;

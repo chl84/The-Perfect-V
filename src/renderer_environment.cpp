@@ -5,6 +5,14 @@
 #include "visual_mountains.h"
 #include "visual_weather.h"
 #include "visual_snow_accumulation.h"
+#include "visual_scenery_shadow.h"
+#include "visual_scenery_mask.h"
+#include "visual_snow_material.h"
+#include "visual_snow_shadow.h"
+#include "visual_terrain_sun.h"
+#include "visual_sun_shadow_field.h"
+#include "visual_shadow.h"
+#include "visual_tree_geometry.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -100,18 +108,16 @@ void sphere(Vec3 p, double r, Color color) {
 double terrainY(const Hill &h, double x, double z) {
     return visual::backdropGround(h, x, z);
 }
-double preparedSnowWeight(const Hill &h, double x, double z) {
-    const double side = clamp((25 * h.scale() - std::abs(z)) / (8 * h.scale()), 0.0, 1.0);
-    // Only the material ends here. The original uphill surface continues intact.
-    const double end = h.outrunBottom() + 45 + 2 * std::sin(z * .13);
-    const double t = clamp((end - x) / 33, 0.0, 1.0);
-    return side * t * t * (3 - 2 * t);
-}
+using visual::preparedSnowWeight;
 Color snowColor(const Hill &h, double x, double z) {
-    const double variation = .014 * std::sin(x * .057 + z * .037) + .009 * std::sin(x * .19 - z * .083);
+    // Broad wind-shaped tonal bands, baked once into the existing vertices.
+    const double variation = .024 * std::sin(x * .047 + z * .031) + .012 * std::sin(x * .13 - z * .071);
     const double corridor = preparedSnowWeight(h, x, z);
-    const Color color{float(.83 + .065 * corridor + variation), float(.89 + .035 * corridor + variation),
-                      float(.94 + .012 * corridor + variation * .6), 1};
+    const double pocket = smoothRange(.006, .08, h.slope(x + 3 * h.scale()) - h.slope(x - 3 * h.scale()));
+    const double edge = std::exp(-std::pow((std::abs(z) - 24 * h.scale()) / (3 * h.scale()), 2)) * corridor;
+    const Color color{float(.83 + .065 * corridor + variation - .027 * pocket - .025 * edge),
+                      float(.89 + .035 * corridor + variation - .014 * pocket - .023 * edge),
+                      float(.94 + .012 * corridor + variation * .6 - .003 * pocket - .016 * edge), 1};
     double occlusion = 0;
     if (x >= h.inrunStart() && x <= 0 && std::abs(z) < 4.8) {
         const double gap = std::max(0.0, h.inrun(x) - .62 - terrainY(h, x, z));
@@ -225,6 +231,7 @@ sjp::gfx::Id makeSnowTexture(bool groomed) {
         width = nextWidth;
     }
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MIN_FILTER, sjp::gfx::LINEAR_MIPMAP_LINEAR);
+    sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAX_ANISOTROPY, 4);
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_MAG_FILTER, sjp::gfx::LINEAR);
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_S, sjp::gfx::REPEAT);
     sjp::gfx::texParameteri(sjp::gfx::TEXTURE_2D, sjp::gfx::TEXTURE_WRAP_T, sjp::gfx::REPEAT);
@@ -493,15 +500,12 @@ bool visibleTree(const Hill &h, const Tree &tree) {
     const double s = h.scale();
     return !(tree.base.x > 74 * s && tree.base.x < 242 * s && std::abs(tree.base.z) < std::max(47 * s, 18.0));
 }
-void branch(Vec3 p, double radius, double height, double seed, Color needles, Vec3 sway = {}) {
+void branch(const visual::TreeBoughGeometry &geometry, double seed, Color needles) {
     constexpr int count = 7;
-    const Vec3 tip = p + Vec3{0, height, 0} + sway;
+    const Vec3 tip = geometry.tip;
     std::array<Vec3, count + 1> bases{}, snow{};
-    const double rotation = hash(seed) * PI;
     for (int i = 0; i < count; ++i) {
-        const double angle = i * 2 * PI / count + rotation;
-        const double r = radius * (.90 + hash(seed + i * 11.21) * .18);
-        bases[i] = p + Vec3{std::cos(angle) * r, -height * hash(seed + i * 1.41) * .065, std::sin(angle) * r};
+        bases[i] = geometry.base[size_t(i)];
         const double fraction = .28 + hash(seed + i * 8.12) * .28;
         snow[i] = bases[i] + (tip - bases[i]) * fraction;
     }
@@ -514,10 +518,8 @@ void branch(Vec3 p, double radius, double height, double seed, Color needles, Ve
     }
 }
 void treeBranch(const Tree &tree, int tier, Vec3 sway = {}) {
-    const double t = tier / double(tree.tiers - 1);
-    const Vec3 p = tree.base + Vec3{0, tree.height * (.12 + .53 * t), 0};
-    branch(p, tree.height * (.31 - .238 * t), tree.height * (.43 - .12 * t), tree.seed + tier * 29.7,
-           tree.needles, sway);
+    branch(visual::treeTierGeometry(tree.base, tree.height, tree.seed, tree.tiers, tier, sway),
+           tree.seed + tier * 29.7, tree.needles);
 }
 void terraceSlab(const visual::CameraSurface &snow, double x0, double x1, double z0, double z1,
                  double top, Color c) {
@@ -1051,7 +1053,360 @@ void Renderer::installTerrain() {
 void Renderer::waitForScene() {
     if (preparingLandscape.valid())
         installTerrain();
+    for (size_t i = 0; i < hills().size(); ++i)
+        if (hills()[i].id == sceneHill && landscapes[i]) {
+            // An older job may finish first after rapid selection changes.
+            // Only explicit captures/tests wait; normal frames remain asynchronous.
+            while (!prepareSceneryShadows(hills()[i], i))
+                installSceneryShadows();
+            sceneryShadowsReady = true;
+            break;
+        }
 }
+void Renderer::releaseSceneryShadow(SceneryShadow &entry) {
+    if (entry.mesh)
+        gfx::deleteLists(entry.mesh, 1);
+    for (auto texture : entry.textures)
+        if (texture)
+            gfx::deleteTextures(1, &texture);
+    entry = {};
+}
+void Renderer::installSceneryShadows() {
+    auto prepared = preparingSceneryShadow.get();
+    auto &entry = sceneryShadowMeshes[preparingShadowVenue][size_t(preparingShadowVariant)];
+    releaseSceneryShadow(entry);
+    entry.mesh = gfx::installList(std::move(prepared));
+    entry.textures = preparingShadowTextures;
+    preparingShadowTextures = {};
+    entry.field = std::move(preparingShadowField);
+    entry.bytes = gfx::listBytes(entry.mesh) + entry.field->textureBytes;
+    entry.use = ++sceneryShadowClock;
+    // One bounded cache across venues and sun directions. Least recently
+    // drawn entries go first; the entry just installed is always retained.
+    for (;;) {
+        size_t total = 0;
+        SceneryShadow *oldest = nullptr;
+        for (auto &venue : sceneryShadowMeshes)
+            for (auto &item : venue) {
+                total += item.bytes;
+                if (item.mesh && &item != &entry && (!oldest || item.use < oldest->use))
+                    oldest = &item;
+            }
+        if (total <= 24 * 1024 * 1024 || !oldest)
+            break;
+        releaseSceneryShadow(*oldest);
+    }
+}
+const Renderer::SceneryShadow *Renderer::activeSceneryShadow(size_t venue) const {
+    const int variant = int(sceneEnvironment.time);
+    if (!sceneryShadows || !visual::bakedSunShadows(lighting) || variant < 0 || variant >= sunShadowVariants)
+        return nullptr;
+    const auto &entry = sceneryShadowMeshes[venue][size_t(variant)];
+    return entry.mesh ? &entry : nullptr;
+}
+bool Renderer::prepareSceneryShadows(const Hill &, size_t venue) {
+    if (preparingSceneryShadow.valid() &&
+        preparingSceneryShadow.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+        installSceneryShadows();
+    const int variant = int(sceneEnvironment.time);
+    if (!sceneryShadows || !visual::bakedSunShadows(lighting) || variant < 0 || variant >= sunShadowVariants)
+        return true;
+    auto &entry = sceneryShadowMeshes[venue][size_t(variant)];
+    if (entry.mesh) {
+        entry.use = ++sceneryShadowClock;
+        return true;
+    }
+    if (!preparingSceneryShadow.valid()) {
+        preparingShadowVenue = venue;
+        preparingShadowVariant = variant;
+        gfx::genTextures(2, preparingShadowTextures.data());
+        preparingShadowField = std::make_shared<visual::SunShadowField>();
+        auto *field = preparingShadowField.get();
+        const auto textures = preparingShadowTextures;
+        const auto light = lighting;
+        const auto *hill = &hills()[venue];
+        preparingSceneryShadow = gfx::prepareList([this, hill, venue, light, textures, field] {
+            buildSceneryShadows(*hill, venue, light, textures, *field);
+        });
+        if (preparingSceneryShadow.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+            installSceneryShadows();
+            return true;
+        }
+    }
+    return false;
+}
+void Renderer::buildSceneryShadows(const Hill &h, size_t venue, visual::EnvironmentLight light,
+                                   std::array<gfx::Id, 2> textures, visual::SunShadowField &field) {
+    visual::StaticBatch batch;
+    std::vector<visual::SceneryShadowTriangle> receivers;
+    visual::pushAttrib(gfx::ENABLE_BIT | gfx::CURRENT_BIT | gfx::TEXTURE_BIT |
+                       gfx::COLOR_BUFFER_BIT | gfx::DEPTH_BUFFER_BIT | gfx::POLYGON_BIT);
+    visual::disable(gfx::LIGHTING);
+    visual::disable(gfx::CULL_FACE);
+    visual::enable(gfx::BLEND);
+    visual::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
+    visual::depthMask(false);
+    visual::enable(gfx::POLYGON_OFFSET_FILL);
+    // Constant depth units plus 1 mm of ground clearance avoid rounding
+    // artifacts without dragging shadows through the bank with a slope bias.
+    visual::polygonOffset(0, -2);
+    const double scale = h.scale(), strength = visual::sunShadowOpacity(light);
+    const Color tint{visual::shadowColor[0], visual::shadowColor[1], visual::shadowColor[2], 1};
+    // The horizon is the snow alone. The elevated inrun is an open structure
+    // and casts its own deck/pier shadow below; as a height field it would
+    // also block the sunlight that passes underneath the deck.
+    field.horizon = std::make_unique<visual::TerrainSunHorizon>(
+        Vec3{visual::snowGridStart(h),0,-200*scale}, Vec3{std::max(420*scale,h.end()+80*scale),0,200*scale},
+        light.direction,.5*std::sqrt(scale),[&](double x,double z) { return visual::terrainSnowHeight(h,x,z); });
+    const auto &horizon = *field.horizon;
+    const auto exposure = [&](Vec3 p) { return visual::scenerySunExposure(h, p, light.direction); };
+    auto footprint = [&](const std::vector<Vec3> &sources, double opacity = 1) {
+        const auto litSources = horizon.sunlitCaster(sources);
+        if (litSources.size()<3) return;
+        visual::SceneryShadowVolume volume(litSources,light.direction,200*std::sqrt(h.scale()));
+        if (volume.planes.empty()) return;
+        // Only first snow hits of sun rays from the caster can be lit shadow:
+        // anything beyond lies in the ridge's own shadow. Bound the receiver
+        // search by those hits instead of the volume's full 200 m reach.
+        Vec3 low = litSources.front(), high = low;
+        for (const auto &p : litSources) {
+            const auto hit = visual::projectToSnow(h, p, light.direction*-1);
+            for (const auto &q : {p, hit ? *hit : p-light.direction.normalized()*(200*std::sqrt(h.scale()))}) {
+                low.x = std::min(low.x,q.x); low.z = std::min(low.z,q.z);
+                high.x = std::max(high.x,q.x); high.z = std::max(high.z,q.z);
+            }
+        }
+        const double margin = 2 * std::sqrt(h.scale());
+        volume.low.x = std::max(volume.low.x, low.x-margin); volume.low.z = std::max(volume.low.z, low.z-margin);
+        volume.high.x = std::min(volume.high.x, high.x+margin); volume.high.z = std::min(volume.high.z, high.z+margin);
+        volume.receivers(h,[&](Vec3 a,Vec3 b,Vec3 c) {
+            visual::SceneryShadowTriangle triangle{{a,b,c},{}};
+            for (size_t i=0;i<3;++i)
+                triangle.opacity[i]=strength*opacity*exposure(triangle.points[i])*horizon.visibility(triangle.points[i]);
+            if (*std::max_element(triangle.opacity.begin(),triangle.opacity.end())>.001)
+                receivers.push_back(triangle);
+        });
+    };
+    // Every caster shares the one filtered atlas, so a whole mast or pier has
+    // the same soft edge. Poles narrower than an atlas cell are widened to a
+    // full cell; thinner strips break into faint dashes when rasterized.
+    const double atlasSpacing = .40*std::sqrt(h.scale());
+    const Vec3 sideways = cross(light.direction, {0,1,0}).normalized();
+    struct Pole { Vec3 base, top; double radius; };
+    std::vector<Pole> poles;
+    auto pole = [&](Vec3 base, Vec3 top, double radius) { poles.push_back({base, top, radius}); };
+    for (int i = 0; i < 420; ++i) {
+        const auto tree = treeAt(h,i);
+        if (!visibleTree(h,tree)) continue;
+        const auto trunk = visual::treeTrunkGeometry(tree.base,tree.height);
+        footprint({trunk.begin(),trunk.end()},.85);
+        for (int tier=0;tier<tree.tiers;++tier) {
+            const auto bough = visual::treeTierGeometry(tree.base,tree.height,tree.seed,tree.tiers,tier);
+            std::vector<Vec3> points(bough.base.begin(),bough.base.end());
+            points.push_back(bough.tip);
+            footprint(points,.85);
+        }
+    }
+    const auto &stands = grandstandLayouts[venue];
+    for (int side : {-1,1}) {
+        for (int column = 0; column < visual::floodlightColumns(h); ++column) {
+            const auto mast = visual::floodlightMast(h,column,side);
+            pole(mast.base, mast.lamp-Vec3{0,.625,0}, .13);
+            std::vector<Vec3> head;
+            for (int x : {-1,1}) for (int y : {-1,1}) for (int z : {-1,1})
+                head.push_back(mast.lamp+Vec3{x*1.7,y*.625,z*.30});
+            footprint(head);
+        }
+        for (int section = 0; section < visual::GrandstandLayout::sectionCount; ++section) {
+            const auto &stand = stands.section(side,section);
+            for (const auto &t : stand.terraces) {
+                std::vector<Vec3> slab;
+                for (double x : {t.x0,t.x1})
+                    for (int back : {0,1}) {
+                        const double z = side*(stands.near+(back?4.95:1.35));
+                        slab.push_back({x,visual::terrainSnowHeight(h,x,z),z});
+                        slab.push_back({x,t.floor(back?2:0)+.25,z});
+                    }
+                footprint(slab, .80);
+            }
+            // The sponsor board in front of each section (1.6 m panel).
+            const double front = side*(stands.near-1.0);
+            std::vector<Vec3> board;
+            for (double x : {stand.center-stand.width*.5, stand.center+stand.width*.5})
+                for (double z : {front-side*.15, front+side*.15}) {
+                    const double ground = visual::terrainSnowHeight(h,x,z);
+                    board.push_back({x,ground+.16,z});
+                    board.push_back({x,ground+1.82,z});
+                }
+            footprint(board, .90);
+        }
+    }
+    // The elevated inrun deck with its service walkway, in short straight
+    // pieces along the curved profile. Exposed piers are thin poles.
+    for (double x = h.inrunStart(); x < 0;) {
+        const double xx = std::min(0.0, x + 4 * std::sqrt(scale));
+        std::vector<Vec3> deck;
+        for (double px : {x,xx})
+            for (double z : {double(visual::inrunServiceSide)*visual::inrunWalkOuter, 2.3})
+                for (double y : {-.62, .06})
+                    deck.push_back({px,h.inrun(px)+y,z});
+        footprint(deck);
+        x = xx;
+    }
+    for (const auto &support : inrunLayouts[venue].supports)
+        if (support.exposed())
+            for (int side : {-1,1}) {
+                const double z = side*visual::inrunColumnZ;
+                pole({support.x,support.footingTop,z},{support.x,support.deck,z},
+                     clamp(.12+support.height()*.003,.12,.32));
+            }
+    std::unique_ptr<visual::SceneryShadowMask> mask;
+    double spacing=atlasSpacing;
+    const size_t solidReceivers = receivers.size();
+    for (;;) {
+        // Pole width follows the final cell size, so a coarser atlas on a
+        // large hill does not turn the pole into a fainter partial cell.
+        receivers.resize(solidReceivers);
+        for (const auto &p : poles) {
+            const double half = std::max(p.radius, .5*spacing);
+            footprint({p.base-sideways*half, p.base+sideways*half, p.top+sideways*half, p.top-sideways*half});
+        }
+        mask=std::make_unique<visual::SceneryShadowMask>(spacing);
+        bool complete=true;
+        for (const auto &triangle:receivers)
+            if (!mask->rasterize(triangle)) { complete=false; break; }
+        if (complete) break;
+        spacing*=2; // Keep the per-venue mask bounded on large flying hills.
+    }
+    const auto atlas=mask->atlas();
+    visual::bindTexture(gfx::TEXTURE_2D,textures[0]);
+    gfx::pixelStorei(gfx::UNPACK_ALIGNMENT,1);
+    gfx::texImage2D(gfx::TEXTURE_2D,0,gfx::ALPHA,atlas.width,atlas.height,0,gfx::ALPHA,gfx::UNSIGNED_BYTE,atlas.pixels.data());
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_MIN_FILTER,gfx::LINEAR);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_MAG_FILTER,gfx::LINEAR);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_WRAP_S,gfx::CLAMP_TO_EDGE);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_WRAP_T,gfx::CLAMP_TO_EDGE);
+    // Ridges shade the snow behind them, consistently with the casters they hide.
+    field.terrain = std::make_unique<visual::TerrainShadowGrid>(h,horizon,strength,exposure,2*std::sqrt(scale));
+    const auto &ground = *field.terrain;
+    std::vector<uint8_t> groundPixels(ground.opacity.size());
+    for (size_t i = 0; i < groundPixels.size(); ++i)
+        groundPixels[i] = uint8_t(std::lround(255 * clamp(double(ground.opacity[i]),0.,1.)));
+    visual::bindTexture(gfx::TEXTURE_2D,textures[1]);
+    gfx::texImage2D(gfx::TEXTURE_2D,0,gfx::ALPHA,ground.columns,ground.rows,0,gfx::ALPHA,gfx::UNSIGNED_BYTE,groundPixels.data());
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_MIN_FILTER,gfx::LINEAR);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_MAG_FILTER,gfx::LINEAR);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_WRAP_S,gfx::CLAMP_TO_EDGE);
+    gfx::texParameteri(gfx::TEXTURE_2D,gfx::TEXTURE_WRAP_T,gfx::CLAMP_TO_EDGE);
+    field.textureBytes = (size_t(atlas.width)*atlas.height + groundPixels.size())*4;
+
+    visual::enable(gfx::TEXTURE_2D);
+    visual::bindTexture(gfx::TEXTURE_2D,textures[0]);
+    col(tint);
+    for (size_t index=0;index<atlas.keys.size();++index) {
+        const auto key=atlas.keys[index];
+        const double left=key.second*visual::SceneryShadowMask::core*spacing;
+        const double front=key.first*visual::SceneryShadowMask::core*spacing;
+        const double size=visual::SceneryShadowMask::core*spacing;
+        const double u=double(index%atlas.columns)*visual::SceneryShadowMask::stride+visual::SceneryShadowMask::gutter;
+        const double v=double(index/atlas.columns)*visual::SceneryShadowMask::stride+visual::SceneryShadowMask::gutter;
+        visual::begin(gfx::TRIANGLES);
+        visual::snowDecalTriangles(h,{{left,0,front},{left+size,0,front},{left+size,0,front+size},{left,0,front+size}},
+                                  [&](Vec3 a,Vec3 b,Vec3 c) {
+            for (auto p:{a,b,c}) {
+                visual::texCoord((u+(p.x-left)/spacing)/atlas.width,(v+(p.z-front)/spacing)/atlas.height);
+                vertex(p+Vec3{0,.001,0});
+            }
+        });
+        visual::end();
+        visual::flush();
+    }
+    // Terrain shadow: only snow cells that actually receive some of it.
+    visual::bindTexture(gfx::TEXTURE_2D,textures[1]);
+    const double dx = 3*scale, dz = 10*scale, gridStart = visual::snowGridStart(h);
+    const double gridEnd = std::max(420*scale,h.end()+80*scale);
+    for (double x = gridStart; x < gridEnd; x += dx) {
+        visual::begin(gfx::TRIANGLES);
+        for (double z = -200*scale; z < 200*scale; z += dz) {
+            if (ground.maximum(x,x+dx,z,z+dz) < .5/255) continue;
+            visual::snowCellTriangles(h,x,z,[&](double xx,double zz){return visual::backdropGround(h,xx,zz);},
+                                      [&](Vec3 a,Vec3 b,Vec3 c) {
+                for (auto p:{a,b,c}) {
+                    visual::texCoord((p.x-ground.x0)/(ground.columns*ground.step),
+                                     (p.z-ground.z0)/(ground.rows*ground.step));
+                    vertex(p+Vec3{0,.001,0});
+                }
+            });
+        }
+        visual::end();
+        visual::flush();
+    }
+    // The same filtered textures also shade the ground-connected snow.
+    // Project each raised vertex along sunlight onto the atlas receiver,
+    // then split UVs at tile boundaries without lifting the original surface.
+    // Clipped vertices need a few constant depth units for float rounding on
+    // steep close-ups. A slope bias would pull the buried skirt into view.
+    visual::polygonOffset(0, -8);
+    using BankTriangle = std::array<visual::SnowShadowVertex,3>;
+    std::vector<BankTriangle> banks;
+    std::map<visual::SceneryShadowMask::Key,size_t> tileIndices;
+    for (size_t i=0;i<atlas.keys.size();++i) tileIndices[atlas.keys[i]]=i;
+    std::map<visual::SceneryShadowMask::Key,std::vector<BankTriangle>> bankTiles;
+    const double tileSize=visual::SceneryShadowMask::core*spacing;
+    for (const auto &bank:snowBankReceivers[venue]) {
+        BankTriangle triangle;
+        for (size_t i=0;i<3;++i)
+            triangle[i]=visual::snowShadowVertex(h,bank[i],bank[i+3],light.direction);
+        if (std::all_of(triangle.begin(),triangle.end(),[](const auto &v){return v.weight==0;})) continue;
+        banks.push_back(triangle);
+        const double left=std::min({triangle[0].receiver.x,triangle[1].receiver.x,triangle[2].receiver.x});
+        const double right=std::max({triangle[0].receiver.x,triangle[1].receiver.x,triangle[2].receiver.x});
+        const double front=std::min({triangle[0].receiver.z,triangle[1].receiver.z,triangle[2].receiver.z});
+        const double back=std::max({triangle[0].receiver.z,triangle[1].receiver.z,triangle[2].receiver.z});
+        for (int z=int(std::floor(front/tileSize));z<=int(std::floor(back/tileSize));++z)
+            for (int x=int(std::floor(left/tileSize));x<=int(std::floor(right/tileSize));++x) {
+                const visual::SceneryShadowMask::Key key{z,x};
+                if (!tileIndices.count(key)) continue;
+                visual::snowShadowTile(triangle,x*tileSize,(x+1)*tileSize,z*tileSize,(z+1)*tileSize,
+                                       [&](auto a,auto b,auto c) {bankTiles[key].push_back({a,b,c});});
+            }
+    }
+    visual::bindTexture(gfx::TEXTURE_2D,textures[0]);
+    for (const auto &[key,triangles]:bankTiles) {
+        const size_t index=tileIndices.at(key);
+        const double u=double(index%atlas.columns)*visual::SceneryShadowMask::stride+visual::SceneryShadowMask::gutter;
+        const double v=double(index/atlas.columns)*visual::SceneryShadowMask::stride+visual::SceneryShadowMask::gutter;
+        visual::begin(gfx::TRIANGLES);
+        for (const auto &triangle:triangles) for (const auto &p:triangle) {
+            col({tint.r,tint.g,tint.b,float(p.weight)});
+            visual::texCoord((u+(p.receiver.x-key.second*tileSize)/spacing)/atlas.width,
+                             (v+(p.receiver.z-key.first*tileSize)/spacing)/atlas.height);
+            vertex(p.position);
+        }
+        visual::end();
+        visual::flush();
+    }
+    visual::bindTexture(gfx::TEXTURE_2D,textures[1]);
+    visual::begin(gfx::TRIANGLES);
+    for (const auto &triangle:banks) {
+        const double left=std::min({triangle[0].receiver.x,triangle[1].receiver.x,triangle[2].receiver.x});
+        const double right=std::max({triangle[0].receiver.x,triangle[1].receiver.x,triangle[2].receiver.x});
+        const double front=std::min({triangle[0].receiver.z,triangle[1].receiver.z,triangle[2].receiver.z});
+        const double back=std::max({triangle[0].receiver.z,triangle[1].receiver.z,triangle[2].receiver.z});
+        if (ground.maximum(left,right,front,back)<.5/255) continue;
+        for (const auto &p:triangle) {
+            col({tint.r,tint.g,tint.b,float(p.weight)});
+            visual::texCoord((p.receiver.x-ground.x0)/(ground.columns*ground.step),
+                             (p.receiver.z-ground.z0)/(ground.rows*ground.step));
+            vertex(p.position);
+        }
+    }
+    visual::end();
+    field.scenery = std::move(mask);
+    batch.finish();
+    visual::popAttrib();
+}
+
 bool Renderer::prepareTerrain(const Hill &h) {
     size_t index = 0;
     for (size_t i = 0; i < hills().size(); ++i)
@@ -1123,6 +1478,10 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     const float edge[]{float(visual::valleyEdgeStart * s), float(visual::valleyEdgeEnd * s), 1, float(visual::valleyBackStart(h))};
     const float noEdge[]{0, 0, 0, 0};
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, edge);
+    // A conservative interior: every groomed receiver vertex surrounding it
+    // has alpha 1, including the start/tail fade and stitched mesh rows.
+    const auto coverage = visual::opaquePreparedCoverage(h);
+    sjp::visual::materialfv(gfx::FRONT_AND_BACK,gfx::SNOW_COVERAGE,coverage.data());
     // Fixed fine ski corridor, stitched to the unchanged coarse valley. Both
     // snow layers use the exact same triangles and original Hill samples.
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s); x < std::max(420 * s, h.end() + 80 * s);
@@ -1130,15 +1489,17 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
             snowPatch(h, x, z);
     sjp::visual::materialfv(sjp::gfx::FRONT_AND_BACK, sjp::gfx::VALLEY_EDGE, noEdge);
+    sjp::visual::materialfv(gfx::FRONT_AND_BACK,gfx::SNOW_COVERAGE,noEdge);
     // Reuse the exact receiver triangles for a finite, softly blended prepared
-    // strip. Polygon offset avoids coplanar flicker; this pass never writes depth.
+    // strip. It also supplies depth where its opaque interior replaces the
+    // redundant natural layer. Receiver geometry and edge blending stay intact.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT | sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::POLYGON_BIT);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, snowTexture);
     sjp::visual::enable(sjp::gfx::BLEND);
     sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
-    sjp::visual::depthMask(sjp::gfx::FALSE);
+    sjp::visual::depthMask(sjp::gfx::TRUE);
     sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
-    sjp::visual::polygonOffset(-1, -1);
+    sjp::visual::polygonOffset(0, -1);
     for (double x = std::min(-170 * s, h.inrunStart() - 60 * s);
          x < std::min(std::max(420 * s, h.end() + 80 * s), h.outrunBottom() + 47); x += 3 * s)
         for (double z = -200 * s; z < 200 * s; z += 10 * s)
@@ -1158,7 +1519,8 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
     sjp::visual::depthMask(sjp::gfx::FALSE);
     sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
-    sjp::visual::polygonOffset(-1, -1);
+    // Prepared snow writes depth at one bias layer; decals sit one above it.
+    sjp::visual::polygonOffset(0, -2);
     for (int i = 0; i < 420; ++i) {
         const Tree tree = treeAt(h, i);
         if (visibleTree(h, tree)) {
@@ -1189,8 +1551,8 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
         const Tree tree = treeAt(h, i);
         if (!visibleTree(h, tree))
             continue;
-        box(tree.base + Vec3{0, tree.height * .22, 0},
-            {tree.height * .085, tree.height * .44, tree.height * .085}, {.28f, .25f, .22f, 1});
+        box(visual::treeTrunkCenter(tree.base,tree.height), visual::treeTrunkSize(tree.height),
+            {.28f, .25f, .22f, 1});
         for (int tier = 0; tier < tree.tiers; ++tier)
             if (!(tree.animated && tier == tree.tiers - 1))
                 treeBranch(tree, tier);
@@ -1315,7 +1677,9 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
     sjp::visual::depthMask(sjp::gfx::FALSE);
     sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
-    sjp::visual::polygonOffset(-1, -1);
+    // Prepared snow now owns depth in its opaque interior. Put the clipped
+    // markings one bias layer above it; their original X/Y/Z remain unchanged.
+    sjp::visual::polygonOffset(0, -2);
     for (int d = 10; d <= h.k + 50; d += 10)
         if (d != h.k)
             distanceMarkerStrip(h, h.atDistance(d), d, .52, 18, {.23f, .30f, .24f, .76f});
@@ -1455,6 +1819,25 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     visual::enable(gfx::TEXTURE_2D);
     visual::bindTexture(gfx::TEXTURE_2D, naturalSnowTexture);
     visual::disable(gfx::BLEND);
+    // Written once by the first build of this venue, before any shadow job
+    // for it can start; later rebuilds produce identical banks and skip this.
+    if (!snowBanksRecorded[index]) {
+        for (size_t i:accumulatedSnow.groundTriangles) {
+            const auto &triangle=accumulatedSnow.triangles[i];
+            std::array<Vec3,6> receiver;
+            for (size_t j=0;j<3;++j) {
+                const auto &v=triangle[j];
+                const double elevation=v.position.y-visual::terrainSnowHeight(h,v.position.x,v.position.z);
+                const double raised=smoothRange(.015,.14,elevation);
+                receiver[j]=v.position;
+                receiver[j+3]=(terrainSnowNormal(h,v.position)*(1-raised)+v.normal*raised).normalized();
+            }
+            visual::visibleSnowBank(h,receiver,[&](const auto &visible) {
+                snowBankReceivers[index].push_back(visible);
+            });
+        }
+        snowBanksRecorded[index] = true;
+    }
     visual::begin(gfx::TRIANGLES);
     for (const auto &triangle : accumulatedSnow.triangles)
         for (const auto &v : triangle) {
@@ -1517,7 +1900,7 @@ void Renderer::hillRecordMarker(const Hill &h) {
     visual::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
     visual::depthMask(gfx::FALSE);
     visual::enable(gfx::POLYGON_OFFSET_FILL);
-    visual::polygonOffset(-1, -1);
+    visual::polygonOffset(0, -2);
     distanceMarkerStrip(h, h.atDistance(distance), distance, .85, 20, {.25f, .41f, .65f, .82f});
     batch.finish();
     visual::popAttrib();

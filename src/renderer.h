@@ -9,12 +9,13 @@
 #include <SDL3/SDL.h>
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace sjp {
-namespace visual { class SnowAccumulation; }
+namespace visual { class SnowAccumulation; class SkiTrackCache; struct SunShadowField; }
 // Fall contact correction is presentation only. Never feed this Frame to physics,
 // input, camera tracking, scoring or replay storage.
 Frame displayedAthleteFrame(const Hill &, const Frame &, JumperAppearance = JumperAppearance::Pro);
@@ -56,9 +57,14 @@ class Renderer {
     // Visual diagnostics can compare identical scenes with the material disabled.
     void setBackdropMist(bool enabled) { backdropMist = enabled; }
     void setSnowGlitter(bool enabled) { snowGlitter = enabled; }
+    void setLampGlow(bool enabled) { lampGlow = enabled; }
+    void setSceneryShadows(bool enabled) { sceneryShadows = enabled; }
+    void setSkiTrackHistory(int hill, const std::vector<Frame> *frames) {
+        trackHistoryHill = hill; trackHistory = frames;
+    }
     void setSynchronousRendering(bool enabled) { synchronousRendering = enabled; }
-    bool sceneReady() const { return terrainReady; }
-    bool sceneReadyFor(const Hill &hill) const { return terrainReady && sceneHill == hill.id; }
+    bool sceneReady() const { return terrainReady && sceneryShadowsReady; }
+    bool sceneReadyFor(const Hill &hill) const { return sceneReady() && sceneHill == hill.id; }
     // Explicit diagnostics can wait for a complete scene before taking captures.
     void waitForScene();
     int width = 1440, height = 900;
@@ -95,6 +101,28 @@ class Renderer {
     uint64_t landscapeClock = 0;
     std::future<std::shared_ptr<gfx::PreparedList>> preparingLandscape;
     size_t preparingVenue = 0;
+    // Only clear morning, day and evening sun casts baked scenery shadows.
+    // Weather merely selects whether they are shown, so it never rebuilds them.
+    static constexpr int sunShadowVariants = 3;
+    struct SceneryShadow {
+        gfx::Id mesh = 0;
+        std::array<gfx::Id, 2> textures{};
+        size_t bytes = 0;
+        uint64_t use = 0;
+        std::shared_ptr<const visual::SunShadowField> field;
+    };
+    std::array<std::array<SceneryShadow, sunShadowVariants>, HILL_COUNT> sceneryShadowMeshes{};
+    std::future<std::shared_ptr<gfx::PreparedList>> preparingSceneryShadow;
+    size_t preparingShadowVenue = 0;
+    int preparingShadowVariant = -1;
+    std::array<gfx::Id, 2> preparingShadowTextures{};
+    std::shared_ptr<visual::SunShadowField> preparingShadowField;
+    uint64_t sceneryShadowClock = 0;
+    // Low snow banks rise above the snow mesh. Retain them once per venue so
+    // baked sun shadows can darken them as well as the surface beneath.
+    std::array<std::vector<std::array<Vec3, 6>>, HILL_COUNT> snowBankReceivers;
+    std::array<bool, HILL_COUNT> snowBanksRecorded{};
+    bool sceneryShadows = true, sceneryShadowsReady = false;
     bool terrainReady = false;
     std::string sceneHill;
     struct PresentedScene {
@@ -132,6 +160,13 @@ class Renderer {
     bool prepareTerrain(const Hill &);
     void buildTerrain(const Hill &, size_t venue);
     void installTerrain();
+    bool prepareSceneryShadows(const Hill &, size_t venue);
+    void installSceneryShadows();
+    void buildSceneryShadows(const Hill &, size_t venue, visual::EnvironmentLight, std::array<gfx::Id, 2> textures,
+                             visual::SunShadowField &field);
+    void releaseSceneryShadow(SceneryShadow &);
+    // The baked shadow drawn for this venue's current conditions, if any.
+    const SceneryShadow *activeSceneryShadow(size_t venue) const;
     void drawScene(const Hill &, const Frame &, double time, int camera, bool panorama, bool ghost,
                    const Frame *ghostFrame);
     Frame cachedAthleteFrame(const Hill &, const Frame &, bool ghost);
@@ -144,8 +179,15 @@ class Renderer {
     void athlete(const Hill &, const Frame &, bool ghost);
     void jumperPreviewGeometry(JumperAppearance);
     void effects(const Hill &, const Frame &, double time, bool showWeather);
+    void lampGlows(const Hill &, const Frame &, const visual::InrunLayout &);
+    void skiTracks(const Hill &, const Frame &);
+    void floodlightBeams(const Hill &);
+    std::unique_ptr<visual::SkiTrackCache> skiTrackCache;
+    const std::vector<Frame> *trackHistory = nullptr;
+    int trackHistoryHill = -1;
     bool backdropMist = true;
     bool snowGlitter = true;
+    bool lampGlow = true;
     bool snowfall = false;
     environment::Conditions sceneEnvironment;
     visual::EnvironmentLight lighting = visual::environmentLight({});
