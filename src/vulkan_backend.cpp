@@ -118,7 +118,7 @@ struct VulkanBackend::Impl {
     FrameResources &frame() { return frames[frameIndex]; }
     SDL_GPUSampleCount samples = SDL_GPU_SAMPLECOUNT_1;
     SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_VSYNC;
-    SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
+    SDL_GPUTextureFormat depthFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
     static constexpr auto colorFormat = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     std::map<PipelineState, SDL_GPUGraphicsPipeline *> pipelines;
     std::shared_ptr<Image> white;
@@ -194,7 +194,7 @@ struct VulkanBackend::Impl {
         presentMode = mode;
         if (!SDL_GPUTextureSupportsFormat(device, depthFormat, SDL_GPU_TEXTURETYPE_2D,
                                           SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET))
-            depthFormat = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
+            depthFormat = SDL_GPU_TEXTUREFORMAT_D24_UNORM;
         samples = selectSamples(msaaSamples);
         SDL_GPUShaderCreateInfo shader{};
         shader.format = SDL_GPU_SHADERFORMAT_SPIRV;
@@ -341,12 +341,18 @@ struct VulkanBackend::Impl {
         info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
         info.rasterizer_state.enable_depth_clip = true;
         info.rasterizer_state.enable_depth_bias = state.offset;
-        info.rasterizer_state.depth_bias_constant_factor = state.offsetUnits;
-        info.rasterizer_state.depth_bias_slope_factor = state.offsetFactor;
+        // The recorder's negative offset still means "towards the camera".
+        // Reversed depth needs the opposite bias sign on the GPU.
+        // Float reversed-depth units are much smaller than D24 units at long
+        // range. Allow enough ULPs for rounding of clipped receiver vertices;
+        // this remains a subpixel separation without a large slope bias.
+        const float biasUnits = depthFormat == SDL_GPU_TEXTUREFORMAT_D32_FLOAT ? 16.f : 1.f;
+        info.rasterizer_state.depth_bias_constant_factor = -state.offsetUnits * biasUnits;
+        info.rasterizer_state.depth_bias_slope_factor = -state.offsetFactor;
         info.multisample_state.sample_count = samples;
         info.depth_stencil_state.enable_depth_test = state.depthTest;
         info.depth_stencil_state.enable_depth_write = state.depthTest && state.depthWrite;
-        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_LESS;
+        info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_GREATER;
         info.target_info.color_target_descriptions = &colorTarget;
         info.target_info.num_color_targets = 1;
         info.target_info.has_depth_stencil_target = true;
@@ -526,7 +532,7 @@ struct VulkanBackend::Impl {
         target.resolve_texture = frame().multisample ? frame().color : nullptr;
         SDL_GPUDepthStencilTargetInfo depthTarget{};
         depthTarget.texture = frame().depth;
-        depthTarget.clear_depth = 1;
+        depthTarget.clear_depth = 0;
         depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
         depthTarget.store_op = SDL_GPU_STOREOP_DONT_CARE;
         depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;

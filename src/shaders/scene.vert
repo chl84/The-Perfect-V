@@ -163,9 +163,8 @@ void main() {
             }
         }
     }
-    // Retain the existing projection and cameras; SDL_GPU expects depth 0..1
-    // and handles the Vulkan viewport's Y convention itself.
-    clip.z = (clip.z + clip.w) * 0.5;
+    // The uploaded matrix already maps near/far to 1/0. Keep that small far
+    // depth intact instead of subtracting nearly equal clip-space values here.
     gl_Position = clip;
 
     // Snow meshes use unchanged world coordinates. The scene view is rigid,

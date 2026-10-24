@@ -108,7 +108,7 @@ struct Context {
     Uniforms uniforms() const {
         Uniforms u{};
         u.modelView = modelView;
-        u.projection = projection;
+        u.projection = reverseDepthProjection(projection);
         u.normalMatrix = normalMatrix(modelView);
         u.ambient = state.ambient;
         for (int component = 0; component < 3; ++component)

@@ -17,6 +17,8 @@ struct Vertex {
 };
 static_assert(sizeof(Vertex) == 64);
 using Matrix = std::array<float, 16>;
+// CPU cameras/culling retain -W..W clip space. GPU depth uses near=1, far=0.
+Matrix reverseDepthProjection(const Matrix &projection);
 struct alignas(16) Uniforms {
     Matrix modelView{}, projection{}, normalMatrix{};
     std::array<float, 4> ambient{}, direction0{}, direction1{}, diffuse0{}, diffuse1{}, specularLight0{},

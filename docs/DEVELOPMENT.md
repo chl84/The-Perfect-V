@@ -931,6 +931,15 @@ test cover the installed renderer.
 
 ## Cached scenery shadows and snow detail
 
+The Vulkan depth target prefers D32 float with reversed depth (near 1, far 0),
+clears to 0 and tests GREATER. Camera matrices and culling keep the original
+clip volume; the upload converts the projection matrix before multiplying
+vertices, avoiding far-depth cancellation in the shader. Logical polygon
+offsets retain their original sign convention; the backend reverses the sign
+and allows a small float ULP rounding margin for clipped receiver vertices.
+This stabilizes shadows on distant snow without pushing them through banks.
+Unsupported float depth targets fall back to D24 with the matching bias units.
+
 The two snow samplers use 4x anisotropy with their existing mip chains. Other
 textures retain their previous filtering. Lit geometry uses a sky/snow ambient
 gradient and a hue-preserving highlight shoulder in the existing vertex shader;
@@ -965,6 +974,12 @@ never as a darker shadow-in-shadow. Athlete and scenery share one sun-shadow
 darkness and color. Prepared snow and scenery shadows use constant depth offsets
 without a slope bias; ground decals have only 1 mm of clearance and bank
 shadows stay on the visible surface. This prevents dark skirts around snow.
+Coplanar distance, K-point and record markings retain their slope depth bias
+to prevent flicker against the snow at grazing camera angles.
+Their alpha textures keep transparent outer rows at every mip level, so
+clamp-to-edge sampling and distant filtering cannot turn them into rectangular
+ribbons. A longer, varied branch tile and porous spray masks break up repeated
+stamps; the markings use the snow's smooth normals and scene lighting.
 
 Only clear morning, day and evening sun bakes these shadows. Overcast, fog and
 snowfall change the image by at most a few 8-bit levels, and moonlight would

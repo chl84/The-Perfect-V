@@ -25,6 +25,7 @@ int resources = 0, waits = 0, submits = 0, draws = 0, uploads = 0, blits = 0, ac
 int pipelineCreations = 0;
 int anisotropicSamplers = 0;
 bool available = true;
+bool floatingDepthAvailable = true, reversedBiasObserved = false;
 bool requirePreparedScene = false;
 bool immediateAvailable = true, multisampleAvailable = true;
 int maxColorSamples = 8, maxDepthSamples = 8;
@@ -132,9 +133,9 @@ bool SDLCALL SDL_SetGPUSwapchainParameters(SDL_GPUDevice *, SDL_Window *, SDL_GP
     audit::presentMode = mode;
     return true;
 }
-bool SDLCALL SDL_GPUTextureSupportsFormat(SDL_GPUDevice *, SDL_GPUTextureFormat, SDL_GPUTextureType,
+bool SDLCALL SDL_GPUTextureSupportsFormat(SDL_GPUDevice *, SDL_GPUTextureFormat format, SDL_GPUTextureType,
                                           SDL_GPUTextureUsageFlags) {
-    return true;
+    return format != SDL_GPU_TEXTUREFORMAT_D32_FLOAT || audit::floatingDepthAvailable;
 }
 bool SDLCALL SDL_GPUTextureSupportsSampleCount(SDL_GPUDevice *, SDL_GPUTextureFormat format, SDL_GPUSampleCount count) {
     const int maximum = format == SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM
@@ -149,6 +150,10 @@ SDL_GPUBuffer *SDLCALL SDL_CreateGPUBuffer(SDL_GPUDevice *, const SDL_GPUBufferC
     return audit::make<SDL_GPUBuffer>();
 }
 SDL_GPUTexture *SDLCALL SDL_CreateGPUTexture(SDL_GPUDevice *, const SDL_GPUTextureCreateInfo *info) {
+    if (info->usage & SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET)
+        audit::require(info->format == (audit::floatingDepthAvailable ? SDL_GPU_TEXTUREFORMAT_D32_FLOAT
+                                                                     : SDL_GPU_TEXTUREFORMAT_D24_UNORM),
+                       "Depth target lost float precision or its supported fallback");
     auto *texture = audit::make<SDL_GPUTexture>();
     texture->samples = info->sample_count;
     return texture;
@@ -163,6 +168,12 @@ SDL_GPUSampler *SDLCALL SDL_CreateGPUSampler(SDL_GPUDevice *, const SDL_GPUSampl
 }
 SDL_GPUGraphicsPipeline *SDLCALL
 SDL_CreateGPUGraphicsPipeline(SDL_GPUDevice *, const SDL_GPUGraphicsPipelineCreateInfo *info) {
+    audit::require(info->depth_stencil_state.compare_op == SDL_GPU_COMPAREOP_GREATER,
+                   "Pipeline uses forward depth with a reversed projection");
+    if (info->rasterizer_state.enable_depth_bias &&
+        info->rasterizer_state.depth_bias_constant_factor == (audit::floatingDepthAvailable ? 64 : 4) &&
+        info->rasterizer_state.depth_bias_slope_factor == .25f)
+        audit::reversedBiasObserved = true;
     ++audit::pipelineCreations;
     auto *p = audit::make<SDL_GPUGraphicsPipeline>();
     p->blend = info->target_info.color_target_descriptions[0].blend_state.enable_blend;
@@ -266,6 +277,7 @@ SDL_GPURenderPass *SDLCALL SDL_BeginGPURenderPass(SDL_GPUCommandBuffer *c,
     audit::write(c, target->texture);
     if (target->resolve_texture)
         audit::write(c, target->resolve_texture);
+    audit::require(depth->clear_depth == 0,"Reversed depth must clear to the farthest depth");
     audit::write(c, depth->texture);
     audit::require(depth->texture->samples == target->texture->samples,
                    "Color and depth attachment sample counts differ");
@@ -436,6 +448,17 @@ int main() {
     using namespace sjp::gfx;
     try {
         cacheKeys();
+        for (bool floating : {true,false}) {
+            audit::floatingDepthAvailable=floating;
+            audit::reversedBiasObserved=false;
+            initialize(nullptr,0,false,false);
+            beginFrame(640,480);
+            enable(DEPTH_TEST);enable(POLYGON_OFFSET_FILL);polygonOffset(-.25f,-4);
+            triangle();present(false);
+            audit::require(audit::reversedBiasObserved,"Decal depth bias was not reversed with the depth comparison");
+            shutdown();
+        }
+        audit::floatingDepthAvailable=true;
         audit::maxDepthSamples = 2;
         initialize(nullptr, 8, false, false);
         audit::require(sampleCount() == 2 && !supportsSampleCount(1) && !supportsSampleCount(16),

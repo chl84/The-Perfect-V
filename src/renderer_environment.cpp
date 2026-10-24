@@ -240,7 +240,7 @@ sjp::gfx::Id makeSnowTexture(bool groomed) {
     return texture;
 }
 sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int height,
-                               sjp::gfx::Enum format = sjp::gfx::ALPHA) {
+                               sjp::gfx::Enum format = sjp::gfx::ALPHA, bool transparentRim = false) {
     sjp::gfx::Id texture = 0;
     sjp::gfx::genTextures(1, &texture);
     sjp::visual::pushAttrib(sjp::gfx::TEXTURE_BIT);
@@ -249,6 +249,14 @@ sjp::gfx::Id makeMarkerTexture(std::vector<uint8_t> pixels, int width, int heigh
     sjp::gfx::pixelStorei(sjp::gfx::UNPACK_ALIGNMENT, 1);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, texture);
     for (int level = 0;; ++level) {
+        if (transparentRim) {
+            // Clamp-to-edge must see empty snow outside a marking at every
+            // mip level. Tiny mips fade out instead of becoming a solid ribbon.
+            for (int x = 0; x < width; ++x) {
+                pixels[size_t(x)] = 0;
+                pixels[size_t((height - 1) * width + x)] = 0;
+            }
+        }
         sjp::gfx::texImage2D(sjp::gfx::TEXTURE_2D, level, format, width, height, 0,
                            format, sjp::gfx::UNSIGNED_BYTE, pixels.data());
         if (width == 1 && height == 1)
@@ -350,7 +358,7 @@ sjp::gfx::Id makeContactShadowTexture() {
     return texture;
 }
 sjp::gfx::Id makeSpruceMarkerTexture() {
-    int width = 128, height = 64;
+    constexpr int width = 512, height = 128;
     std::vector<uint8_t> pixels(width * height, 0);
     // Flat overlapping twigs: the alpha mask supplies needles and uneven edges.
     // Wrap strokes across the tile seam; all markers share this small texture.
@@ -367,44 +375,58 @@ sjp::gfx::Id makeSpruceMarkerTexture() {
                 pixel = std::max(pixel, alpha);
             }
     };
-    for (int twig = 0; twig < 4; ++twig) {
+    // A longer tile carries individually angled branches with uneven gaps,
+    // rather than repeating the same four silhouettes every metre.
+    for (int twig = 0; twig < 10; ++twig) {
         const double seed = twig * 71.3;
-        const double x0 = twig * 32 - 12, y0 = 26 + hash(seed + 1) * 10;
-        const double dx = 48 + hash(seed + 2) * 12, dy = (hash(seed + 3) - .5) * 12;
-        stroke(x0, y0, x0 + dx, y0 + dy, .85, .95);
-        for (int needle = 0; needle < 14; ++needle) {
-            const double t = (needle + .5) / 14;
+        const double x0 = twig * (width / 10.) - 16 + hash(seed + 4) * 14;
+        const double y0 = height * .5 + (hash(seed + 1) - .5) * 24;
+        const double dx = 42 + hash(seed + 2) * 50, dy = (hash(seed + 3) - .5) * 36;
+        const double length = std::hypot(dx, dy), ux = dx / length, uy = dy / length;
+        const double opacity = .72 + .23 * hash(seed + 6);
+        stroke(x0, y0, x0 + dx, y0 + dy, .85 + hash(seed + 5) * .45, opacity);
+        const int count = 11 + int(hash(seed + 7) * 7);
+        for (int needle = 0; needle < count; ++needle) {
+            const double t = (needle + .5) / count;
             const double x = x0 + dx * t, y = y0 + dy * t;
             for (int side : {-1, 1}) {
-                const double length = (11 + hash(seed + needle * 13 + side) * 11) * (1 - .55 * t);
-                stroke(x, y, x + 5 + hash(seed + needle * 7) * 6, y + side * length,
-                       .55 + hash(seed + needle * 17 + side) * .35, .8 + hash(seed + needle) * .2);
+                const double reach = (17 + hash(seed + needle * 13 + side) * 25) * (1 - .62 * t);
+                const double forward = 5 + hash(seed + needle * 7) * 13;
+                stroke(x, y, x + forward * ux - side * reach * uy,
+                       y + forward * uy + side * reach * ux,
+                       .65 + hash(seed + needle * 17 + side) * .55, opacity);
             }
         }
     }
-    return makeMarkerTexture(std::move(pixels), width, height);
+    for (int y = 0; y < height; ++y) {
+        const double edge = smoothRange(0, 8, std::min(y, height - 1 - y));
+        for (int x = 0; x < width; ++x)
+            pixels[size_t(y * width + x)] = uint8_t(std::lround(pixels[size_t(y * width + x)] * edge));
+    }
+    return makeMarkerTexture(std::move(pixels), width, height, sjp::gfx::ALPHA, true);
 }
 sjp::gfx::Id makeSprayMarkerTexture() {
     constexpr int width = 128, height = 64;
     std::vector<uint8_t> pixels(width * height);
     for (int y = 0; y < height; ++y)
         for (int x = 0; x < width; ++x) {
-            const double center = .5 + .025 * std::sin(x * 2 * PI / width);
-            const double radius = .32 + .02 * std::cos(x * 4 * PI / width);
-            const double edge = clamp((radius - std::abs((y + .5) / height - center)) / .19, 0.0, 1.0);
-            const double grain = hash(x * 13.71 + y * 8.17);
-            pixels[y * width + x] = uint8_t(edge * (.62 + .38 * grain) * 245);
+            const double u = x / double(width), v = (y + .5) / height;
+            const double center = .5 + .04 * std::sin(u * 2 * PI) + .018 * std::sin(u * 6 * PI + .7);
+            const double radius = .28 + .035 * std::cos(u * 4 * PI) + .025 * std::sin(u * 10 * PI);
+            const double edge = smoothRange(0, .17, radius - std::abs(v - center));
+            const double grain = smoothRange(.12, .90, hash(x * 13.71 + y * 8.17));
+            pixels[y * width + x] = uint8_t(edge * grain * 245);
         }
-    return makeMarkerTexture(std::move(pixels), width, height);
+    return makeMarkerTexture(std::move(pixels), width, height, sjp::gfx::ALPHA, true);
 }
-void distanceMarkerStrip(const Hill &h, double x, double distance, double width, double extent, Color color) {
+void distanceMarkerStrip(const Hill &h, double x, double distance, double width, double extent, Color color, bool foliage = false) {
     const double scale = h.scale(), step = 3 * scale, zStep = 10 * scale;
     const double gridStart = std::min(-170 * scale, h.inrunStart() - 60 * scale);
     const double halfWidth = width * .5 / std::hypot(1.0, h.slope(x));
     const double left = x - halfWidth * 1.7, right = x + halfWidth * 1.7;
     const double hillSeed = h.k * 17.13 + h.kMarkerX * .031;
     const double seed = hillSeed + distance * 31.71, phase = hash(seed) * 11;
-    const double repeatLength = .75 + hash(seed + 7) * .6;
+    const double repeatLength = foliage ? 3.6 + hash(seed + 7) * 2.0 : 2.1 + hash(seed + 7) * 1.3;
     const double sampleStep = clamp(1.25 * std::sqrt(scale), .8, 1.5);
     // Jumpers wear a broad, slightly wandering central lane from the landing
     // region into the outrun. The field is fixed per hill, never per frame.
@@ -419,7 +441,8 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
         const double wear = landingWear * std::exp(-lane * lane) *
                             (.78 + .22 * smoothNoise(p.z / 2.4 + x / (9 * scale), hillSeed + 41));
         Color c = shade(color, .88 + .19 * broad);
-        c.a = float(color.a * (.38 + .62 * broad) * gap * (1 - .88 * wear));
+        const double endFade = 1 - smoothRange((extent - 1.0) * scale, extent * scale, std::abs(p.z));
+        c.a = float(color.a * (.38 + .62 * broad) * gap * (1 - .88 * wear) * endFade);
         return c;
     };
     // Use the already rendered snow mesh's straight segments as the receiver.
@@ -434,8 +457,7 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
                 [&](double xx, double z) { return terrainY(h, xx, z); }, [&](Vec3 aa, Vec3 bb, Vec3 cc) {
                 visual::clipSnowTriangle(aa, bb, cc, a, b, z, zz, [&](const auto &polygon, size_t count) {
                     sjp::visual::begin(sjp::gfx::TRIANGLE_FAN);
-                    const Vec3 normal = cross(bb - aa, cc - aa).normalized();
-                    sjp::visual::normal(normal.x, normal.y, normal.z);
+
                     for (size_t i = 0; i < count; ++i) {
                         const auto &p = polygon[i];
                         // Vary twig size and edge position smoothly, keeping the
@@ -443,6 +465,8 @@ void distanceMarkerStrip(const Hill &h, double x, double distance, double width,
                         const double size = .65 + .7 * smoothNoise(p.z / 2.2, seed + 53);
                         const double drift = (smoothNoise(p.z / 3.1, seed + 67) - .5) * halfWidth * .55;
                         col(appearance(p));
+                        const auto normal = terrainSnowNormal(h, p);
+                        sjp::visual::normal(normal.x, normal.y, normal.z);
                         sjp::visual::texCoord(p.z / repeatLength + phase + .25 * smoothNoise(p.z / 2.7, seed + 79),
                                              .5 + (p.x - x - drift) / (2 * halfWidth * size));
                         vertex(p);
@@ -1670,19 +1694,19 @@ void Renderer::buildTerrain(const Hill &h, size_t index) {
     // Granbar and red spray share a cached overlay pass with two small textures.
     sjp::visual::pushAttrib(sjp::gfx::ENABLE_BIT | sjp::gfx::TEXTURE_BIT | sjp::gfx::DEPTH_BUFFER_BIT |
                           sjp::gfx::COLOR_BUFFER_BIT | sjp::gfx::POLYGON_BIT | sjp::gfx::CURRENT_BIT);
-    sjp::visual::disable(sjp::gfx::LIGHTING);
+    sjp::visual::enable(sjp::gfx::LIGHTING);
     sjp::visual::enable(sjp::gfx::TEXTURE_2D);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, spruceMarkerTexture);
     sjp::visual::enable(sjp::gfx::BLEND);
     sjp::visual::blendFunc(sjp::gfx::SRC_ALPHA, sjp::gfx::ONE_MINUS_SRC_ALPHA);
     sjp::visual::depthMask(sjp::gfx::FALSE);
     sjp::visual::enable(sjp::gfx::POLYGON_OFFSET_FILL);
-    // Prepared snow now owns depth in its opaque interior. Put the clipped
-    // markings one bias layer above it; their original X/Y/Z remain unchanged.
-    sjp::visual::polygonOffset(0, -2);
+    // Coplanar clipped markings need slope bias at grazing camera angles;
+    // constant units alone flicker against the prepared snow's depth.
+    sjp::visual::polygonOffset(-2, -2);
     for (int d = 10; d <= h.k + 50; d += 10)
         if (d != h.k)
-            distanceMarkerStrip(h, h.atDistance(d), d, .52, 18, {.23f, .30f, .24f, .76f});
+            distanceMarkerStrip(h, h.atDistance(d), d, .52, 18, {.23f, .30f, .24f, .76f}, true);
     sjp::visual::bindTexture(sjp::gfx::TEXTURE_2D, sprayMarkerTexture);
     if (h.k % 10 == 0)
         distanceMarkerStrip(h, h.atDistance(h.k) + .09, h.k, .48, 18, {.76f, .38f, .36f, .72f});
@@ -1893,14 +1917,14 @@ void Renderer::hillRecordMarker(const Hill &h) {
     visual::StaticBatch batch;
     visual::pushAttrib(gfx::ENABLE_BIT | gfx::TEXTURE_BIT | gfx::DEPTH_BUFFER_BIT | gfx::COLOR_BUFFER_BIT |
                        gfx::POLYGON_BIT | gfx::CURRENT_BIT);
-    visual::disable(gfx::LIGHTING);
+    visual::enable(gfx::LIGHTING);
     visual::enable(gfx::TEXTURE_2D);
     visual::bindTexture(gfx::TEXTURE_2D, sprayMarkerTexture);
     visual::enable(gfx::BLEND);
     visual::blendFunc(gfx::SRC_ALPHA, gfx::ONE_MINUS_SRC_ALPHA);
     visual::depthMask(gfx::FALSE);
     visual::enable(gfx::POLYGON_OFFSET_FILL);
-    visual::polygonOffset(0, -2);
+    visual::polygonOffset(-2, -2);
     distanceMarkerStrip(h, h.atDistance(distance), distance, .85, 20, {.25f, .41f, .65f, .82f});
     batch.finish();
     visual::popAttrib();

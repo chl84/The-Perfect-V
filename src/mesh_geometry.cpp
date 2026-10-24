@@ -6,14 +6,23 @@
 #include <stdexcept>
 
 namespace sjp::gfx {
+Matrix reverseDepthProjection(const Matrix &projection) {
+    auto result = projection;
+    // Convert the matrix before vertex multiplication. Reversing an already
+    // evaluated clip Z would subtract nearly equal values at long distances.
+    for (int column = 0; column < 4; ++column)
+        result[size_t(column * 4 + 2)] =
+            float((double(projection[size_t(column * 4 + 3)]) - projection[size_t(column * 4 + 2)]) * .5);
+    return result;
+}
 Frustum::Frustum(const Matrix &projection, const Matrix &modelView) {
     std::array<double, 16> clip{};
     for (int column = 0; column < 4; ++column)
         for (int row = 0; row < 4; ++row)
             for (int k = 0; k < 4; ++k)
                 clip[column * 4 + row] += double(projection[k * 4 + row]) * modelView[column * 4 + k];
-    // The shader converts the original -W..W depth to Vulkan's 0..W after
-    // transforming positions. These planes test that original clip volume.
+    // GPU uniforms convert depth to reversed 0..W; culling continues to test
+    // the original -W..W camera volume with identical near/far planes.
     for (int axis = 0; axis < 3; ++axis)
         for (int sign = 0; sign < 2; ++sign)
             for (int column = 0; column < 4; ++column)

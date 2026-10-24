@@ -27,6 +27,30 @@ sjp::gfx::Matrix perspective(float aspect) {
 int main() {
     using namespace sjp::gfx;
     try {
+        const auto originalProjection=perspective(1.6f);
+        const auto reversed=reverseDepthProjection(originalProjection);
+        for (size_t i=0;i<16;++i)
+            if (i%4!=2) require(reversed[i]==originalProjection[i],
+                                "Reversed depth changed camera framing or perspective divide");
+        auto depth=[&](const Matrix &m,float distance) {
+            return (m[14]-m[10]*distance)/(m[15]-m[11]*distance);
+        };
+        require(std::abs(depth(reversed,.25f)-1)<1e-6 && std::abs(depth(reversed,1000))<1e-7,
+                "Reversed projection changed the camera near/far planes");
+        size_t collapsed=0;
+        for (float distance:{10.f,55.f,160.f,350.f,800.f}) {
+            const float far=depth(reversed,distance),near=depth(reversed,distance-.001f);
+            require(near>far && far>=0 && near<=1,
+                    "A millimetre-separated shadow loses floating depth precision at distance");
+            const auto fixed=[&](float d) {return std::lround((1-double(depth(reversed,d)))*16777215.);};
+            collapsed+=fixed(distance)==fixed(distance-.001f);
+        }
+        require(collapsed>=2,"Depth regression did not exercise the old distant D24 collisions");
+        auto ortho=identity();ortho[10]=-.02f;ortho[14]=-.2f;
+        const auto orthoReversed=reverseDepthProjection(ortho);
+        require(std::abs(depth(orthoReversed,0)-.6f)<1e-6 &&
+                    depth(orthoReversed,1)>depth(orthoReversed,2),
+                "Orthographic depth no longer orders close and distant geometry correctly");
         const Uniforms unlit;
         for (auto member : {&Uniforms::signalColor, &Uniforms::signalPositionRange,
                             &Uniforms::signalDirectionCone, &Uniforms::signalParameters,
