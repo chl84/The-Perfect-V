@@ -477,7 +477,7 @@ class App {
             audio->update(sim.renderFrame(accumulator), dt, mode, records.sound);
         }
     }
-    double chosenWind() { return windMode == 1 ? 0 : windMode == 2 ? 3 : -2.5; }
+    double chosenWind() { return windMode == 1 ? 0 : windMode == 2 ? 4.5 : -2.5; }
     void captureMouse() {
         const bool capture = screen == Screen::Playing && (!smoke || smokeMouseCapture);
         // Relative mode already hides the cursor. Only change it when needed:
