@@ -60,8 +60,15 @@ void tracks() {
     visual::SkiTrackCache cache;
     cache.update(sim.hill(),sim.frames);
     require(!cache.triangles.empty(),"Standing landing produced no ski tracks");
+    const auto braking = std::find_if(sim.frames.begin(),sim.frames.end(),[](const Frame &f) {
+        if (Phase(f.phase)!=Phase::Outrun) return false;
+        const auto skeleton=f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton} : originalSkeleton(f.pose,f.leadingLeg);
+        return visual::brakingSkiWedge(skeleton,0)>0 || visual::brakingSkiWedge(skeleton,1)>0;
+    });
+    require(braking!=sim.frames.end(),"Ski-track fixture never began snowplough braking");
     double last = 0;
     for (const auto &triangle : cache.triangles) {
+        require(triangle.endTime<braking->elapsed,"Straight ski tracks continue into snowplough braking");
         require(triangle.endTime >= last,"Ski-track cache is not ordered by replay time");
         last = triangle.endTime;
         for (const auto &v : triangle.vertices) {
@@ -71,6 +78,25 @@ void tracks() {
         }
     }
     const auto count = cache.triangles.size();
+    // Exercise incremental live history as well as complete replay history.
+    std::vector<Frame> live;
+    live.reserve(sim.frames.size()+2);
+    live.assign(sim.frames.begin(),braking);
+    visual::SkiTrackCache liveCache;
+    liveCache.update(sim.hill(),live);
+    const auto beforeBraking=liveCache.triangles.size();
+    require(beforeBraking>0,"Parallel skis before braking lost their landing tracks");
+    for (auto i=braking;i!=sim.frames.end();++i) live.push_back(*i);
+    liveCache.update(sim.hill(),live);
+    require(liveCache.triangles.size()==beforeBraking,"Live braking added tracks or bridged the transition");
+    auto parallel=live.back();
+    parallel.phase=int(Phase::Outrun);parallel.pose[0]=parallel.pose[9]=0;parallel.hasRenderSkeleton=false;
+    for (int i=0;i<2;++i) {
+        parallel.x+=1;parallel.y=float(sim.hill().ground(parallel.x));parallel.elapsed+=.05f;
+        live.push_back(parallel);
+    }
+    liveCache.update(sim.hill(),live);
+    require(liveCache.triangles.size()==beforeBraking,"Tracks restarted after the braking pose straightened");
     cache.update(sim.hill(),sim.frames);
     require(cache.triangles.size() == count,"Pause duplicated ski tracks");
     require(visual::SkiTrackCache::opacity(2,3,1) == 0 &&
@@ -89,10 +115,15 @@ void tracks() {
             auto &f = replacement[i];
             f.renderSkeleton = originalSkeleton(f.pose,f.leadingLeg).points;
             f.hasRenderSkeleton = true;
-            f.renderSkeleton[size_t(OriginalJoint::Ankle1)].z += .30;
+            // Move the whole ski; moving only its ankle invents an inward
+            // braking angle, which now correctly stops track generation.
+            for (auto joint:{OriginalJoint::Ankle1,OriginalJoint::SkiRear1,
+                             OriginalJoint::SkiFront1,OriginalJoint::SkiTip1})
+                f.renderSkeleton[size_t(joint)].z += .30;
         }
     sim.frames = std::move(replacement);
     cache.update(sim.hill(),sim.frames);
+    require(!cache.triangles.empty(),"A replacement replay with parallel skis lost its tracks");
     require((cache.triangles.front().vertices[0].position-previousTrack).length() > .01,
             "A different replay with the same final pose retained old ski tracks");
     sim.reset(2,0);

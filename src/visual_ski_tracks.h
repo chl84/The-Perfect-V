@@ -1,6 +1,7 @@
 #pragma once
 #include "original_skeleton.h"
 #include "visual_scenery_shadow.h"
+#include "visual_ski_spray.h"
 
 namespace sjp::visual {
 struct SkiTrackVertex { Vec3 position; double time = 0, edge = 0; };
@@ -14,18 +15,24 @@ class SkiTrackCache {
             (processed && !sameFrame(frames[processed-1], lastFrame))) {
             triangles.clear();
             source = &frames; sourceData = frames.data(); hillId = hill.id; processed = 0; previous.reset();
+            brakingStarted = false;
         }
         for (; processed < frames.size(); ++processed) {
             const auto &f = frames[processed];
             lastFrame = f;
             const auto phase = Phase(f.phase);
-            if ((phase != Phase::Outrun && phase != Phase::Finished) || f.crashed ||
+            if (brakingStarted || (phase != Phase::Outrun && phase != Phase::Finished) || f.crashed ||
                 std::abs(f.y - hill.ground(f.x)) > .40) {
                 previous.reset();
                 continue;
             }
             OriginalSkeleton skeleton = f.hasRenderSkeleton ? OriginalSkeleton{f.renderSkeleton}
                                                             : originalSkeleton(f.pose, f.leadingLeg);
+            if (brakingSkiWedge(skeleton, 0) > 0 || brakingSkiWedge(skeleton, 1) > 0) {
+                brakingStarted = true;
+                previous.reset();
+                continue;
+            }
             Contact current;
             current.time = f.elapsed;
             for (size_t ski = 0; ski < 2; ++ski) {
@@ -57,6 +64,7 @@ class SkiTrackCache {
     std::string hillId;
     size_t processed = 0;
     Frame lastFrame;
+    bool brakingStarted = false;
     static bool sameFrame(const Frame &a,const Frame &b) {
         return a.elapsed == b.elapsed && a.x == b.x && a.y == b.y && a.pose == b.pose && a.crashed == b.crashed;
     }

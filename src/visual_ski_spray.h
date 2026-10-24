@@ -8,6 +8,16 @@ struct BrakingSkiSpray {
     double strength = 0;
 };
 
+// Shared by powder and track generation: read the visible inward ski angle,
+// including interpolated replay skeletons, without consulting physics state.
+inline double brakingSkiWedge(const OriginalSkeleton &skeleton, size_t leg) {
+    const auto axis = skeleton[leg == 0 ? OriginalJoint::SkiFront1 : OriginalJoint::SkiFront2] -
+                      skeleton[leg == 0 ? OriginalJoint::Ankle1 : OriginalJoint::Ankle2];
+    const double length = std::hypot(axis.x, axis.z);
+    const double side = leg == 0 ? 1.0 : -1.0;
+    return length < .1 ? 0 : clamp((-side * axis.z / length - .025) / .25, 0.0, 1.0);
+}
+
 // Read the displayed skis, including replay interpolation. This is cosmetic:
 // no braking force, pose, simulation state or random stream is changed.
 inline BrakingSkiSpray brakingSkiSpray(const Hill &hill, const Frame &frame,
@@ -25,7 +35,7 @@ inline BrakingSkiSpray brakingSkiSpray(const Hill &hill, const Frame &frame,
     const double side = leg == 0 ? 1.0 : -1.0;
     const Vec3 direction{axis.x / length, 0, axis.z / length};
     spray.outward = {-direction.z * side, 0, direction.x * side};
-    const double wedge = clamp((-side * direction.z - .025) / .25, 0.0, 1.0);
+    const double wedge = brakingSkiWedge(skeleton, leg);
     const double motion = clamp((std::hypot(frame.vx, frame.vy) - 1.2) / 18, 0.0, 1.0);
     const Vec3 contact = spray.ankle + axis * .6;
     const double gap = (contact.y - terrainSnowHeight(hill, contact.x, contact.z)) /

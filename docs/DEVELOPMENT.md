@@ -999,7 +999,10 @@ evaluation. Partial edge fades retain both materials; frozen terrain positions
 and triangulation are unchanged. CPU tests verify opaque coverage on all venues.
 
 Landing tracks are cached from recorded standing ski contacts, then fade over
-eight seconds of jump/replay time. Rendering supplies the live or
+eight seconds of jump/replay time. New tracks stop as soon as either visible
+ski enters the snowplough braking angle; they stay stopped for the rest of
+that recording. Earlier landing tracks continue their normal fade.
+Rendering supplies the live or
 loaded replay history; seeking does not leave future tracks or erase past ones.
 All cached track geometry is replaced for a new recording. Night fog/snowfall
 also enables a bounded batch of faint, depth-tested floodlight slices. These
