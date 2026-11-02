@@ -156,7 +156,7 @@ class App {
     Records records;
     Replay lastReplay;
     bool hasReplay = false, ghost = false;
-    std::string dataDir, captureDir;
+    std::string dataDir, captureDir, smokeReplayFixture;
     bool running = true, fullscreen = false, competition = false, smoke = false, hidden = false,
          storageError = false;
     bool mouseLeft = false, mouseRight = false, newRecord = false, replayPlaying = true,
@@ -222,6 +222,8 @@ class App {
                 dataDir = argv[++i];
             else if (a == "--replay" && i + 1 < argc)
                 replayArgument = argv[++i];
+            else if (a == "--smoke-reference-replay" && i + 1 < argc)
+                smokeReplayFixture = argv[++i];
             else if (a == "--help") {
                 std::cout << "The Perfect V\n  --smoke-test     automated complete jump and render "
                              "validation\n  --hidden         hidden window (use with --smoke-test)\n  "
@@ -229,6 +231,7 @@ class App {
                              " use a separate records and replay directory\n  --replay FILE     open an "
                              "original .RPL or native .pvr replay\n"
                              "  --smoke-mouse-capture  fullscreen test of mouse capture and cup clicks\n"
+                             "  --smoke-reference-replay FILE  additionally test an original .RPL fixture\n"
                              "  --graphics-compat  wait for each submitted Vulkan frame\n"
                              "  --sync-rendering   wait for each submitted frame\n"
                              "  --vulkan          use the native Vulkan renderer (default)\n"
@@ -241,6 +244,9 @@ class App {
         }
         if (smokeMouseCapture && hidden)
             throw std::runtime_error("Mouse capture testing requires a visible window");
+        if (!smokeReplayFixture.empty() &&
+            (!smoke || !std::filesystem::is_regular_file(std::filesystem::u8path(smokeReplayFixture))))
+            throw std::runtime_error("--smoke-reference-replay requires --smoke-test and an existing replay");
         struct StartupCleanup {
             App &app;
             bool complete = false;
@@ -274,7 +280,7 @@ class App {
         std::filesystem::path executableDir = base ? base : ".";
         for (auto candidate : {executableDir / "assets", executableDir / "../assets",
                                executableDir / "../share/the-perfect-v/assets",
-                               executableDir / "../share/the-perfect-v", std::filesystem::path(SJP_ASSET_DIR)}) {
+                               executableDir / "../share/the-perfect-v"}) {
             if (std::filesystem::exists(candidate / "fonts/Interim-Regular.ttf")) {
                 assets = candidate.string();
                 break;
@@ -3247,10 +3253,9 @@ class App {
             throw std::runtime_error("Visible CPU/human cup lost or duplicated a jump");
         // The standalone source distribution does not include the original demo.
         // Exercise its frontend import only when the optional local fixture exists.
-        const std::string originalReplayFixture = std::string(SJP_ASSET_DIR) + "/../reference/EXAMPLE.RPL";
-        if (std::filesystem::is_regular_file(originalReplayFixture)) {
+        if (!smokeReplayFixture.empty()) {
             // Import the source replay through the same frontend as file browsing/drag-drop.
-            if (!openReplayFile(originalReplayFixture) || !canExportOriginal || lastReplay.hill != 0)
+            if (!openReplayFile(smokeReplayFixture) || !canExportOriginal || lastReplay.hill != 0)
                 throw std::runtime_error("Original RPL frontend import failed");
             render();
             if (!captureDir.empty())

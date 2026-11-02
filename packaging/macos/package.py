@@ -12,6 +12,8 @@ import zipfile
 app = Path(sys.argv[1]).resolve()
 downloads = Path(sys.argv[2]).resolve()
 root = Path(__file__).resolve().parents[2]
+checker = root / 'tools/check_home_paths.py'
+subprocess.run([sys.executable, str(checker), '--source-root', str(root)], check=True)
 version = re.search(r'project\(ThePerfectV VERSION ([0-9.]+)', (root / 'CMakeLists.txt').read_text())[1]
 resources = app / 'Contents/Resources'
 source = resources / 'docs/source'
@@ -61,6 +63,7 @@ out = root / 'dist'
 out.mkdir(exist_ok=True)
 artifact = out / f'ThePerfectV-v{version}-macos-universal.zip'
 subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent', str(app), str(artifact)], check=True)
+subprocess.run([sys.executable, str(checker), str(artifact)], check=True)
 with artifact.open('rb') as handle:
     digest = hashlib.file_digest(handle, 'sha256').hexdigest()
 artifact.with_suffix('.zip.sha256').write_text(f'{digest}  {artifact.name}\n')

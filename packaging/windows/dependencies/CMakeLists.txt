@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(ThePerfectVWindowsDependencies LANGUAGES C CXX)
+include(../../portable-paths.cmake)
 include(FetchContent)
 set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

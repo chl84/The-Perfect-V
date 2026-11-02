@@ -20,6 +20,12 @@ which points to `~/.local/bin/the-perfect-v`. Check that this executable matches
 `build-vulkan/the-perfect-v` before reporting the build as updated. Installation
 updates game resources without replacing personal saves.
 
+Assets are copied beside the build-tree executable (into the bundle's Resources
+directory on macOS). Runtime lookup uses executable-relative locations, so a
+relocated build or installation works independently of the current directory.
+The executable contains no compiled-in source asset directory. Tests that need
+assets run from the source checkout and use the relative `assets` directory.
+
 Without external fixtures, CTest registers seventeen standalone suites, including:
 
 - `renderer-commands`: CPU-only validation of finite rendering arguments, stack balance, current attributes, terrain cache eviction, zero-size drawables, graphics resource lifetime and camera response at different frame cadences. It does not use a GPU or emulate rasterization.
@@ -61,7 +67,8 @@ running these tests.
 
 The explicit full-game `--smoke-test` checks native input flow, all 32 venues, competition
 checkpoints and replay persistence without those external fixtures. Its extra
-original-demo replay import check is conditional on the local sample file.
+original-demo replay import check is enabled explicitly with
+`--smoke-reference-replay reference/EXAMPLE.RPL` when the local sample is available.
 Use `--data-dir` with a temporary directory to keep personal records intact.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
 relative mouse mode and Ready/Next button hit testing. The standalone suites
@@ -184,6 +191,22 @@ Track source code, required assets with their license, tests, reusable native
 verification tools, portable documentation and build/launch/package scripts.
 Do not track reference programs, recordings, capture exports, build directories,
 packages, personal saves, machine-specific shortcuts, caches or local credentials.
+
+Before packaging, `python3 tools/check_home_paths.py --source-root .` checks
+tracked and new source files for absolute Linux, macOS and Windows home paths.
+The package recipes also scan their payloads: the AppImage staging directory and
+the completed Windows/macOS ZIPs, including nested project source archives.
+Text, binary strings, UTF-16 and escaped/URL-encoded paths are checked. Findings
+or unreadable archives stop packaging before successful output/checksums.
+Known SDL3/FreeType source archives are exempt because upstream documentation
+contains example home directories; their compiled libraries are still checked.
+Ignored local builds, logs and captures are excluded from the source check.
+
+For a manual package audit, pass a ZIP/TAR file or an unpacked payload directory:
+`python3 tools/check_home_paths.py path/to/package.zip`. Extract an AppImage first
+with `--appimage-extract` and scan its `squashfs-root` directory. The check does
+not rewrite old history or existing release files. Compiler path mapping also
+keeps source/build directory names out of newly built game/dependency binaries.
 
 ## Prepared snow appearance
 

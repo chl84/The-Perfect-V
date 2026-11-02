@@ -11,6 +11,8 @@ import zipfile
 stage = Path(sys.argv[1]).resolve()
 downloads = Path(sys.argv[2]).resolve()
 root = Path(__file__).resolve().parents[2]
+checker = root / 'tools/check_home_paths.py'
+subprocess.run([sys.executable, str(checker), '--source-root', str(root)], check=True)
 version = re.search(r'project\(ThePerfectV VERSION ([0-9.]+)', (root / 'CMakeLists.txt').read_text())[1]
 source = stage / 'docs/source'
 source.mkdir(parents=True, exist_ok=True)
@@ -36,7 +38,9 @@ with zipfile.ZipFile(artifact, 'w', zipfile.ZIP_DEFLATED) as archive:
     for path in sorted(stage.rglob('*')):
         if path.is_file():
             archive.write(path, path.relative_to(stage.parent))
-digest = hashlib.file_digest(artifact.open('rb'), 'sha256').hexdigest()
+subprocess.run([sys.executable, str(checker), str(artifact)], check=True)
+with artifact.open('rb') as handle:
+    digest = hashlib.file_digest(handle, 'sha256').hexdigest()
 artifact.with_suffix('.zip.sha256').write_text(f'{digest}  {artifact.name}\n')
 shutil.copy2(stage / 'Windows-build.json', out)
 print(f'Windows package: {artifact} ({artifact.stat().st_size} bytes)')

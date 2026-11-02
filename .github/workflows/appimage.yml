@@ -26,6 +26,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Check source paths and scanner regressions
+        run: |
+          python3 tests/home_path_scan_tests.py
+          python3 tools/check_home_paths.py --source-root .
       - name: Install build dependencies
         run: |
           sudo apt-get update

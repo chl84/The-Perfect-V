@@ -2,6 +2,7 @@
 set -euo pipefail
 game_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$game_dir"
+python3 "$game_dir/tools/check_home_paths.py" --source-root "$game_dir"
 if [[ $(uname -m) != x86_64 ]]; then
   printf 'This recipe builds x86_64 AppImages.\n' >&2
   exit 1
@@ -30,6 +31,7 @@ if [[ ! -f "$sdl_source/CMakeLists.txt" ]]; then
 fi
 sdl_prefix="$build_root/sdl-prefix"
 cmake -S "$sdl_source" -B "$build_root/sdl-build" -G Ninja \
+  -DCMAKE_PROJECT_INCLUDE="$game_dir/packaging/portable-paths.cmake" \
   -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$sdl_prefix" -DCMAKE_INSTALL_LIBDIR=lib \
   -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF \
   -DSDL_EXAMPLES=OFF -DSDL_WAYLAND_LIBDECOR=OFF -DSDL_RPATH=OFF
@@ -64,6 +66,7 @@ git ls-files -z --cached --others --exclude-standard -- \
   > "$staging_dir/source-files"
 tar -czf "$documentation/source.tar.gz" --null -T "$staging_dir/source-files"
 cp "$build_root/downloads/sdl" "$documentation/SDL3-3.4.16.tar.gz"
+python3 "$game_dir/tools/check_home_paths.py" "$appdir"
 app_version="${APP_VERSION:-$(git describe --tags --always --dirty)}"
 if [[ ! "$app_version" =~ ^[A-Za-z0-9._+-]+$ ]]; then
   printf 'Invalid APP_VERSION: %s\n' "$app_version" >&2

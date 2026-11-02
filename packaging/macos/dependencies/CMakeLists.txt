@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 project(ThePerfectVMacDependencies LANGUAGES C CXX)
+include(../../portable-paths.cmake)
 include(FetchContent)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
