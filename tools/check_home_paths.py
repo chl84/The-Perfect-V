@@ -24,7 +24,7 @@ THIRD_PARTY_SOURCE = re.compile(r'(?:SDL3-[0-9.]+\.tar\.gz|freetype-[0-9.]+\.tar
 
 def home_paths(data):
     # Handle escaped JSON slashes and both UTF-16 byte orders in binaries.
-    normalized = data.replace(b'\x00', b'').replace(b'\\/', b'/').replace(b'\\\\', b'\\')
+    normalized = re.sub(rb'[\\/]+', b'/', data.replace(b'\x00', b''))
     return sorted({m.group().decode('utf-8', 'replace') for pattern in (HOME, ENCODED_HOME)
                    for m in pattern.finditer(normalized)})
 

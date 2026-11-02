@@ -55,7 +55,8 @@ jobs:
           tar -tzf "$RUNNER_TEMP/source.tar.gz" | sort > "$RUNNER_TEMP/source-files.txt"
           grep -Fx 'LICENSE' "$RUNNER_TEMP/source-files.txt"
           grep -Fx 'packaging/appimage/dependencies.json' "$RUNNER_TEMP/source-files.txt"
-          xvfb-run -a "$image" --appimage-extract-and-run --smoke-test --hidden \
+          timeout 20m xvfb-run -a stdbuf -oL -eL "$image" --appimage-extract-and-run --smoke-test --hidden \
+            --no-msaa --smoke-size 960x540 \
             --data-dir "$RUNNER_TEMP/tpv-appimage-saves"
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
@@ -98,5 +99,6 @@ jobs:
           chmod +x ./*.AppImage
           image=$(find "$PWD" -maxdepth 1 -name '*.AppImage' -print -quit)
           "$image" --appimage-extract-and-run --help
-          xvfb-run -a "$image" --appimage-extract-and-run --smoke-test --hidden \
+          timeout 8m xvfb-run -a stdbuf -oL -eL "$image" --appimage-extract-and-run --smoke-test --hidden \
+            --no-msaa --smoke-size 960x540 \
             --data-dir "$RUNNER_TEMP/tpv-compat-saves"

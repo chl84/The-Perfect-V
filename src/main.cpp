@@ -194,6 +194,8 @@ class App {
     uint32_t visualJumpSerial = 0;
     bool synchronousRendering = false, noMsaa = false, gpuValidation = false;
     bool smokeMouseCapture = false;
+    int smokeWidth = 1920, smokeHeight = 1080;
+    bool smokeSizeSpecified = false;
     size_t mouseCaptureTransitions = 0;
 
   public:
@@ -224,6 +226,15 @@ class App {
                 replayArgument = argv[++i];
             else if (a == "--smoke-reference-replay" && i + 1 < argc)
                 smokeReplayFixture = argv[++i];
+            else if (a == "--smoke-size" && i + 1 < argc) {
+                std::istringstream size(argv[++i]);
+                char separator = 0, extra = 0;
+                if (!(size >> smokeWidth >> separator >> smokeHeight) || separator != 'x' ||
+                    (size >> extra) || smokeWidth < 640 || smokeWidth > 3840 ||
+                    smokeHeight < 360 || smokeHeight > 2160)
+                    throw std::runtime_error("--smoke-size requires WIDTHxHEIGHT between 640x360 and 3840x2160");
+                smokeSizeSpecified = true;
+            }
             else if (a == "--help") {
                 std::cout << "The Perfect V\n  --smoke-test     automated complete jump and render "
                              "validation\n  --hidden         hidden window (use with --smoke-test)\n  "
@@ -232,6 +243,7 @@ class App {
                              "original .RPL or native .pvr replay\n"
                              "  --smoke-mouse-capture  fullscreen test of mouse capture and cup clicks\n"
                              "  --smoke-reference-replay FILE  additionally test an original .RPL fixture\n"
+                             "  --smoke-size WxH  set the automated test window size\n"
                              "  --graphics-compat  wait for each submitted Vulkan frame\n"
                              "  --sync-rendering   wait for each submitted frame\n"
                              "  --vulkan          use the native Vulkan renderer (default)\n"
@@ -244,6 +256,8 @@ class App {
         }
         if (smokeMouseCapture && hidden)
             throw std::runtime_error("Mouse capture testing requires a visible window");
+        if (smokeSizeSpecified && !smoke)
+            throw std::runtime_error("--smoke-size requires --smoke-test");
         if (!smokeReplayFixture.empty() &&
             (!smoke || !std::filesystem::is_regular_file(std::filesystem::u8path(smokeReplayFixture))))
             throw std::runtime_error("--smoke-reference-replay requires --smoke-test and an existing replay");
@@ -269,12 +283,12 @@ class App {
         SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_MODE_SCALING, "aspect");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_EVENTS))
             throw std::runtime_error(SDL_GetError());
-        window = SDL_CreateWindow("The Perfect V", smoke ? 1920 : 1440, smoke ? 1080 : 900,
+        window = SDL_CreateWindow("The Perfect V", smoke ? smokeWidth : 1440, smoke ? smokeHeight : 900,
                                   SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY |
                                       (hidden ? SDL_WINDOW_HIDDEN : 0));
         if (!window)
             throw std::runtime_error(std::string("Window creation failed: ") + SDL_GetError());
-        SDL_SetWindowMinimumSize(window, 960, 600);
+        SDL_SetWindowMinimumSize(window, smoke ? 640 : 960, smoke ? 360 : 600);
         std::string assets;
         const char *base = SDL_GetBasePath();
         std::filesystem::path executableDir = base ? base : ".";
@@ -2262,6 +2276,7 @@ class App {
         }
     }
     int smokeTest() {
+        std::cout << "Smoke test: menu and input checks" << std::endl;
         const bool originalMusic = records.music;
         records.music = true;
         for (Screen menu : {Screen::Menu, Screen::Hills, Screen::Settings, Screen::Graphics,
@@ -2489,6 +2504,7 @@ class App {
             throw std::runtime_error("Settings must contain only Back and the six category links");
         renderer->finish();
         const auto savedGraphics = records.graphics;
+        std::cout << "Smoke test: graphics settings checks" << std::endl;
         const bool savedNoMsaa = noMsaa;
         const auto graphicsBaseline = sim.frame();
         clickButton(Action::Graphics);

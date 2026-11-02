@@ -70,6 +70,10 @@ checkpoints and replay persistence without those external fixtures. Its extra
 original-demo replay import check is enabled explicitly with
 `--smoke-reference-replay reference/EXAMPLE.RPL` when the local sample is available.
 Use `--data-dir` with a temporary directory to keep personal records intact.
+For software Vulkan, CI uses `--no-msaa --smoke-size 960x540` to reduce raster
+cost while retaining the full venue/input checks and graphics setting cycles.
+The default smoke window remains 1920x1080; `--smoke-size` affects automated
+testing only. Progress messages identify the menu and graphics-settings phases.
 `--smoke-mouse-capture` additionally uses a visible fullscreen window, real
 relative mouse mode and Ready/Next button hit testing. The standalone suites
 and the standard Vulkan smoke test passed on 2026-10-13; the additional fullscreen
