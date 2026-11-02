@@ -17,8 +17,8 @@ spec.loader.exec_module(scanner)
 class HomePathTests(unittest.TestCase):
     def test_text_binary_and_encodings(self):
         for value in ('/' + 'home/alice/project/assets', '/' + 'Users/alice/project',
-                      '/' + 'root/project', 'C:' + '\\Users\\Alice\\project',
-                      '/' + 'Users/Åse/project'):
+                      '/' + 'root/project', '\\'.join(('C:', 'Users', 'Alice', 'project')),
+                      '/' + 'Users/Åse/project', '\\' + 'home\\alice\\project'):
             for encoding in ('utf-8', 'utf-16le', 'utf-16be'):
                 with self.subTest(value=value, encoding=encoding):
                     self.assertTrue(scanner.home_paths(b'\0header\0' + value.encode(encoding) + b'\0'))
